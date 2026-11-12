@@ -198,6 +198,9 @@ pub struct Session {
     /// Started with `--login`: Sign in (banner, Settings) opens the bridge's full window, as
     /// before the guided step (a debug path).
     pub debug_login: bool,
+    /// Bumped whenever the account's data is dropped (sign out, sign in): replies about the
+    /// account asked before that are stale (`Msg::Account`).
+    pub account: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -301,6 +304,10 @@ impl Default for Playback {
 #[derive(Debug)]
 pub enum Msg {
     Bridge(Event),
+    /// A reply about the signed-in account (a `/v1/me` read, any write), stamped with the
+    /// `Session::account` it was asked under: one from before a sign-out (or a sign-in) is
+    /// dropped, so a page landing late can't bring the old library back.
+    Account { generation: u64, msg: Box<Msg> },
     Shelf { index: usize, result: Result<Vec<Collection>, String> },
     LibraryAlbums(Result<Page<Collection>, String>),
     LibraryPlaylists(Result<Page<Collection>, String>),
@@ -670,6 +677,12 @@ impl State {
     fn apply_msg(&mut self, msg: Msg) -> bool {
         match msg {
             Msg::Bridge(event) => return self.apply_event(event),
+            Msg::Account { generation, msg } => {
+                if generation != self.session.account {
+                    return false; // asked before a sign-out or sign-in
+                }
+                return self.apply_msg(*msg);
+            }
             Msg::Shelf { index, result } => {
                 if let Some(slot) = self.shelves.get_mut(index) {
                     *slot = match result {
@@ -1162,11 +1175,7 @@ impl State {
             self.begin_sync();
         } else if !authorized && was {
             // Signed out (or the cache guessed wrong): drop the account's data, in memory and on disk.
-            self.clear_personal();
-            self.forget_storefront();
-            if let Some(c) = &self.cache {
-                c.forget_personal();
-            }
+            self.drop_account();
         }
     }
 

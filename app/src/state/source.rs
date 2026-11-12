@@ -16,6 +16,16 @@ impl Route {
         }
     }
 
+    /// A page of the account's own library (a library album, playlist or artist): it goes
+    /// when signing out.
+    pub fn personal(&self) -> bool {
+        match self {
+            Route::Collection { id, .. } => super::library::personal_id(id),
+            Route::Artist { id, .. } | Route::ArtistShelf { id, .. } => crate::models::Artist::is_library_id(id),
+            _ => false,
+        }
+    }
+
     /// Local only mode's own pages (Albums, Artists, Folders, a local album or artist): Apple
     /// mode has Local Files instead.
     pub fn local_library(&self) -> bool {

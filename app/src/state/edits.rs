@@ -282,8 +282,9 @@ impl State {
             Some(b) => format!("{method} {path} {b}"),
             None => format!("{method} {path}"),
         });
+        let account = Some(self.session.account);
         if let Some(b) = &self.bridge {
-            b.api_send(method, &path, body, move |r| Some(done(r.map(|_| ()))));
+            b.api_send(method, &path, body, move |r| Some(super::library::stamp(account, done(r.map(|_| ())))));
         }
     }
 }
