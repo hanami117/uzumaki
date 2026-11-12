@@ -12,6 +12,9 @@
 #   git tag -a v<version>-<build> -m "Uzumaki <version> (build <build>)"  (build 2 and up)
 # The build number goes up when the packages are rebuilt without code changes (e.g. a new
 # Electron signature): raise BUILD, commit, tag, run this again. A new version starts at build 1.
+# packaging/MINIMUM_SUPPORTED (one version, e.g. 0.1.0) goes into latest.json as `minimum_supported`:
+# clients older than it get a non-dismissable "update required" notice. Raise it ONLY when older
+# versions are known to be broken (e.g. Apple changed MusicKit); never for an ordinary release.
 # Run it in the PUBLIC repo's checkout: the tarball is `git archive` of the tag, so it holds
 # exactly what that repo has (and the PKGBUILD's checksum is the tarball's).
 #
@@ -56,6 +59,13 @@ if ((build == 1)); then release=$version; else release=$version-$build; fi
 tag=v$release
 title="Uzumaki $version"
 ((build == 1)) || title="Uzumaki $version (build $build)"
+# minimum_supported: semver-ish, and not above the version being released.
+min_supported=$(tr -d '[:space:]' <packaging/MINIMUM_SUPPORTED 2>/dev/null) || die "packaging/MINIMUM_SUPPORTED is missing (one version, e.g. 0.1.0)"
+[[ $min_supported =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] ||
+    die "packaging/MINIMUM_SUPPORTED must hold one version like 0.1.0 (got '$min_supported')"
+if [[ $(printf '%s\n%s\n' "${version%%-*}" "$min_supported" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1) != "${version%%-*}" ]]; then
+    die "packaging/MINIMUM_SUPPORTED ($min_supported) is above the version being released ($version)"
+fi
 grep -q "\"version\": \"$version\"" bridge/package.json || die "bridge/package.json's version isn't $version"
 grep -q "^## \[$version\]" CHANGELOG.md || die "CHANGELOG.md has no '## [$version]' section"
 
@@ -141,6 +151,7 @@ cat >"$out/latest.json" <<JSON
   "version": "$version",
   "build": $build,
   "date": "$(git log -1 --format=%cs "$tag")",
+  "minimum_supported": "$min_supported",
   "notes_url": "https://github.com/$REPO/releases/tag/$tag",
   "downloads": {
     "macos_dmg": "$latest/$DMG_LATEST",
