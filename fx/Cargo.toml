@@ -1,0 +1,11 @@
+[package]
+name = "uzumaki-fx"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+description = "Uzumaki's background effects (dither, ASCII, halftone, scanlines, blur) on RGBA images"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+serde = { version = "1", features = ["derive"] }

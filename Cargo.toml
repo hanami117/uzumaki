@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["cli", "app", "fx", "ctl", "fx-web"]
+
+# The one version and license of every crate (and of the app: About, `--version`, Info.plist, the DMG
+# name). bridge/package.json carries the same version; a test checks they match.
+[workspace.package]
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/hanami117/uzumaki"
+
+# Rune is unusably slow unoptimized; optimize dependencies even in dev builds.
+[profile.dev.package."*"]
+opt-level = 2
+
+# The background effects are per-pixel loops: keep them fast in dev builds too (the KDE launcher
+# runs a debug binary). Workspace members don't get the "*" override above.
+[profile.dev.package.uzumaki-fx]
+opt-level = 3
+
+# `uzumaki-fx-web` (the site demo's WebAssembly build): `cargo build -p uzumaki-fx-web --target
+# wasm32-unknown-unknown --profile web`. A custom profile, so the desktop release build is untouched.
+[profile.web]
+inherits = "release"
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true

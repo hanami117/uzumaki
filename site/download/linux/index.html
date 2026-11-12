@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uzumaki for Linux: AppImage or source · Uzumaki</title>
+<meta name="description" content="Install Uzumaki on any Linux distro: download one AppImage, or build from source. Requirements, updates and uninstall.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0e0e11">
+<meta property="og:title" content="Uzumaki for Linux: AppImage or source · Uzumaki">
+<meta property="og:description" content="Install Uzumaki on any Linux distro: download one AppImage, or build from source. Requirements, updates and uninstall.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://getuzumaki.app/download/linux/">
+<meta property="og:site_name" content="Uzumaki">
+<meta property="og:image" content="https://getuzumaki.app/assets/og-v2.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Uzumaki logo">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@Uzumaki_App">
+<link rel="canonical" href="https://getuzumaki.app/download/linux/">
+<link rel="icon" href="/assets/icon-coral.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="/" aria-label="Uzumaki, home">
+      <img src="/assets/icon.svg" alt="" width="28" height="28">
+      <span>Uzumaki</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="/#features">Features</a>
+      <a href="/#how">How it works</a>
+      <a href="/#uzu">uzu</a>
+      <a href="/#requirements">Requirements</a>
+      <a href="/#download" aria-current="true">Download</a>
+      <a href="/#faq">FAQ</a>
+    </nav>
+    <a class="nav-x" href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener" aria-label="Uzumaki on X (@Uzumaki_App)" title="@Uzumaki_App on X"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg></a>
+    <a class="nav-x nav-gh" href="https://github.com/hanami117/uzumaki" target="_blank" rel="noopener" aria-label="Uzumaki on GitHub" title="Uzumaki on GitHub"><svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+  </div>
+</header>
+
+<main id="main">
+<section class="wrap page">
+  <span class="eyebrow"><b>05</b> &middot; <a href="/#download">download</a></span>
+  <h1>Uzumaki for Linux, any distro</h1>
+  <p class="lead">Download one AppImage file, or build from source. No sudo. Wayland and X11.</p>
+  <nav class="tabs" aria-label="Install pages"><a href="/download/macos/">macOS</a><a href="/download/arch/">Arch Linux</a><a href="/download/linux/" aria-current="page">AppImage · any distro</a><a href="/download/windows/">Windows</a></nav>
+  <div class="body">
+    <p class="status"><span class="pill">Beta coming soon</span> The first beta isn&rsquo;t published yet. Follow the <a href="https://github.com/hanami117/uzumaki">GitHub page</a> for the release.</p>
+    <!-- PROVISIONAL: on release day link this button to the AppImage, drop "two" and the small label -->
+    <a class="btn primary two" href="https://github.com/hanami117/uzumaki">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+      <span>Download the AppImage<small>Beta coming soon</small></span>
+    </a>
+
+    <h2>What you need</h2>
+    <ul>
+      <li>A 64-bit Intel or AMD PC (x86_64) running Linux.</li>
+      <li>A GPU with Vulkan: the Vulkan loader and your GPU&rsquo;s driver.</li>
+      <li>An Apple Music subscription, to stream. Your own music files play without one.</li>
+    </ul>
+    <p>Wayland and X11 both work. On X11 you also need <code>libxkbcommon-x11</code> from your distro (<code>libxkbcommon-x11-0</code> on Debian and Ubuntu): Uzumaki loads it at start-up and stops without it. On Arch, use the <a href="/download/arch/">AUR package</a> instead.</p>
+
+    <h2>Option 1: the AppImage</h2>
+    <p>One file, no install, no sudo. It works on most distros.</p>
+    <ol>
+      <li>Download <code>Uzumaki-0.1.0-x86_64.AppImage</code> from the release page. Keep it anywhere you like, for example in <code>~/Applications</code>.</li>
+      <li>Make it executable.</li>
+      <li>Run it.</li>
+    </ol>
+    <span class="cmd"><i>$</i> chmod +x Uzumaki-0.1.0-x86_64.AppImage
+<i>$</i> ./Uzumaki-0.1.0-x86_64.AppImage</span>
+<p class="cmd-note">Available at release.</p>
+    <p>On the first start, sign in to Apple Music from the banner. The Widevine module that plays the music downloads by itself then.</p>
+    <p class="callout">If it won&rsquo;t start, your distro may be missing FUSE 2, which AppImages need. Install <code>libfuse2</code> (Debian, Ubuntu) or <code>fuse2</code> (Arch) and try again. Without FUSE you can still run it with <code>./Uzumaki-0.1.0-x86_64.AppImage --appimage-extract-and-run</code>.</p>
+
+    <h2>Option 2: build from source</h2>
+    <p>For when you want to build it yourself. You need:</p>
+    <ul>
+      <li>Rust with <code>cargo</code>, Node.js with <code>npm</code>, <code>git</code> and <code>pkg-config</code>.</li>
+      <li>The ALSA development files (<code>alsa-lib</code>, <code>libasound2-dev</code> or <code>alsa-lib-devel</code>, depending on your distro).</li>
+    </ul>
+    <p>The install script checks for the tools and tells you what is missing. It builds a release binary and installs for your user, with no sudo.</p>
+    <span class="cmd"><i>$</i> git clone https://github.com/hanami117/uzumaki.git
+<i>$</i> cd uzumaki
+<i>$</i> ./install.sh</span>
+<p class="cmd-note">Available at release. The repository has no code yet.</p>
+    <p>You can also unpack the source tarball from the release page and run <code>./install.sh</code> in it.</p>
+    <p>It installs into <code>~/.local</code> (set <code>PREFIX=...</code> for another place):</p>
+    <ul>
+      <li><code>~/.local/bin/uzumaki</code> and <code>~/.local/bin/uzu</code>;</li>
+      <li><code>~/.local/share/uzumaki/bridge/</code>, the playback bridge with castLabs Electron (about 290 MB);</li>
+      <li>the app-menu entry and icons.</li>
+    </ul>
+    <p>The first build takes a few minutes. If <code>~/.local/bin</code> isn&rsquo;t on your <code>PATH</code>, start Uzumaki from your app menu. Sign in to Apple Music from the banner on the first start.</p>
+
+    <h2>Updates</h2>
+    <p>Uzumaki shows a notice when a new version is out. It never downloads or installs anything by itself. Quit Uzumaki first.</p>
+    <ul>
+      <li><b>AppImage:</b> the notice has a Download button. Download the new AppImage, then replace the old file with it.</li>
+      <li><b>From source:</b> pull the new code and run the install script again.</li>
+    </ul>
+    <span class="cmd"><i>$</i> git pull && ./install.sh</span>
+
+    <h2>Uninstall</h2>
+    <p>Quit Uzumaki first.</p>
+    <ul>
+      <li><b>AppImage:</b> delete the file. If you added it to your app menu with a helper tool, remove it there too.</li>
+      <li><b>From source:</b> run this in the source folder.</li>
+    </ul>
+    <span class="cmd"><i>$</i> ./install.sh --uninstall</span>
+    <p>Your login, settings and caches stay in <code>~/.config/uzumaki</code> and <code>~/.cache/uzumaki</code>. Delete those two folders to forget everything.</p>
+
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="brand">
+      <img src="/assets/icon.svg" alt="" width="24" height="24" loading="lazy">
+      <span>Uzumaki</span>
+    </div>
+    <p class="foot-social"><a href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg> Follow @Uzumaki_App on X</a></p>
+    <p class="foot-contact">Install: <a href="/download/macos/">macOS</a> · <a href="/download/arch/">Arch Linux</a> · <a href="/download/linux/">AppImage · any distro</a> · <a href="/download/windows/">Windows (soon)</a></p>
+    <p class="foot-contact"><a href="https://github.com/hanami117/uzumaki">GitHub</a> <span class="foot-note">Source coming with the beta</span> · <a href="https://github.com/hanami117/uzumaki">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki">GPL-3.0</a></p>
+    <!-- PROVISIONAL (line above): on release day point Changelog to https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md and GPL-3.0 to https://github.com/hanami117/uzumaki/blob/main/LICENSE, and remove the "Source coming with the beta" span -->
+    <p class="foot-contact">Questions or ideas: <a href="mailto:hello@getuzumaki.app">hello@getuzumaki.app</a> · Help with the app: <a href="mailto:support@getuzumaki.app">support@getuzumaki.app</a></p>
+    <p class="disclaimer">Uzumaki is an independent project, not affiliated with or endorsed by Apple. Apple Music is a trademark of Apple Inc.</p>
+    <p class="fine">Uzumaki streams through Apple's own web player and does not download, convert or decrypt music.</p>
+  </div>
+</footer>
+
+</body>
+</html>

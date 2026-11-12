@@ -1,0 +1,10 @@
+[package]
+name = "uzumaki-cli"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+description = "Test client for the Uzumaki Electron playback bridge"
+
+[dependencies]
+serde_json = "1"

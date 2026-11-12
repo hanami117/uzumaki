@@ -1,0 +1,681 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uzumaki: a native Apple Music desktop client for Linux and macOS</title>
+<meta name="description" content="Uzumaki is a native Apple Music desktop client for Linux and macOS: fast, GPU-rendered and written in Rust. Synced lyrics, local files in the same queue, media keys, and a terminal client called uzu.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0e0e11">
+<meta property="og:title" content="Uzumaki: a native Apple Music desktop client for Linux and macOS">
+<meta property="og:description" content="A native Apple Music desktop client for Linux and macOS, GPU-rendered and written in Rust. Synced lyrics, local files, media keys and a terminal client.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://getuzumaki.app/">
+<meta property="og:site_name" content="Uzumaki">
+<meta property="og:image" content="https://getuzumaki.app/assets/og-v2.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Uzumaki logo">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@Uzumaki_App">
+<link rel="canonical" href="https://getuzumaki.app/">
+<link rel="icon" href="assets/icon-coral.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preload" as="image" href="assets/swirl.webp" type="image/webp">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="demo/demo.css">
+<link rel="stylesheet" href="demo/mine.css">
+<script>
+/* Before first paint: .intro-on plays the startup intro once per session (not for reduced motion, not when
+   the page opens scrolled or on a #hash); .js lets sections fade in once site.js runs, .js-fail lifts that
+   if it never does. */
+(function(d){try{
+var r=matchMedia("(prefers-reduced-motion: reduce)").matches;
+if(!r&&!scrollY&&!location.hash&&!sessionStorage.getItem("uzu-intro")){sessionStorage.setItem("uzu-intro","1");d.classList.add("intro-on")}
+if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.classList.contains("rv")||d.classList.add("js-fail")},5000)}
+}catch(e){}})(document.documentElement)
+</script>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="intro" id="intro" aria-hidden="true">
+  <div class="intro-bg"></div>
+  <img class="intro-swirl" src="assets/swirl.webp" alt="" width="768" height="768" decoding="async" fetchpriority="high">
+</div>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="Uzumaki, back to top">
+      <img src="assets/icon.svg" alt="" width="28" height="28">
+      <span>Uzumaki</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#uzu">uzu</a>
+      <a href="#requirements">Requirements</a>
+      <a href="#download">Download</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="nav-x" href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener" aria-label="Uzumaki on X (@Uzumaki_App)" title="@Uzumaki_App on X"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg></a>
+    <a class="nav-x nav-gh" href="https://github.com/hanami117/uzumaki" target="_blank" rel="noopener" aria-label="Uzumaki on GitHub" title="Uzumaki on GitHub"><svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero demo-hero" id="top">
+  <div class="swirl" aria-hidden="true"></div>
+  <div class="demo-sticky" id="demo-sticky">
+  <div class="wrap hero-in">
+    <div class="demo-text" id="demo-text">
+    <span class="eyebrow">$ uzumaki</span>
+    <h1><span class="w" style="--i:0">A</span> <span class="w" style="--i:1">native</span> <span class="w" style="--i:2">Apple</span> <span class="w" style="--i:3">Music</span> <span class="w" style="--i:4">desktop</span> <span class="w" style="--i:5">client</span> <span class="w" style="--i:6">for</span> <span class="w" style="--i:7">Linux</span> <span class="w" style="--i:8">and</span> <span class="w" style="--i:9">macOS.</span></h1>
+    <p class="sub">GPU&#8209;rendered and written in Rust. Your library, your playlists, synced lyrics and your own music files, in one fast window that works with your media keys and your terminal.</p>
+
+    <div class="cta" id="get">
+      <a class="btn primary two" href="/download/arch/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+        <span>Linux &middot; AUR<small>Beta coming soon</small></span>
+      </a>
+      <a class="btn two" href="/download/macos/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+        <span>macOS DMG<small>Beta coming soon</small></span>
+      </a>
+    </div>
+    <p class="soon"><a href="#download">All ways to install</a> &middot; <a href="/download/windows/">Windows: coming soon</a> &middot; <a href="https://github.com/hanami117/uzumaki">Follow on GitHub</a></p>
+    <p class="fineprint">Free &middot; Linux and macOS &middot; an Apple Music subscription for streaming, or play only your own files without one</p>
+    </div>
+
+    <div class="demo-stage" id="demo-stage">
+      <div class="demo-tilt" id="demo-tilt">
+        <div class="demo-window" id="demo-window" role="group" aria-label="Interactive Uzumaki window preview: click a cover to play a 30 second preview">
+          <div class="dw-wall" id="dw-wall" data-fx-hook="wallpaper" aria-hidden="true"></div>
+          <div class="dw-titlebar">
+            <a class="dw-credit" id="dw-credit" href="https://music.apple.com/" target="_blank" rel="noopener" hidden>Preview courtesy of Apple Music ↗</a>
+            <span class="dw-title" aria-hidden="true">Uzumaki</span>
+            <span class="dw-wbtns" aria-hidden="true"><i></i><i></i><i></i></span>
+          </div>
+          <div class="dw-body">
+            <aside class="dw-side" id="dw-side">
+              <div class="dw-sbfull" id="dw-sbfull">
+              <div class="dw-brand"><img src="assets/icon.svg" alt="" width="26" height="26"><b>Uzumaki</b>
+                <button type="button" class="dw-gear" id="dw-gear" aria-hidden="true" tabindex="-1" disabled><svg class="ic gear"><use href="#i-gear"/></svg></button><button type="button" class="dw-sbtoggle" data-sbtoggle aria-label="Toggle sidebar" title="Toggle sidebar" aria-expanded="true" aria-controls="dw-side"><svg class="ic"><use href="#i-panel"/></svg></button></div>
+              <nav class="dw-nav" aria-hidden="true">
+                <a><svg class="ic"><use href="#i-search"/></svg>Search</a>
+                <a class="on"><svg class="ic"><use href="#i-home"/></svg>Home</a>
+                <a><svg class="ic"><use href="#i-grid"/></svg>New</a>
+                <a><svg class="ic"><use href="#i-radio"/></svg>Radio</a>
+                <h4>Library</h4>
+                <a><svg class="ic"><use href="#i-clock"/></svg>Recently Added</a>
+                <a><svg class="ic"><use href="#i-mic"/></svg>Artists</a>
+                <a><svg class="ic"><use href="#i-album"/></svg>Albums</a>
+                <a><svg class="ic"><use href="#i-note"/></svg>Songs</a>
+                <a><svg class="ic"><use href="#i-user"/></svg>Made for You</a>
+                <a><svg class="ic"><use href="#i-folder"/></svg>Local Files</a>
+                <h4>Playlists <span>+</span></h4>
+                <a><svg class="ic"><use href="#i-dots"/></svg>All Playlists</a>
+                <a><svg class="ic"><use href="#i-star"/></svg>Favourite Songs</a>
+                <a><svg class="ic"><use href="#i-queue"/></svg>Morning commute</a>
+                <a><svg class="ic"><use href="#i-queue"/></svg>Focus</a>
+                <a><svg class="ic"><use href="#i-queue"/></svg>Late night</a>
+              </nav>
+              </div>
+              <div class="dw-rail" id="dw-rail" inert>
+                <img class="dw-rail-logo" src="assets/icon.svg" alt="" width="31" height="31">
+                <button type="button" class="dw-sbtoggle" data-sbtoggle aria-label="Toggle sidebar" title="Toggle sidebar" aria-expanded="true" aria-controls="dw-side"><svg class="ic"><use href="#i-panel"/></svg></button>
+                <button type="button" class="dw-gear" aria-hidden="true" tabindex="-1" disabled><svg class="ic gear"><use href="#i-gear"/></svg></button>
+                <nav class="dw-rail-nav" aria-hidden="true">
+                  <a class="dw-ri" title="Search"><svg class="ic"><use href="#i-search"/></svg></a>
+                  <a class="dw-ri on" title="Home"><svg class="ic"><use href="#i-home"/></svg></a>
+                  <a class="dw-ri" title="New"><svg class="ic"><use href="#i-grid"/></svg></a>
+                  <a class="dw-ri" title="Radio"><svg class="ic"><use href="#i-radio"/></svg></a>
+                  <i class="dw-rail-sep"></i>
+                  <a class="dw-ri" title="Recently Added"><svg class="ic"><use href="#i-clock"/></svg></a>
+                  <a class="dw-ri" title="Artists"><svg class="ic"><use href="#i-mic"/></svg></a>
+                  <a class="dw-ri" title="Albums"><svg class="ic"><use href="#i-album"/></svg></a>
+                  <a class="dw-ri" title="Songs"><svg class="ic"><use href="#i-note"/></svg></a>
+                  <a class="dw-ri" title="Made for You"><svg class="ic"><use href="#i-user"/></svg></a>
+                  <a class="dw-ri" title="Local Files"><svg class="ic"><use href="#i-folder"/></svg></a>
+                  <i class="dw-rail-sep"></i>
+                  <a class="dw-ri" title="All Playlists"><svg class="ic"><use href="#i-dots"/></svg></a>
+                  <a class="dw-ri" title="Favourite Songs"><svg class="ic"><use href="#i-star"/></svg></a>
+                </nav>
+              </div>
+              <div class="dw-grip" id="dw-grip" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" aria-controls="dw-side" aria-valuemin="170" aria-valuemax="300" aria-valuenow="200" tabindex="0" title="Drag to resize, double-click to reset"></div>
+            </aside>
+            <section class="dw-main">
+              <h2>Listen now</h2>
+              <p class="dw-sub">Picked from your recent listening</p>
+              <h3>Recently played</h3>
+              <ul class="dw-shelf" id="dw-shelf"><li class="dw-tile" tabindex="0" role="button" data-track="1766137063" aria-label="Play Two Faced by Linkin Park"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/69/21/cf/6921cff3-7074-118a-ece2-4012450e6c75/093624839811.jpg/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>Two Faced</b><span>Linkin Park · 2024</span></li><li class="dw-tile" tabindex="0" role="button" data-track="1440839332" aria-label="Play The Kill by Thirty Seconds to Mars"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/b3/59/d0/b359d085-aa84-aae8-d03c-5305d0bb0111/16UMGIM34076.rgb.jpg/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>The Kill</b><span>Thirty Seconds to Mars · 2005</span></li><li class="dw-tile" tabindex="0" role="button" data-track="1837658529" aria-label="Play IRIS OUT by Kenshi Yonezu"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/e0/f9/f1/e0f9f1f3-a088-b28d-6760-a28accabc705/4547366775181.jpg/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>IRIS OUT</b><span>Kenshi Yonezu · 2025</span></li><li class="dw-tile" tabindex="0" role="button" data-track="1639023912" aria-label="Play NIGHT DANCER by imase"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music122/v4/c2/49/87/c249873f-fa61-9d61-52aa-a7e1d780c8b3/22UMGIM81500.rgb.jpg/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>NIGHT DANCER</b><span>imase · 2022</span></li><li class="dw-tile" tabindex="0" role="button" data-track="1828830887" aria-label="Play Zombie by The Cranberries"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/a3/77/a3/a377a309-8e52-f787-2250-2b34d320bf7b/25UMGIM64146.rgb.jpg/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>Zombie</b><span>The Cranberries · 1994</span></li></ul>
+              <h3>Recently added</h3>
+              <ul class="dw-shelf" id="dw-shelf-2"><li class="dw-tile" tabindex="0" role="button" data-track="1693743238" aria-label="Play CODE MISTAKE by CORPSE &amp; Bring Me The Horizon"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/58/a1/21/58a121f6-32e0-0ff7-e539-fbe8ff7a181e/artwork.jpg/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>CODE MISTAKE</b><span>CORPSE &amp; Bring Me The Horizon · 2023</span></li><li class="dw-tile" tabindex="0" role="button" data-track="1744407121" aria-label="Play DArkSide by Bring Me The Horizon"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/c2/64/38/c264386e-c6e6-c7e0-fefc-39beffa0e5ec/196872087246.jpg/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>DArkSide</b><span>Bring Me The Horizon · 2017</span></li><li class="dw-tile" tabindex="0" role="button" data-track="1852046148" aria-label="Play Guardian by Poppy"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/10/83/27/10832750-4df6-9ae1-5636-d01dae9c25e0/198704839702_Cover.jpg/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>Guardian</b><span>Poppy · 2026</span></li><li class="dw-tile" tabindex="0" role="button" data-track="1274598339" aria-label="Play XO TOUR Llif3 by Lil Uzi Vert"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/02/ed/6f/02ed6f77-7e89-ca9c-4d5a-83088113cbe8/075679887955.jpg/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>XO TOUR Llif3</b><span>Lil Uzi Vert · 2017</span></li><li class="dw-tile" tabindex="0" role="button" data-track="1176303886" aria-label="Play After Dark by Mr.Kitty"><div class="dw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/ce/5d/c6/ce5dc65e-6dac-bb8a-daaf-72bf77d0ba75/616450974909.png/600x600bb.jpg" alt="" width="150" height="150" loading="eager" decoding="async"></div><b>After Dark</b><span>Mr.Kitty · 2014</span></li></ul>
+            </section>
+            <aside class="dw-rp" id="dw-rp" aria-label="Side panel" inert>
+              <div class="rp-head">
+                <div class="rp-switch" role="tablist" aria-label="Side panel">
+                  <button type="button" class="rp-tab" id="rp-tab-lyrics" role="tab" aria-selected="true" aria-controls="rp-lyrics">Lyrics</button>
+                  <button type="button" class="rp-tab" id="rp-tab-queue" role="tab" aria-selected="false" aria-controls="rp-queue" tabindex="-1">Up Next</button>
+                </div>
+                <button type="button" class="dw-btn rp-close" id="rp-close" aria-label="Close sidebar" title="Close sidebar"><svg class="ic"><use href="#i-close"/></svg></button>
+              </div>
+              <div class="rp-pane rp-msg" id="rp-lyrics" role="tabpanel" aria-labelledby="rp-tab-lyrics"><p id="rp-lyrics-msg">Nothing is playing</p></div>
+              <div class="rp-pane" id="rp-queue" role="tabpanel" aria-labelledby="rp-tab-queue" hidden></div>
+            </aside>
+          </div>
+          <div class="dw-strip" aria-label="Player">
+          <div class="dw-bar">
+            <div class="dw-btns">
+              <button type="button" class="dw-btn" id="dw-shuffle" data-act="shuffle" aria-label="Shuffle off" aria-pressed="false"><svg class="ic"><use href="#i-shuffle"/></svg></button>
+              <button type="button" class="dw-btn" id="dw-prev" data-act="prev" aria-label="Previous"><svg class="ic"><use href="#i-prev"/></svg></button>
+              <button type="button" class="dw-play" id="dw-play" data-act="play" aria-label="Play"><svg class="ic"><use href="#i-play"/></svg></button>
+              <button type="button" class="dw-btn" id="dw-next" data-act="next" aria-label="Next"><svg class="ic"><use href="#i-next"/></svg></button>
+              <button type="button" class="dw-btn" id="dw-repeat" data-act="repeat" aria-label="Repeat off" aria-pressed="false"><svg class="ic"><use href="#i-repeat"/></svg><em>1</em></button>
+            </div>
+            <div class="dw-nowcol">
+              <div class="dw-now" id="dw-open" role="button" tabindex="0" aria-label="Open Now Playing" aria-haspopup="dialog" aria-expanded="false" aria-controls="dw-np">
+                <img id="dw-cover" alt="" width="36" height="36">
+                <div><b id="dw-title">Two Faced</b><span id="dw-artist">Linkin Park</span></div>
+              </div>
+              <div class="dw-prog"><span id="dw-cur">0:00</span><div class="dw-track" id="dw-seek" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="30" aria-valuenow="0"><i id="dw-fill"></i></div><span id="dw-dur">&minus;0:30</span></div>
+            </div>
+            <div class="dw-right">
+              <span class="dw-btn dw-deco" aria-hidden="true"><svg class="ic"><use href="#i-more"/></svg></span>
+              <button type="button" class="dw-btn" id="dw-lyrics" aria-label="Lyrics" title="Lyrics" aria-pressed="false" aria-controls="dw-rp"><svg class="ic"><use href="#i-lyrics"/></svg></button>
+              <button type="button" class="dw-btn" id="dw-queue" aria-label="Up Next" title="Up Next" aria-pressed="false" aria-controls="dw-rp"><svg class="ic"><use href="#i-queue"/></svg></button>
+              <button type="button" class="dw-btn" id="dw-volbtn" aria-label="Volume" aria-expanded="false" aria-controls="dw-pop"><svg class="ic"><use href="#i-vol"/></svg></button>
+            </div>
+          </div>
+          <div class="dw-pop" id="dw-pop" hidden>
+            <svg class="ic" aria-hidden="true"><use href="#i-vol"/></svg>
+            <div class="dw-vol" id="dw-vol" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="70"><i id="dw-volfill"></i></div>
+          </div>
+          </div>
+          <div class="dw-np" id="dw-np" role="dialog" aria-modal="false" aria-label="Now Playing" inert>
+            <div class="np-bg" id="np-bg" data-fx-hook="np-background" aria-hidden="true"></div>
+            <div class="np-body">
+              <div class="np-left" id="np-left">
+                <div class="np-cover" id="np-cover" aria-hidden="true"></div>
+                <div class="np-meta">
+                  <div class="np-text"><b id="np-title">Two Faced</b><span id="np-artist">Linkin Park</span></div>
+                  <span class="dw-btn dw-deco" aria-hidden="true"><svg class="ic"><use href="#i-star-o"/></svg></span>
+                </div>
+                <div class="np-seekrow"><span id="np-cur">0:00</span><div class="dw-track" id="np-seek" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="30" aria-valuenow="0"><i id="np-fill"></i></div><span id="np-dur">0:30</span></div>
+                <div class="np-transport">
+                  <button type="button" class="dw-btn" data-act="shuffle" aria-label="Shuffle off" aria-pressed="false"><svg class="ic"><use href="#i-shuffle"/></svg></button>
+                  <button type="button" class="dw-btn" data-act="prev" aria-label="Previous"><svg class="ic"><use href="#i-prev"/></svg></button>
+                  <button type="button" class="dw-play" data-act="play" aria-label="Play"><svg class="ic"><use href="#i-play"/></svg></button>
+                  <button type="button" class="dw-btn" data-act="next" aria-label="Next"><svg class="ic"><use href="#i-next"/></svg></button>
+                  <button type="button" class="dw-btn" data-act="repeat" aria-label="Repeat off" aria-pressed="false"><svg class="ic"><use href="#i-repeat"/></svg><em>1</em></button>
+                </div>
+                <div class="np-bottom">
+                  <svg class="ic" aria-hidden="true"><use href="#i-vol"/></svg>
+                  <div class="dw-vol" id="np-vol" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="70"><i></i></div>
+                  <button type="button" class="dw-btn on" id="np-lyrics" aria-label="Hide lyrics" title="Lyrics" aria-pressed="true"><svg class="ic"><use href="#i-lyrics"/></svg></button>
+                  <button type="button" class="dw-btn" id="np-queue" aria-label="Show Up Next" title="Up Next" aria-pressed="false"><svg class="ic"><use href="#i-queue"/></svg></button>
+                </div>
+                <p class="np-nolyrics" id="np-nolyrics">No lyrics for this song</p>
+              </div>
+              <div class="np-right" id="np-right" aria-label="Up Next" hidden></div>
+            </div>
+            <button type="button" class="dw-btn np-close" id="np-close" aria-label="Close Now Playing"><svg class="ic"><use href="#i-chev-down"/></svg></button>
+          </div>
+          <div class="dw-toast" id="dw-toast" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note demo-note">Interactive preview of the real window, drawn in HTML. Covers and 30 s previews courtesy of Apple Music (iTunes Search API).</p>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9H4z"/><path d="M10 20v-5h4v5"/></symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></symbol>
+      <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M7.5 7.5a6.4 6.4 0 0 0 0 9M16.5 7.5a6.4 6.4 0 0 1 0 9M4.5 4.5a10.6 10.6 0 0 0 0 15M19.5 4.5a10.6 10.6 0 0 1 0 15"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+      <symbol id="i-album" viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="12" rx="2"/><path d="M8 4.5h8"/></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="10" r="2.6"/><path d="M7.5 17c.8-2 2.4-3 4.5-3s3.7 1 4.5 3"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7a2 2 0 0 1 2-2H10l2 2.5h6.5a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+      <symbol id="i-dots" viewBox="0 0 24 24"><path d="M5 5h2M11 5h2M17 5h2M5 12h2M11 12h2M17 12h2M5 19h2M11 19h2M17 19h2"/></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 4 2.4 5 5.4.7-4 3.8 1 5.4L12 16.3 7.2 18.9l1-5.4-4-3.8 5.4-.7z"/></symbol>
+      <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 7h11M4 12h11M4 17h6"/><path d="M17 15v5l4-1.6V9"/></symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 5.8a6.2 6.2 0 1 0 0 12.4 6.2 6.2 0 0 0 0-12.4z"/><path d="M12 9.8a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4z"/><path d="M12 3.5v2.3M12 18.2v2.5M3.5 12h2.3M18.2 12h2.5M18 6l-1.6 1.6M7.6 16.4 6 18M6 6l1.6 1.6M16.4 16.4 18 18"/></symbol>
+      <symbol id="i-panel" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9.5 5v14"/></symbol>
+      <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M4 7h3c5 0 5 10 10 10h3M4 17h3c1.6 0 2.7-.8 3.6-2M14 9c.9-1.3 2-2 3-2h3M18 4l2.5 3L18 10M18 14l2.5 3L18 20"/></symbol>
+      <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6v12M19 6v12l-9-6z" class="fill"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M18 6v12M5 6v12l9-6z" class="fill"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" class="fill"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5.5v13M16 5.5v13" class="thick"/></symbol>
+      <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4 11V9a2 2 0 0 1 2-2h13M16 4l3 3-3 3M20 13v2a2 2 0 0 1-2 2H5M8 20l-3-3 3-3"/></symbol>
+      <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM8 9h8M8 12h5"/></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.5" class="fill"/><circle cx="12" cy="12" r="1.5" class="fill"/><circle cx="18.5" cy="12" r="1.5" class="fill"/></symbol>
+      <symbol id="i-vol" viewBox="0 0 24 24"><path d="M4 10v4h3.5L12 17.5v-11L7.5 10zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+      <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+      <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+<symbol id="i-star-o" viewBox="0 0 24 24"><path d="M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.8L12 16.9l-5.2 2.75 1-5.8-4.2-4.1 5.8-.85z"/></symbol>
+    </defs></svg>
+  </div>
+  </div>
+</section>
+
+<section class="features wrap" id="features" aria-labelledby="features-h">
+  <span class="eyebrow reveal"><b>01</b> &middot; native</span>
+  <h2 id="features-h" class="reveal">A music app that feels like it belongs on your desktop</h2>
+  <p class="lead reveal">No browser tab. Uzumaki draws its own interface on the GPU and uses Apple's own web player, hidden in the background, for the actual playback.</p>
+
+  <ul class="grid stagger">
+    <li class="reveal">
+      <h3>Native and GPU&#8209;rendered</h3>
+      <p>Written in Rust and drawn with the GPU (Vulkan on Linux). A sidebar like Apple's, pins, a collapsible rail, sortable song tables that adapt to the window width, drag and drop, and keyboard shortcuts you can change.</p>
+    </li>
+    <li class="reveal">
+      <h3>Synced lyrics, word by word</h3>
+      <p>Lyrics glide along with the song and fill in word by word when Apple has word timing, or line by line when it doesn't. Read them full screen, or in a panel beside whatever you're browsing.</p>
+    </li>
+    <li class="reveal">
+      <h3>Now Playing, with backgrounds</h3>
+      <p>A full-screen Now Playing view with the cover, controls and lyrics. Set a background behind the app or behind Now Playing: the built-in swirl, your own picture or the current cover, with dither, ASCII, halftone, scanline or blur effects.</p>
+    </li>
+    <li class="reveal">
+      <h3>Your own files, in the same queue</h3>
+      <p>Point it at your music folders. FLAC, MP3, AAC/M4A, ALAC, Vorbis and WAV play inside the app and mix with Apple Music songs in one queue. Local files have their own page and search tab.</p>
+    </li>
+    <li class="reveal">
+      <h3>Media keys, tray and notifications</h3>
+      <p>MPRIS on Linux and Now Playing on macOS, so media keys and desktop widgets just work. A tray icon with playback controls, optional close-to-tray, song-change notifications, and hook scripts that run on every song change.</p>
+    </li>
+    <li class="reveal">
+      <h3>Your whole library, fast</h3>
+      <p>Library, albums, artists, playlists, Favourite Songs, New, Radio and Made for You. The library is kept on disk, so it opens at once and you can browse it offline. Create and edit playlists, mark favourites, and pick light or dark.</p>
+    </li>
+  </ul>
+
+  <div class="gallery stagger">
+    <figure class="shot reveal">
+      <img src="assets/shots/np-bg-cover.webp" width="1360" height="860" loading="lazy" decoding="async"
+           alt="Full-screen Now Playing: the controls on the left, synced lyrics on the right with the current line highlighted, over a blurred background.">
+      <figcaption>Full-screen Now Playing with synced lyrics.</figcaption>
+    </figure>
+    <figure class="shot reveal">
+      <img src="assets/shots/right-panel-lyrics.webp" width="1360" height="860" loading="lazy" decoding="async"
+           alt="An album page with its song list, and a lyrics panel on the right following the current song.">
+      <figcaption>Lyrics in a side panel, next to the album you're browsing.</figcaption>
+    </figure>
+    <figure class="shot reveal">
+      <img src="assets/shots/local-files.webp" width="1360" height="860" loading="lazy" decoding="async"
+           alt="The Local Files page: a sortable table of songs from your music folders with title, artist, album, year and time.">
+      <figcaption>Local files, playable alongside Apple Music.</figcaption>
+    </figure>
+    <figure class="shot reveal">
+      <img src="assets/shots/appearance.webp" width="1360" height="860" loading="lazy" decoding="async"
+           alt="Settings, Appearance: a halftone swirl preview, theme choice, three app icon styles and a docked or floating player.">
+      <figcaption>Appearance settings: backgrounds, theme, icon and player style.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="mine wrap" id="mine" aria-labelledby="mine-h">
+  <div class="mine-grid">
+    <div class="mine-copy">
+      <span class="eyebrow reveal"><b>02</b> &middot; make it yours</span>
+      <h2 id="mine-h" class="reveal">Your picture, your theme, your keys</h2>
+      <p class="lead reveal">Behind the app you can have Uzumaki&rsquo;s own swirl, a picture of your choice or the cover of whatever is playing, redrawn with an effect. The window next to this text is the real thing: it runs the app&rsquo;s own effect code, right in your browser.</p>
+      <ul class="mine-points reveal">
+        <li><strong>Source.</strong> The built-in swirl, your own picture (PNG or JPEG) or the playing song&rsquo;s cover, or nothing at all.</li>
+        <li><strong>Effect.</strong> None, Dither, ASCII, Halftone, Scanlines or Blur.</li>
+        <li><strong>Strength.</strong> From faint to strong, never fully opaque, with a separate strength for song lists.</li>
+        <li><strong>Fade.</strong> The picture can fade out towards the bottom, so long lists sit on the plain background.</li>
+        <li><strong>Where.</strong> On every page, or only on card pages such as Home and Radio.</li>
+      </ul>
+      <p class="note reveal">Now Playing has a background of its own: a gradient in the cover&rsquo;s colour, the cover itself with its own effect under a dark scrim, or the same as the rest of the app.</p>
+    </div>
+
+    <div class="mine-demo reveal">
+      <div class="mw-box" id="mw-box">
+        <div class="mw" id="mw" aria-hidden="true">
+          <div class="mw-wall" id="mw-wall"><div class="mw-fb" id="mw-fb"></div></div>
+          <div class="mw-fade"></div>
+          <div class="mw-bar"><span class="mw-lights"><i></i><i></i><i></i></span><span>Uzumaki</span></div>
+          <div class="mw-body">
+            <div class="mw-side">
+              <div class="mw-brand"><img src="assets/icon.svg" alt="" width="20" height="20"><b>Uzumaki</b></div>
+              <p><i></i>Search</p><p class="on"><i></i>Home</p><p><i></i>New</p><p><i></i>Radio</p>
+              <h4>Library</h4>
+              <p><i></i>Artists</p><p><i></i>Albums</p><p><i></i>Songs</p><p><i></i>Local Files</p>
+              <h4>Playlists</h4>
+              <p><i></i>Favourite Songs</p>
+            </div>
+            <div class="mw-main">
+              <h5>Listen now</h5>
+              <h6>Recently played</h6>
+              <ul><li><div class="mw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/69/21/cf/6921cff3-7074-118a-ece2-4012450e6c75/093624839811.jpg/600x600bb.jpg" alt="" width="120" height="120" loading="lazy" decoding="async"></div><b>Two Faced</b><span>Linkin Park</span></li><li><div class="mw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/b3/59/d0/b359d085-aa84-aae8-d03c-5305d0bb0111/16UMGIM34076.rgb.jpg/600x600bb.jpg" alt="" width="120" height="120" loading="lazy" decoding="async"></div><b>The Kill</b><span>Thirty Seconds to Mars</span></li><li><div class="mw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/e0/f9/f1/e0f9f1f3-a088-b28d-6760-a28accabc705/4547366775181.jpg/600x600bb.jpg" alt="" width="120" height="120" loading="lazy" decoding="async"></div><b>IRIS OUT</b><span>Kenshi Yonezu</span></li><li><div class="mw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music122/v4/c2/49/87/c249873f-fa61-9d61-52aa-a7e1d780c8b3/22UMGIM81500.rgb.jpg/600x600bb.jpg" alt="" width="120" height="120" loading="lazy" decoding="async"></div><b>NIGHT DANCER</b><span>imase</span></li></ul>
+              <h6>Recently added</h6>
+              <ul><li><div class="mw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/58/a1/21/58a121f6-32e0-0ff7-e539-fbe8ff7a181e/artwork.jpg/600x600bb.jpg" alt="" width="120" height="120" loading="lazy" decoding="async"></div><b>CODE MISTAKE</b><span>CORPSE &amp; Bring Me The Horizon</span></li><li><div class="mw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/c2/64/38/c264386e-c6e6-c7e0-fefc-39beffa0e5ec/196872087246.jpg/600x600bb.jpg" alt="" width="120" height="120" loading="lazy" decoding="async"></div><b>DArkSide</b><span>Bring Me The Horizon</span></li><li><div class="mw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/10/83/27/10832750-4df6-9ae1-5636-d01dae9c25e0/198704839702_Cover.jpg/600x600bb.jpg" alt="" width="120" height="120" loading="lazy" decoding="async"></div><b>Guardian</b><span>Poppy</span></li><li><div class="mw-art"><img src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/02/ed/6f/02ed6f77-7e89-ca9c-4d5a-83088113cbe8/075679887955.jpg/600x600bb.jpg" alt="" width="120" height="120" loading="lazy" decoding="async"></div><b>XO TOUR Llif3</b><span>Lil Uzi Vert</span></li></ul>
+            </div>
+          </div>
+        </div>
+        <span class="mw-tag">Live preview</span>
+      </div>
+
+      <form class="mine-ctl" id="mine-ctl" autocomplete="off" hidden>
+        <fieldset class="mine-row">
+          <legend>Background</legend>
+          <div class="seg">
+            <label class="mine-o"><input type="radio" name="mine-src" value="swirl" checked><span>Uzumaki swirl</span></label>
+            <label class="mine-o"><input type="radio" name="mine-src" value="cover"><span>Album cover</span></label>
+            <label class="mine-o"><input type="radio" name="mine-src" value="picture"><span>Your picture</span></label>
+          </div>
+          <div class="mine-pic" id="mine-pic" hidden>
+            <label class="mine-file btn"><input type="file" id="mine-file" accept="image/png,image/jpeg"><span>Choose a picture&hellip;</span></label>
+            <button type="button" class="mine-rm" id="mine-rm" hidden>Remove</button>
+            <span class="mine-name" id="mine-name"></span>
+            <p class="mine-priv">PNG or JPEG. It stays in your browser: nothing is uploaded.</p>
+          </div>
+        </fieldset>
+        <fieldset class="mine-row">
+          <legend>Effect</legend>
+          <div class="chips">
+            <label class="mine-o chip"><input type="radio" name="mine-fx" value="0" data-desc="The picture as it is."><span>None</span></label>
+            <label class="mine-o chip"><input type="radio" name="mine-fx" value="1" data-desc="Recreates the picture in solid colour pixels, like an old screen."><span>Dither</span></label>
+            <label class="mine-o chip"><input type="radio" name="mine-fx" value="2" data-desc="Redraws the picture as coloured text characters."><span>ASCII</span></label>
+            <label class="mine-o chip"><input type="radio" name="mine-fx" value="3" data-desc="Recreates the picture with coloured print dots." checked><span>Halftone</span></label>
+            <label class="mine-o chip"><input type="radio" name="mine-fx" value="4" data-desc="Darkens every third line, like an old monitor."><span>Scanlines</span></label>
+            <label class="mine-o chip"><input type="radio" name="mine-fx" value="5" data-desc="A soft haze of the picture&rsquo;s colours."><span>Blur</span></label>
+          </div>
+          <p class="mine-desc" id="mine-fxd">Recreates the picture with coloured print dots.</p>
+        </fieldset>
+        <div class="mine-row mine-two">
+          <div class="mine-str">
+            <label for="mine-op">Strength <output id="mine-opv" for="mine-op">50%</output></label>
+            <input type="range" id="mine-op" min="5" max="65" step="1" value="50">
+          </div>
+          <label class="mine-sw"><input type="checkbox" id="mine-fade" role="switch" checked><span class="sw" aria-hidden="true"></span><span>Fade toward the bottom</span></label>
+        </div>
+        <p class="mine-status" id="mine-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </div>
+  <div class="mine-grid mine-more" id="mine-theme-block">
+    <div class="mine-text reveal">
+      <h3 id="mine-theme-h">Dark, light, or your system</h3>
+      <p>Pick Dark or Light, or let Uzumaki follow your computer&rsquo;s appearance, which is the default. The backgrounds follow the theme: the same effects draw as light on black in Dark and as ink on near-white paper in Light.</p>
+      <div class="seg two" id="mine-theme" role="radiogroup" aria-labelledby="mine-theme-h" hidden>
+        <label class="mine-o"><input type="radio" name="mine-theme" value="dark" checked><span>Dark</span></label>
+        <label class="mine-o"><input type="radio" name="mine-theme" value="light"><span>Light</span></label>
+      </div>
+    </div>
+    <figure class="mine-shot reveal" id="mine-shot" data-theme="dark">
+      <div class="mine-frame">
+        <img class="s-dark" src="assets/setup-dark.webp" width="1400" height="1121" loading="lazy" decoding="async"
+             alt="Uzumaki in the dark theme: the album page for Narcotic - EP by Liquido over a halftone anime picture that fades out towards the bottom, with the floating player at the bottom.">
+        <img class="s-light" src="assets/setup-light.webp" width="1400" height="1121" loading="lazy" decoding="async" aria-hidden="true"
+             alt="The same page in the light theme: the halftone picture now draws as pale ink on near-white paper, with the same floating player.">
+      </div>
+      <figcaption>The author&rsquo;s setup: their own picture with Halftone in Dark and no effect in Light, fade on.</figcaption>
+    </figure>
+  </div>
+
+  <div class="mine-grid mine-more">
+    <div class="mine-text reveal">
+      <h3 id="mine-keys-h">Your shortcuts</h3>
+      <p>Every shortcut can be rebound in Settings &rsaquo; Keyboard: click one, then press the new keys. Esc cancels and Backspace removes it, and a combination another shortcut already has moves over to the one you&rsquo;re setting.</p>
+      <p>The number keys 1&ndash;9 can use Ctrl or Alt, or be switched off, and open the main pages or your sidebar pins. The shortcuts tour can be played again from Settings.</p>
+    </div>
+    <div class="mine-keys reveal">
+      <ul class="keys" aria-labelledby="mine-keys-h">
+          <li><span>Play or pause</span><span class="keys-k"><kbd>Space</kbd></span></li>
+          <li><span>Next song</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>→</kbd></span></li>
+          <li><span>Shuffle on or off</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>S</kbd></span></li>
+          <li><span>Show or hide the sidebar</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>B</kbd></span></li>
+          <li><span>Lyrics in the right sidebar</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>L</kbd></span></li>
+          <li><span>Up Next in the right sidebar</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>U</kbd></span></li>
+          <li><span>Full-screen Now Playing</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>F</kbd></span></li>
+          <li><span>Keyboard shortcuts</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>/</kbd></span></li>
+          <li class="keys-num"><span>Number keys: the main pages, or your sidebar pins</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>1</kbd><i>to</i><kbd>9</kbd></span></li>
+      </ul>
+      <p class="note">The defaults, as shown on Linux; on a Mac, Ctrl is Cmd.</p>
+    </div>
+  </div>
+</section>
+
+<section class="how wrap" id="how" aria-labelledby="how-h">
+  <span class="eyebrow reveal"><b>03</b> &middot; how it works</span>
+  <h2 id="how-h" class="reveal">From download to playing in four steps</h2>
+  <ol class="steps stagger">
+    <li class="reveal">
+      <span class="n">01</span>
+      <h3>Install</h3>
+      <p>On Arch, from the AUR; on other Linux, as an AppImage or from source; on macOS, the DMG or Homebrew. The first beta isn&rsquo;t out yet: see <a href="#download">Download</a>.</p>
+    </li>
+    <li class="reveal">
+      <span class="n">02</span>
+      <h3>Sign in, or go local</h3>
+      <p>Sign in with Apple Music on Apple's own sign-in page. Uzumaki never sees your password. No subscription? Choose local files only and pick your music folders instead.</p>
+    </li>
+    <li class="reveal">
+      <span class="n">03</span>
+      <h3>Play</h3>
+      <p>Open a song, an album or a playlist. Apple Music songs and your own files share one queue, with synced lyrics, media keys and a tray icon.</p>
+    </li>
+    <li class="reveal">
+      <span class="n">04</span>
+      <h3>Control it from the terminal</h3>
+      <p>Script it, bind it to keys, or type <code>uzu</code> for a full-screen player.</p>
+      <span class="cmd"><i>$</i> uzu play "late night"
+<i>$</i> uzu next</span>
+    </li>
+  </ol>
+</section>
+
+<section class="uzu" id="uzu" aria-labelledby="uzu-h">
+  <div class="wrap">
+    <span class="eyebrow reveal"><b>$</b> uzu</span>
+    <h2 id="uzu-h" class="reveal">Built for the terminal too: <code>uzu</code></h2>
+    <p class="lead reveal"><code>uzu</code> controls the running app the way <code>mpc</code> controls mpd. Use it in scripts and key bindings, or just type <code>uzu</code> for a full-screen terminal player with your queue, playlists, search, albums and lyrics. It even works over SSH.</p>
+
+    <div class="term-grid reveal">
+      <div class="term" role="img" aria-label="The uzu terminal screen: the playing song with volume, repeat and time on top, tabs for Queue, Playlists, Search, Albums and Lyrics, and the queue below.">
+        <div class="term-bar" aria-hidden="true"><span></span><span></span><span></span><em>uzu</em></div>
+        <div class="term-scroll"><pre aria-hidden="true"><i>╭────────────────────────────────────────────────────────┬─────────────────────────────────╮</i>
+<i>│</i>                                                        <i>│</i> Volume:  70%                    <i>│</i>
+<i>│</i>  <b class="c">Small Rooms</b>                                           <i>│</i> Status:  <span class="c">▶ Playing</span>              <i>│</i>
+<i>│</i>  Juniper Vale                                          <i>│</i> Repeat:  all     Shuffle: off   <i>│</i>
+<i>│</i>  Night Bus Hymns                                       <i>│</i> Time:    1:23 / 4:37            <i>│</i>
+<i>│</i>                                                        <i>│</i> [<span class="c">━━━━━━━━╸</span><i>────────────────────</i>] <i>│</i>
+<i>│</i>  uzumaki · ? help                                      <i>│</i> Queue:   9 songs · 35 min       <i>│</i>
+<i>├─</i> <b class="c">1 Queue</b> <i>──</i> 2 Playlists <i>──</i> 3 Search <i>──</i> 4 Albums <i>──</i> 5 Lyrics <i>─────────────────────────────┤</i>
+<i>│</i> <span class="m">Playing from:</span> Late night                                                                 <i>│</i>
+<i>├──────────────────────────────────────────────────────────────────────────────────────────┤</i>
+<i>│</i> Artist                        #  Title                                             Time ▲<i>│</i>
+<i>│</i><b class="c"> Juniper Vale                  ▶  Small Rooms                                       4:37 █</b><i>│</i>
+<i>│</i> Juniper Vale                  1  Copper Sky                                        3:10 █<i>│</i>
+<i>│</i> Mara Quell                    2  Harbor                                            3:32 █<i>│</i>
+<i>│</i> Ines Rook                     3  Paper Satellites                                  4:05 █<i>│</i>
+<i>│</i> Kenji Arlo                    4  Glass Hours                                       3:51 █<i>│</i>
+<i>│</i> Okafor &amp; the Lines            5  Concrete Bloom                                    3:18 █<i>│</i>
+<i>│</i> Sable Fen                     6  Northern Lots                                     4:23 <i>││</i>
+<i>│</i> The Margins                   7  Slow Weather                                      5:01 ▼<i>│</i>
+<i>╰─</i> Space play/pause · n/p next/prev · Enter play · d remove · J/K move · / filter <i>─────────╯</i>
+</pre></div>
+      </div>
+
+      <div class="term small">
+        <div class="term-bar" aria-hidden="true"><span></span><span></span><span></span><em>zsh</em></div>
+        <pre><span class="p">$</span> uzu
+Juniper Vale - Small Rooms
+<span class="c">[playing]</span> #1/9   1:23/4:37 (30%)
+<span class="p">$</span> uzu playlists
+<span class="p">$</span> uzu play "late night"
+<span class="p">$</span> uzu search copper sky
+<span class="p">$</span> uzu insert 1      <span class="m"># play next</span>
+<span class="p">$</span> uzu seek +10
+<span class="p">$</span> uzu vol 60
+<span class="p">$</span> uzu next</pre>
+      </div>
+    </div>
+
+    <ul class="uzu-points stagger">
+      <li class="reveal"><strong>Five screens:</strong> Queue, Playlists, Search, Albums and Lyrics, with filtering and sorting.</li>
+      <li class="reveal"><strong>Covers in the terminal:</strong> real images in kitty, Ghostty, WezTerm, iTerm2 or sixel terminals, coloured blocks elsewhere.</li>
+      <li class="reveal"><strong>Runs without a window:</strong> <code>uzu start</code> runs the app in the background, and playlists and albums work from the disk cache.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="wrap req" id="requirements" aria-labelledby="req-h">
+  <span class="eyebrow reveal"><b>04</b> &middot; requirements</span>
+  <h2 id="req-h" class="reveal">What you need</h2>
+  <div class="req-grid stagger">
+    <div class="card reveal">
+      <h3>An Apple Music subscription, for streaming</h3>
+      <p>Uzumaki is a different way to use the subscription you already have. You sign in once with your Apple Account, in Apple's own sign-in page. Your own music files play without one.</p>
+    </div>
+    <div class="card reveal">
+      <h3>Apple's standard streaming quality</h3>
+      <p>Songs stream at 256 kbps AAC, the quality Apple offers on the web. Lossless and Dolby Atmos aren't available this way. There's also a 64 kbps data saver.</p>
+    </div>
+    <div class="card reveal">
+      <h3>Linux or macOS</h3>
+      <p>On Linux, a GPU with Vulkan drivers, on Wayland or X11. On macOS 13 or later with Apple silicon it runs as a regular app, with media keys, a menu bar icon and notifications.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap dl" id="download" aria-labelledby="dl-h">
+  <span class="eyebrow reveal"><b>05</b> &middot; download</span>
+  <h2 id="dl-h" class="reveal">Get Uzumaki</h2>
+  <p class="lead reveal">The first public beta, version 0.1.0, is coming soon. Free and open source under the GPL. Each system has an install page that says how it will work.</p>
+  <div class="dl-grid stagger">
+    <div class="card reveal" id="download-macos">
+      <h3>macOS</h3>
+      <p>macOS 13 or later, Apple silicon. Open the disk image and drag Uzumaki to Applications.</p>
+      <!-- PROVISIONAL: on release day link this to the DMG, drop "two" and the small label -->
+      <a class="btn primary two" href="https://github.com/hanami117/uzumaki">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+        <span>Download for macOS<small>Beta coming soon</small></span>
+      </a>
+      <p class="dl-first"><strong>First launch:</strong> Uzumaki isn&rsquo;t notarized by Apple yet, so macOS stops it the first time. Open <b>System Settings &rarr; Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>. Once is enough.</p>
+      <p>Or with Homebrew:</p>
+      <span class="cmd"><i>$</i> brew install --cask hanami117/uzumaki/uzumaki</span>
+      <p class="cmd-note">Available at release.</p>
+      <a class="more" href="/download/macos/">macOS install guide &rarr;</a>
+    </div>
+    <div class="card reveal" id="download-linux">
+      <h3>Arch Linux</h3>
+      <p>From the AUR. It builds from source and updates with the rest of your system.</p>
+      <span class="cmd"><i>$</i> yay -S uzumaki</span>
+      <p class="cmd-note">Available at release.</p>
+      <a class="more" href="/download/arch/">Arch install guide &rarr;</a>
+    </div>
+    <div class="card reveal" id="download-source">
+      <h3>AppImage &middot; any distro</h3>
+      <p>One file for any Linux distro on x86_64. Make it executable and run it. No install, no sudo.</p>
+      <!-- PROVISIONAL: on release day link this to the AppImage, drop "two" and the small label -->
+      <a class="btn two" href="https://github.com/hanami117/uzumaki">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+        <span>Download the AppImage<small>Beta coming soon</small></span>
+      </a>
+      <span class="cmd"><i>$</i> chmod +x Uzumaki-0.1.0-x86_64.AppImage
+<i>$</i> ./Uzumaki-0.1.0-x86_64.AppImage</span>
+      <p class="cmd-note">Available at release.</p>
+      <p>Or build it from source: needs Rust, Node.js and npm.</p>
+      <a class="more" href="/download/linux/">AppImage and source guide &rarr;</a>
+    </div>
+    <div class="card reveal" id="download-windows">
+      <h3>Windows</h3>
+      <span class="pill">Coming soon</span>
+      <p>Planned, after Linux and macOS. Playback on Windows needs more Widevine work first.</p>
+      <a class="more" href="/download/windows/">About Windows &rarr;</a>
+    </div>
+  </div>
+  <p class="note reveal">Once a day Uzumaki asks this site whether a new version is out and tells you; it never downloads or installs anything by itself. Settings &rarr; General turns it off. Checksums will be on the <a href="https://github.com/hanami117/uzumaki">release page</a>.</p>
+</section>
+
+<section class="wrap faq" id="faq" aria-labelledby="faq-h">
+  <span class="eyebrow reveal"><b>06</b> &middot; faq</span>
+  <h2 id="faq-h" class="reveal">Questions</h2>
+
+  <details class="reveal">
+    <summary>How does playback work?</summary>
+    <p>Uzumaki runs Apple's own Apple Music web player in a hidden window and tells it what to play. The audio is played by that official player, inside a standard licensed browser engine. Uzumaki's own window shows everything else.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>Can I download songs or keep them after my subscription ends?</summary>
+    <p>No. Uzumaki streams Apple Music the same way music.apple.com does and never saves or converts the audio. Songs you own as files play from your own music folders.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>Is it official?</summary>
+    <p>No. Uzumaki is an independent project and is not made, affiliated with or endorsed by Apple.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>Why not lossless?</summary>
+    <p>Apple only offers 256 kbps AAC to its web player, and that is the player Uzumaki uses. Lossless and Spatial Audio need Apple's own apps.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>Is my Apple password stored by Uzumaki?</summary>
+    <p>No. You sign in on Apple's own page in a separate window, and the login stays in that player's profile on your computer, just like signing in to a browser. Settings → Account has a Sign out button that removes it.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>Do lyrics work for every song?</summary>
+    <p>Lyrics come from Apple Music, so they show when Apple has them. Many songs are timed word by word, others line by line, and some have plain lyrics only. Local files don't have lyrics yet.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>Do media keys and desktop widgets work?</summary>
+    <p>Yes. On Linux Uzumaki registers with MPRIS, so media keys, KDE and GNOME widgets and tools like playerctl see it, whether an Apple Music song or a local file is playing. On macOS it uses the system's Now Playing controls.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>When can I download it?</summary>
+    <p>Soon. The first beta isn&rsquo;t published yet. The <a href="#download">Download</a> section has an install page for each system, and the <a href="https://github.com/hanami117/uzumaki">GitHub page</a> is where the release will appear.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>How do I update?</summary>
+    <p>Uzumaki tells you when a new version is out. With the AUR or Homebrew, update as you update everything else (<code>yay</code>, <code>brew upgrade</code>). With an AppImage, download the new file and replace the old one. From source, run <code>./install.sh</code> again.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>Is there a Windows version?</summary>
+    <p>Not yet. It&rsquo;s planned. See <a href="/download/windows/">Windows</a>.</p>
+  </details>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="brand">
+      <img src="assets/icon.svg" alt="" width="24" height="24" loading="lazy">
+      <span>Uzumaki</span>
+    </div>
+    <p class="foot-social"><a href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg> Follow @Uzumaki_App on X</a></p>
+    <p class="foot-contact">Install: <a href="/download/macos/">macOS</a> · <a href="/download/arch/">Arch Linux</a> · <a href="/download/linux/">AppImage · any distro</a> · <a href="/download/windows/">Windows (soon)</a></p>
+    <p class="foot-contact"><a href="https://github.com/hanami117/uzumaki">GitHub</a> <span class="foot-note">Source coming with the beta</span> · <a href="https://github.com/hanami117/uzumaki">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki">GPL-3.0</a></p>
+    <!-- PROVISIONAL (line above): on release day point Changelog to https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md and GPL-3.0 to https://github.com/hanami117/uzumaki/blob/main/LICENSE, and remove the "Source coming with the beta" span -->
+    <p class="foot-contact">Questions or ideas: <a href="mailto:hello@getuzumaki.app">hello@getuzumaki.app</a> · Help with the app: <a href="mailto:support@getuzumaki.app">support@getuzumaki.app</a></p>
+    <p class="disclaimer">Uzumaki is an independent project, not affiliated with or endorsed by Apple. Apple Music is a trademark of Apple Inc.</p>
+    <p class="fine">Uzumaki streams through Apple's own web player and does not download, convert or decrypt music.</p>
+  </div>
+</footer>
+
+<script src="site.js" defer></script>
+<script src="demo/demo.js" defer></script>
+<script src="demo/fx.js" defer></script>
+<script src="demo/mine.js" defer></script>
+<script src="demo/player.js" defer></script>
+<script src="demo/panels.js" defer></script>
+</body>
+</html>

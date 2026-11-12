@@ -1,0 +1,5 @@
+bridge/node_modules/
+target/
+
+# Local notes for your own tools, never committed
+/CLAUDE.local.md

@@ -1,0 +1,25 @@
+# `cargo deny check licenses`: every crate in the build must carry a licence compatible with
+# Uzumaki's GPL-3.0-or-later. Checked for the 0.1.0 release (2026-11-12).
+[graph]
+all-features = true
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+    "GPL-3.0-or-later",   # Uzumaki itself
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "Unlicense",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "MPL-2.0",            # symphonia, opuscule: file-level copyleft, GPL-3.0 compatible (MPL 2.0 §3.3)
+    "CDLA-Permissive-2.0", # webpki-roots (the CA list)
+]

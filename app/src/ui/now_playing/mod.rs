@@ -1,0 +1,522 @@
+//! Full-screen Now Playing: tinted background, cover, transport, and synced lyrics or Up Next.
+//!
+//! Motion is Rune's: the overlay enters and exits with a bottom-edge transition on springs, layout
+//! changes (lyrics on/off, resizing) spring by key, and the lyrics glide on a scroll spring (see
+//! `lines.rs`). `poll` asks for frames only while lyrics are on screen, synced and playing.
+
+mod lines;
+mod follow;
+
+use rune::{Cx, Edge, El, Spring, SpringPair, TextStyle, Transition, Tx, col, el, icon, row, text};
+
+use super::icons;
+use super::player_bar::{icon_button, play_pause, progress, repeat_button, seek_slider, shuffle_button, volume_slider};
+use super::widgets::fmt_time;
+use crate::art::{NOW_PLAYING_PX, SMALL_PX};
+use crate::lyrics::Lyrics;
+use crate::models::Song;
+use crate::state::{Load, State};
+use crate::theme::*;
+
+/// Opens Now Playing; the overlay slides up from the bottom.
+pub fn open(s: &mut State) {
+    if !s.ui.now_playing {
+        crate::framelog::watch("now playing opens", std::time::Duration::from_millis(900));
+    }
+    s.ui.now_playing = true;
+    follow::reset();
+}
+
+pub fn close(s: &mut State) {
+    if s.ui.now_playing {
+        crate::framelog::watch("now playing closes", std::time::Duration::from_millis(700));
+    }
+    s.ui.now_playing = false;
+    s.set_fine_time(false);
+}
+
+/// Catalog id lyrics are keyed by.
+fn lyrics_key(song: &Song) -> Option<&str> {
+    match &song.catalog_id {
+        Some(c) => Some(c),
+        None if song.is_local() => None, // lyrics are Apple's only
+        None if !song.id.starts_with("i.") => Some(&song.id),
+        None => None,
+    }
+}
+
+fn lyrics_load<'a>(s: &'a State, song: &Song) -> Option<&'a Load<Option<Lyrics>>> {
+    s.lyrics.get(lyrics_key(song)?)
+}
+
+/// The current song's lyrics, when loaded and non-empty.
+fn lyrics_of(s: &State) -> Option<&Lyrics> {
+    let song = s.playback.song.as_ref()?;
+    match lyrics_load(s, song) {
+        Some(Load::Ready(Some(l))) if !l.lines.is_empty() => Some(l),
+        _ => None,
+    }
+}
+
+/// The column beside the cover holds the lyrics (not switched off, and Up Next isn't there).
+fn lyrics_on(s: &State) -> bool {
+    s.settings.now_playing_lyrics && !s.settings.now_playing_queue
+}
+
+/// True while the lyrics column shows time-synced lyrics (what `poll` animates).
+fn synced_visible(s: &State) -> bool {
+    s.ui.now_playing && lyrics_on(s) && lyrics_of(s).is_some_and(|l| l.synced)
+}
+
+/// The lyrics button: lyrics on or off, or back from Up Next. Lyrics coming back are placed on
+/// the current line at once, as when Now Playing opens.
+fn toggle_lyrics(s: &mut State) {
+    s.toggle_now_playing_lyrics();
+    if lyrics_on(s) {
+        follow::reset();
+    }
+}
+
+/// The queue button: Up Next in the column, or back to what was there.
+fn toggle_queue(s: &mut State) {
+    s.toggle_now_playing_queue();
+    if lyrics_on(s) {
+        follow::reset();
+    }
+}
+
+fn hex_rgb(h: &str) -> Option<[u8; 3]> {
+    let h = h.trim_start_matches('#');
+    if h.len() != 6 {
+        return None;
+    }
+    let v = u32::from_str_radix(h, 16).ok()?;
+    Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
+}
+
+/// The cover's colour: Apple's `bg` for catalog art, else the average colour of the loaded image
+/// (small cover first, it is the one already loaded), else a neutral dark.
+pub fn cover_tint(s: &State, song: &Song) -> [u8; 3] {
+    const NEUTRAL: [u8; 3] = [0x2a, 0x2a, 0x32];
+    let Some(a) = &song.artwork else { return NEUTRAL };
+    a.bg.as_deref()
+        .and_then(hex_rgb)
+        .or_else(|| s.art.tint(&a.url(SMALL_PX)))
+        .or_else(|| s.art.tint(&a.url(NOW_PLAYING_PX)))
+        .unwrap_or(NEUTRAL)
+}
+
+/// `rgb` mixed `k` of the way from the Now Playing base (#0b0b0e) in sRGB.
+fn mix_base(rgb: [u8; 3], k: f32) -> rune::Color {
+    const BASE: [f32; 3] = [11.0, 11.0, 14.0];
+    let c: Vec<u8> = (0..3).map(|i| (BASE[i] + (rgb[i] as f32 - BASE[i]) * k).round() as u8).collect();
+    rune::color::hex(&format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])).unwrap_or(PAL.np_base)
+}
+
+/// The big cover. It always requests `NOW_PLAYING_PX` (never a size derived from layout, which
+/// would change the URL while the window or the overlay moves) and draws it at whatever size layout
+/// gives; the small, already-loaded cover shows scaled up underneath until it is ready.
+fn cover(s: &State, song: &Song, size: f32) -> El {
+    let radius = (size * 0.03).clamp(8.0, 16.0);
+    let mut stack = el().key(format!("cover-{}", song.id)).w_full().h_full().fill(PAL.card_hover);
+    if let Some(a) = &song.artwork {
+        let fill = |key: &'static str, img: rune::Image| {
+            el().key(key).pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).pixels_fit(img.pixels(), rune::SurfaceFit::Fill)
+        };
+        if let Some(img) = s.art.get(a, SMALL_PX) {
+            stack = stack.child(fill("small", img));
+        }
+        if let Some(img) = s.art.get(a, NOW_PLAYING_PX) {
+            stack = stack.child(fill("big", img));
+        }
+    }
+    el().key("np-cover").size(size, size).radius(radius).clip_rounded(radius)
+        .shadow(14.0, 40.0, crate::theme::shadow(0.45)).fill(PAL.card_hover)
+        .child(stack)
+}
+
+/// Title and artist, with the favourite star beside them when the song can have one.
+fn meta(s: &State, song: &Song) -> El {
+    let text_block = col().gap(4.0).grow(1.0).min_w(0.0)
+        .child(text(song.title.clone()).font(TextStyle::new(22.0, 600.0)).color(PAL.text).truncate())
+        .child(
+            text(if song.album.is_empty() { song.artist.clone() } else { format!("{} \u{2014} {}", song.artist, song.album) })
+                .font(TextStyle::new(16.0, 400.0)).color(PAL.muted).truncate(),
+        );
+    let mut r = row().w_full().gap(8.0).center_y().child(text_block);
+    if s.can_favourite(song) {
+        let on = s.is_favourite(song);
+        let (glyph, color) = if on { (&icons::STAR_FILLED, PAL.accent) } else { (&icons::STAR, PAL.text2) };
+        r = r.child(icon_button("np-star", if on { "Undo Favourite" } else { "Favourite" }, glyph, 20.0, color)
+            .on_press(|s: &mut State| {
+                if let Some(song) = s.playback.song.clone() {
+                    s.toggle_favourite_songs(&[song]);
+                }
+            }));
+    }
+    r
+}
+
+fn seek_row(s: &State) -> El {
+    let (frac, elapsed, dur) = progress(s);
+    let time = |t: String, end: bool| {
+        let r = row().w(44.0);
+        let r = if end { r } else { r.justify_end() };
+        r.child(text(t).font(SMALL12).color(PAL.muted))
+    };
+    row().w_full().gap(10.0).center_y()
+        .child(time(fmt_time(elapsed), false))
+        .child(el().grow(1.0).min_w(0.0).child(seek_slider(s, "np-seek", frac, PAL.text)))
+        .child(time(fmt_time(dur), true))
+}
+
+fn transport(s: &State) -> El {
+    row().w_full().justify_center().center_y().gap(10.0)
+        .child(shuffle_button(s, "np-shuffle"))
+        .child(icon_button("np-prev", "Previous", &icons::PREV, 22.0, PAL.text).on_press(|s: &mut State| s.previous()))
+        .child(play_pause(s, "np-play-pause", 56.0))
+        .child(icon_button("np-next", "Next", &icons::NEXT, 22.0, PAL.text).on_press(|s: &mut State| s.next()))
+        .child(repeat_button(s, "np-repeat"))
+}
+
+/// Volume, then the lyrics and Up Next buttons for the column beside the cover (each lit while
+/// it has the column; they take turns).
+fn bottom_row(s: &State) -> El {
+    let lyrics = lyrics_on(s);
+    let queue = s.settings.now_playing_queue;
+    row().w_full().justify_center().center_y().gap(8.0)
+        .child(icon(icons::volume(s.playback.volume), 18.0).color(PAL.muted))
+        .child(el().w(160.0).child(volume_slider(s, "np-volume", PAL.text2)))
+        .child(
+            icon_button("np-lyrics-toggle", if lyrics { "Hide lyrics" } else { "Show lyrics" }, &LYRICS_ICON, 18.0,
+                if lyrics { PAL.accent } else { PAL.text2 })
+                .ml(8.0)
+                .on_press(toggle_lyrics),
+        )
+        .child(
+            icon_button("np-queue-toggle", if queue { "Hide Up Next" } else { "Show Up Next" }, &icons::QUEUE, 18.0,
+                if queue { PAL.accent } else { PAL.text2 })
+                .on_press(toggle_queue),
+        )
+        .child(word_mode_button(s))
+}
+
+/// Word-by-word / line-by-line highlight. Only shown with lyrics on and only when the song's
+/// lyrics carry word timing: while loading, with no lyrics, or with line timing only (Apple has
+/// word timing for some songs; on the others both modes look the same) there is nothing to
+/// switch, so it is absent. The setting itself is untouched and applies to the next song.
+fn word_mode_button(s: &State) -> El {
+    if !lyrics_on(s) || !has_word_timing(s) {
+        return el().w(0.0);
+    }
+    let words = s.settings.lyrics_words;
+    let label = if words { "Words" } else { "Lines" };
+    let help = if words { "Highlighting word by word (click for whole lines)" } else { "Highlighting whole lines (click for word by word)" };
+    el().key("np-word-mode").role("button").label("Lyrics highlight: word by word or line by line")
+        .help(help)
+        .focusable(true).h(26.0).px(10.0).radius(13.0).center().cursor(rune::Cursor::Pointer)
+        .fill(rune::Color::WHITE.alpha(0.08)).hover(crate::theme::ov(0.14))
+        .on_press(|s: &mut State| s.toggle_lyrics_words())
+        .child(text(label).font(TextStyle::new(12.0, 600.0)).color(PAL.text2))
+        .ml(4.0)
+}
+
+/// The current song's loaded lyrics are synced with timing for single words.
+fn has_word_timing(s: &State) -> bool {
+    lyrics_of(s).is_some_and(|l| l.synced && l.lines.iter().any(|x| !x.words.is_empty()))
+}
+
+/// Up Next in the lyrics' place: the songs after the playing one (the queue button).
+fn queue_panel(s: &State, narrow: bool, cx: &Cx<State>) -> El {
+    let c = col().key("np-queue");
+    let c = if narrow { c.w_full().grow(1.0).min_h(0.0) } else { c.grow(1.0).max_w(520.0).h_full().pt(24.0) };
+    c.child(super::up_next::list(s, super::up_next::Look::NowPlaying, cx))
+}
+
+static LYRICS_ICON: rune::Icon = rune::Icon {
+    name: "np-lyrics",
+    view: 24.0,
+    body: r#"<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 8h8M8 12h5"/>"#,
+};
+
+pub fn overlay(s: &State, cx: &mut Cx<State>) -> Option<El> {
+    let song = s.playback.song.as_ref()?;
+    let win = cx.layout_size("app-root").unwrap_or([1360.0, 860.0]);
+    let tint = cover_tint(s, song);
+    // A narrow window stacks the lyrics under a small cover header.
+    let narrow = crate::theme::is_narrow(win[0]);
+
+    let load = lyrics_load(s, song);
+    let has = matches!(load, Some(Load::Ready(Some(l))) if !l.lines.is_empty());
+    let pending = matches!(load, Some(Load::Loading) | Some(Load::Idle) | None) && lyrics_key(song).is_some();
+    let show_queue = s.settings.now_playing_queue;
+    let show_lyrics = lyrics_on(s) && (has || pending);
+    let side = show_queue || show_lyrics;
+
+    let enter = Spring::new(0.55, 0.0);
+    let exit = Spring::new(0.42, 0.0);
+    let bg = super::backdrop::np_layer(s, cx, win);
+    // The root's own paint never changes: an opaque base, with the tint or a picture as a child
+    // on it. A picture can land mid-slide (it renders off the UI thread); it then fades in over
+    // the tint. Switching the root itself from the tint gradient to a fill made Rune spring the
+    // fill up from clear, so the page underneath flashed through the sliding overlay.
+    let mut root = el().key("np").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).fill(PAL.np_base)
+        .transition(Transition::move_edge(Edge::Bottom).springs(SpringPair::new(enter, exit)))
+        .on_press(|_s: &mut State| {});
+    root = match bg {
+        Some(bg) => root.child(bg),
+        None => root.child(
+            el().key("np-tint").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .gradient(mix_base(tint, 0.34), PAL.np_base)
+                .transition(Transition::opacity()),
+        ),
+    };
+
+    let close_btn = icon_button("np-close", "Close Now Playing", &icons::CHEVRON_DOWN, 22.0, PAL.text2)
+        .size(44.0, 44.0).radius(22.0).pin(None, Some(16.0), Some(16.0), None).on_press(close);
+
+    let side_panel = |s: &State, cx: &Cx<State>, narrow: bool| {
+        if show_queue { queue_panel(s, narrow, cx) } else { lines::panel(s, song, cx, narrow) }
+    };
+    let body = if side && narrow {
+        let head = row().key("np-head").w_full().gap(14.0).center_y()
+            .child(cover(s, song, 64.0))
+            .child(el().grow(1.0).min_w(0.0).child(meta(s, song)));
+        let lower = col().key("np-low").w_full().gap(10.0).child(seek_row(s)).child(transport(s)).child(bottom_row(s));
+        col().w_full().h_full().px(20.0).pt(72.0).pb(20.0).gap(12.0)
+            .child(head)
+            .child(side_panel(s, cx, true))
+            .child(lower)
+    } else {
+        let size = if side {
+            (win[1] - 72.0 - 300.0).clamp(180.0, 380.0).min(win[0] * 0.4)
+        } else {
+            (win[1] - 330.0).clamp(200.0, 560.0).min(win[0] * 0.7)
+        };
+        let mut left = col().key("np-left").w(size).gap(14.0)
+            .child(cover(s, song, size))
+            .child(meta(s, song).mt(6.0))
+            .child(seek_row(s))
+            .child(transport(s))
+            .child(bottom_row(s));
+        if !side && lyrics_on(s) && !pending {
+            left = left.child(
+                row().w_full().justify_center().child(
+                    text("No lyrics for this song").font(SMALL13).color(PAL.dim).key("np-nolyrics"),
+                ),
+            );
+        }
+        let mut r = row().w_full().h_full().px(48.0).py(36.0).gap(56.0).center().child(left);
+        if side {
+            r = r.child(side_panel(s, cx, false));
+        }
+        r
+    };
+    root = root.child(body).child(close_btn);
+    Some(root)
+}
+
+/// Runs before every frame (`AppSpec::poll`). Returns true only when visible state changed;
+/// frames while lyrics animate come from `wake_after` and live values, and nothing is scheduled
+/// otherwise, so an idle or paused window draws nothing.
+pub fn poll(s: &mut State, landed: bool, tx: &mut Tx) -> bool {
+    let visible = synced_visible(s);
+    let playing = visible && matches!(s.playback.state, crate::bridge::PlayState::Playing);
+    s.set_fine_time(playing);
+    if !visible {
+        follow::idle();
+        return false;
+    }
+    let Some(lyr) = lyrics_of(s) else { return false };
+    let song_id = s.playback.song.as_ref().map(|x| x.id.as_str()).unwrap_or("");
+    let t = s.playback.position_now();
+    let changed = follow::step(song_id, lyr, t, playing, landed, tx);
+    if playing {
+        tx.wake_after(std::time::Duration::ZERO);
+    }
+    changed
+}
+
+fn seek_to_line(s: &mut State, start: f64) {
+    let pb = &s.playback;
+    let dur = if pb.duration > 0.0 { pb.duration } else { pb.song.as_ref().map_or(0.0, |x| x.duration) };
+    if dur > 0.0 {
+        s.seek_to(start / dur);
+    }
+}
+
+// ---- scenes (synthetic data only) -----------------------------------------------------------
+
+/// Original synthetic lyrics: 14 lines, a 12 s intro and an 8 s gap before line 7. With `words`,
+/// every word has its own timing.
+pub fn synthetic_lyrics(words: bool) -> Lyrics {
+    use crate::lyrics::{Line, Word};
+    const LINES: [&str; 14] = [
+        "The last tram leaves without a sound",
+        "and the depot lights go low",
+        "I fold the map along its seams",
+        "somewhere past the overpass",
+        "(we never needed the map)",
+        "Every window holds a different sky",
+        "copper, then a quiet blue",
+        "and the driver hums a tune I almost know",
+        "a tune you almost wrote",
+        "(hold the door, hold the door)",
+        "Terminus is only a word",
+        "for the place we stop pretending",
+        "so we walk the rest of the way",
+        "singing it back to the dark",
+    ];
+    let mut t = 12.0;
+    let mut out = Vec::new();
+    for (i, text) in LINES.iter().enumerate() {
+        if i == 7 {
+            t += 8.0;
+        }
+        let parts: Vec<&str> = text.split(' ').collect();
+        let start = t;
+        let ws: Vec<Word> = if words {
+            parts.iter().enumerate().map(|(j, p)| Word {
+                start: start + 0.45 * j as f64,
+                end: start + 0.45 * (j as f64 + 1.0),
+                text: if j + 1 < parts.len() { format!("{p} ") } else { (*p).to_string() },
+            }).collect()
+        } else {
+            Vec::new()
+        };
+        let end = start + 0.45 * parts.len() as f64;
+        out.push(Line { start, end, text: (*text).into(), second_voice: i % 5 == 4, words: ws });
+        t += 5.0;
+    }
+    Lyrics { synced: true, lines: out }
+}
+
+fn scene_base(s: &mut State, lyr: Lyrics, position: f64) {
+    let song = Song {
+        id: "np-scene".into(),
+        catalog_id: Some("cat-np".into()),
+        title: "Last Service".into(),
+        artist: "Juniper Vale".into(),
+        album: "Night Bus Hymns".into(),
+        duration: 241.0,
+        track_number: Some(1),
+        disc_number: Some(1),
+        explicit: false,
+        artwork: Some(crate::models::Artwork { template: "https://example.invalid/{w}x{h}.{f}".into(), bg: Some("a79be6".into()) }),
+        playable: true,
+        genre: None,
+        year: None,
+        album_id: None,
+        artists: Vec::new(),
+    };
+    s.playback.song = Some(song);
+    s.playback.duration = 241.0;
+    s.playback.position = position;
+    s.lyrics.insert("cat-np".into(), Load::Ready(Some(lyr)));
+    s.ui.now_playing = true;
+}
+
+/// Word-timed lyrics, mid-line (word fill visible).
+pub fn scene_np_words(s: &mut State) {
+    scene_base(s, synthetic_lyrics(true), 12.0 + 5.0 * 2.0 + 0.9);
+}
+
+/// Inside the 8 s gap before line 7: the breathing dots.
+pub fn scene_np_interlude(s: &mut State) {
+    scene_base(s, synthetic_lyrics(true), 12.0 + 5.0 * 6.0 + 4.6 + 3.0);
+}
+
+/// Before the first line (intro dots).
+pub fn scene_np_intro(s: &mut State) {
+    scene_base(s, synthetic_lyrics(true), 5.0);
+}
+
+/// Plain (unsynced) lyrics.
+pub fn scene_np_unsynced(s: &mut State) {
+    let mut l = synthetic_lyrics(false);
+    l.synced = false;
+    for x in &mut l.lines {
+        x.start = 0.0;
+        x.end = 0.0;
+    }
+    scene_base(s, l, 30.0);
+}
+
+/// Line-timed lyrics (no word timing) with Words on: no switch.
+pub fn scene_np_lines_only(s: &mut State) {
+    scene_base(s, synthetic_lyrics(false), 12.0 + 5.0 * 2.0 + 0.9);
+    s.settings.lyrics_words = true;
+}
+
+/// Line-timed lyrics with the lyrics column switched off.
+pub fn scene_np_cover_only(s: &mut State) {
+    scene_base(s, synthetic_lyrics(false), 30.0);
+    s.settings.now_playing_lyrics = false;
+}
+
+#[cfg(test)]
+mod tests {
+    use rune::{Env, Runtime};
+
+    use crate::appearance::NpBg;
+    use crate::backdrop::Slot;
+    use crate::state::State;
+
+    const DT: f64 = 1.0 / 60.0;
+
+    /// The screencast's setup (`np-slide`), Now Playing closed, settled.
+    fn slide_scene() -> Runtime<State> {
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == "np-slide").unwrap().1)(&mut s);
+        let mut rt = Runtime::new(s, crate::ui::view, (1360.0, 860.0), Env { system_dark: true, scale: 1.0 });
+        for _ in 0..30 {
+            rt.frame(DT);
+        }
+        rt
+    }
+
+    /// The overlay's own presented fill (its base colour, not the tint or picture on it).
+    fn np_fill(rt: &Runtime<State>) -> Option<rune::Color> {
+        rt.elements().into_iter().find(|e| e.key.as_deref() == Some("np") && !e.exiting).map(|e| e.fill)
+    }
+
+    /// 2026-11-09 screencast: with "Same as app", Now Playing waited about 230 ms for its own
+    /// copy of the content area's picture, which landed mid-slide (and was uploaded then). Now it
+    /// shows that very picture from its first frame.
+    #[test]
+    fn same_as_app_shows_the_app_picture_from_the_first_frame() {
+        let mut rt = slide_scene();
+        rt.update(|s, _| super::open(s));
+        rt.frame(DT);
+        assert!(rt.presented("np-bg").is_some(), "the picture is on the first frame of the slide");
+        let (mut app, mut np) = (None, None);
+        rt.update(|s, _| (app, np) = (s.backdrops.shown_id(Slot::App), s.backdrops.shown_id(Slot::NowPlaying)));
+        assert!(app.is_some());
+        assert_eq!(np, app, "Now Playing shares the content area's picture instead of rendering it again");
+    }
+
+    /// The same screencast: when the picture landed, the overlay's paint switched from the tint
+    /// gradient to a fill that sprang up from clear, so the page flashed through the sliding
+    /// overlay. The base stays opaque from the first frame, through a picture arriving late.
+    #[test]
+    fn the_overlay_base_stays_opaque_when_a_picture_arrives() {
+        let mut rt = slide_scene();
+        rt.update(|s, _| {
+            s.settings.appearance.np = NpBg::Tint;
+            super::open(s);
+        });
+        for i in 0..40 {
+            rt.frame(DT);
+            assert_eq!(np_fill(&rt).map(|c| c.a), Some(1.0), "tint, frame {i}");
+        }
+        assert!(rt.presented("np-tint").is_some());
+        // The picture becomes available while the overlay is up (as a render landing would).
+        rt.update(|s, _| s.settings.appearance.np = NpBg::App);
+        for i in 0..40 {
+            rt.frame(DT);
+            assert_eq!(np_fill(&rt).map(|c| c.a), Some(1.0), "picture arriving, frame {i}");
+        }
+        assert!(rt.presented("np-bg").is_some());
+        assert!(rt.presented("np-tint").is_none(), "the tint is gone once the picture is in");
+    }
+}

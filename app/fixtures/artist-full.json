@@ -1,0 +1,1382 @@
+{
+ "data": [
+  {
+   "id": "28673423",
+   "type": "artists",
+   "href": "/v1/catalog/us/artists/28673423",
+   "attributes": {
+    "name": "Mara Quell",
+    "genreNames": [
+     "Electronic"
+    ],
+    "artistBio": "Mara Quell is a <i>drum and bass</i> project from Perth, formed in 2002, whose\nmix of rock guitars, big-room synths and breakbeats took the genre to arenas. After a long pause the band returned in 2020 with new singles and a run of festival headline shows, and has kept releasing since.",
+    "artwork": {
+     "url": "https://is1-ssl.mzstatic.com/image/thumb/Features/v4/ar/{w}x{h}bb.{f}",
+     "width": 2400,
+     "height": 2400
+    },
+    "editorialArtwork": {
+     "bannerUber": {
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/Features/v4/ban/{w}x{h}{c}.{f}",
+      "width": 4320,
+      "height": 1080,
+      "bgColor": "0c0c10"
+     },
+     "storeFlowcase": {
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/Features/v4/sf/{w}x{h}{c}.{f}",
+      "width": 3200,
+      "height": 1200
+     }
+    },
+    "url": "https://music.apple.com/us/artist/mara-quell/28673423"
+   },
+   "relationships": {
+    "albums": {
+     "href": "/v1/catalog/us/artists/28673423/albums",
+     "data": []
+    }
+   },
+   "views": {
+    "latest-release": {
+     "href": "/v1/x",
+     "attributes": {
+      "title": "Latest Release"
+     },
+     "data": [
+      {
+       "id": "1099",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1099",
+       "attributes": {
+        "name": "Silent Engine",
+        "artistName": "Mara Quell",
+        "releaseDate": "2025-10-03",
+        "trackCount": 1,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/99/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1099",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1099"
+       }
+      }
+     ]
+    },
+    "top-songs": {
+     "href": "/v1/x",
+     "attributes": {
+      "title": "Top Songs"
+     },
+     "data": [
+      {
+       "id": "5000",
+       "type": "songs",
+       "attributes": {
+        "name": "Hold Your Colour",
+        "artistName": "Mara Quell",
+        "albumName": "Hold Your Colour",
+        "durationInMillis": 180000,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/0/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5000",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1000?i=5000"
+       }
+      },
+      {
+       "id": "5001",
+       "type": "songs",
+       "attributes": {
+        "name": "Blood Sugar",
+        "artistName": "Mara Quell",
+        "albumName": "Immersion",
+        "durationInMillis": 187919,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/1/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5001",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1001?i=5001"
+       }
+      },
+      {
+       "id": "5002",
+       "type": "songs",
+       "attributes": {
+        "name": "Watercolour",
+        "artistName": "Mara Quell",
+        "albumName": "In Silico",
+        "durationInMillis": 195838,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/2/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5002",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1002?i=5002"
+       }
+      },
+      {
+       "id": "5003",
+       "type": "songs",
+       "attributes": {
+        "name": "Encoder",
+        "artistName": "Mara Quell",
+        "albumName": "Elemental",
+        "durationInMillis": 203757,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/3/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5003",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1003?i=5003"
+       }
+      },
+      {
+       "id": "5004",
+       "type": "songs",
+       "attributes": {
+        "name": "Self vs Self",
+        "artistName": "Mara Quell",
+        "albumName": "Inertia",
+        "durationInMillis": 211676,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/4/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5004",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1004?i=5004"
+       }
+      },
+      {
+       "id": "5005",
+       "type": "songs",
+       "attributes": {
+        "name": "Midnight Runner",
+        "artistName": "Mara Quell",
+        "albumName": "Blood Sugar",
+        "durationInMillis": 219595,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/5/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5005",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1005?i=5005"
+       }
+      },
+      {
+       "id": "5006",
+       "type": "songs",
+       "attributes": {
+        "name": "In Silico",
+        "artistName": "Mara Quell",
+        "albumName": "Tarantula",
+        "durationInMillis": 227514,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/6/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5006",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1006?i=5006"
+       }
+      },
+      {
+       "id": "5007",
+       "type": "songs",
+       "attributes": {
+        "name": "Slam",
+        "artistName": "Mara Quell",
+        "albumName": "Slam",
+        "durationInMillis": 235433,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/7/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5007",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1007?i=5007"
+       }
+      },
+      {
+       "id": "5008",
+       "type": "songs",
+       "attributes": {
+        "name": "Granite",
+        "artistName": "Mara Quell",
+        "albumName": "Propane Nightmares",
+        "durationInMillis": 243352,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/8/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5008",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1008?i=5008"
+       }
+      },
+      {
+       "id": "5009",
+       "type": "songs",
+       "attributes": {
+        "name": "Fasten Your Seatbelt",
+        "artistName": "Mara Quell",
+        "albumName": "Hold Your Colour",
+        "durationInMillis": 251271,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/0/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5009",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1000?i=5009"
+       }
+      },
+      {
+       "id": "5010",
+       "type": "songs",
+       "attributes": {
+        "name": "Showdown",
+        "artistName": "Mara Quell",
+        "albumName": "Immersion",
+        "durationInMillis": 259190,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/1/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5010",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1001?i=5010"
+       }
+      },
+      {
+       "id": "5011",
+       "type": "songs",
+       "attributes": {
+        "name": "Paper Satellites",
+        "artistName": "Mara Quell",
+        "albumName": "In Silico",
+        "durationInMillis": 267109,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/2/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5011",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1002?i=5011"
+       }
+      },
+      {
+       "id": "5012",
+       "type": "songs",
+       "attributes": {
+        "name": "Inertia",
+        "artistName": "Mara Quell",
+        "albumName": "Elemental",
+        "durationInMillis": 275028,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/3/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5012",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1003?i=5012"
+       }
+      },
+      {
+       "id": "5013",
+       "type": "songs",
+       "attributes": {
+        "name": "The Island",
+        "artistName": "Mara Quell",
+        "albumName": "Inertia",
+        "durationInMillis": 282947,
+        "releaseDate": "2010-05-24",
+        "genreNames": [
+         "Electronic"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/4/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000
+        },
+        "playParams": {
+         "id": "5013",
+         "kind": "song"
+        },
+        "url": "https://music.apple.com/us/album/x/1004?i=5013"
+       }
+      }
+     ],
+     "next": "/v1/catalog/us/artists/28673423/view/top-songs?offset=14"
+    },
+    "full-albums": {
+     "href": "/v1/x",
+     "attributes": {
+      "title": "Albums"
+     },
+     "data": [
+      {
+       "id": "1000",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1000",
+       "attributes": {
+        "name": "Hold Your Colour",
+        "artistName": "Mara Quell",
+        "releaseDate": "2005-07-25",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/0/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1000",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1000"
+       }
+      },
+      {
+       "id": "1001",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1001",
+       "attributes": {
+        "name": "Immersion",
+        "artistName": "Mara Quell",
+        "releaseDate": "2008-05-12",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/1/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1001",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1001"
+       }
+      },
+      {
+       "id": "1002",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1002",
+       "attributes": {
+        "name": "In Silico",
+        "artistName": "Mara Quell",
+        "releaseDate": "2010-05-24",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/2/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1002",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1002"
+       }
+      },
+      {
+       "id": "1003",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1003",
+       "attributes": {
+        "name": "Elemental",
+        "artistName": "Mara Quell",
+        "releaseDate": "2020-11-13",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/3/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1003",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1003"
+       }
+      },
+      {
+       "id": "1004",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1004",
+       "attributes": {
+        "name": "Inertia",
+        "artistName": "Mara Quell",
+        "releaseDate": "2003-01-01",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/4/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1004",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1004"
+       }
+      },
+      {
+       "id": "1005",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1005",
+       "attributes": {
+        "name": "Blood Sugar",
+        "artistName": "Mara Quell",
+        "releaseDate": "1999-06-30",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/5/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1005",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1005"
+       }
+      },
+      {
+       "id": "1006",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1006",
+       "attributes": {
+        "name": "Tarantula",
+        "artistName": "Mara Quell",
+        "releaseDate": "2016-09-09",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/6/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1006",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1006"
+       }
+      },
+      {
+       "id": "1007",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1007",
+       "attributes": {
+        "name": "Slam",
+        "artistName": "Mara Quell",
+        "releaseDate": "2012-02-14",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/7/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1007",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1007"
+       }
+      },
+      {
+       "id": "1008",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1008",
+       "attributes": {
+        "name": "Propane Nightmares",
+        "artistName": "Mara Quell",
+        "releaseDate": "2023-10-06",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/8/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1008",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1008"
+       }
+      }
+     ],
+     "next": "/v1/catalog/us/artists/28673423/view/full-albums?offset=9"
+    },
+    "singles": {
+     "href": "/v1/x",
+     "attributes": {
+      "title": "Singles & EPs"
+     },
+     "data": [
+      {
+       "id": "1020",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1020",
+       "attributes": {
+        "name": "The Island (Single)",
+        "artistName": "Mara Quell",
+        "releaseDate": "2010-01-01",
+        "trackCount": 1,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/20/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1020",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1020"
+       }
+      },
+      {
+       "id": "1021",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1021",
+       "attributes": {
+        "name": "Watercolour - EP",
+        "artistName": "Mara Quell",
+        "releaseDate": "2011-02-02",
+        "trackCount": 4,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/21/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1021",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1021"
+       }
+      },
+      {
+       "id": "1022",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1022",
+       "attributes": {
+        "name": "Witchcraft - EP",
+        "artistName": "Mara Quell",
+        "releaseDate": "2012-03-03",
+        "trackCount": 4,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/22/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1022",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1022"
+       }
+      },
+      {
+       "id": "1023",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1023",
+       "attributes": {
+        "name": "Granite (Single)",
+        "artistName": "Mara Quell",
+        "releaseDate": "2013-04-04",
+        "trackCount": 1,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/23/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1023",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1023"
+       }
+      },
+      {
+       "id": "1024",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1024",
+       "attributes": {
+        "name": "Crush - EP",
+        "artistName": "Mara Quell",
+        "releaseDate": "2014-05-05",
+        "trackCount": 4,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/24/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1024",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1024"
+       }
+      },
+      {
+       "id": "1025",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1025",
+       "attributes": {
+        "name": "Salt in the Wounds - EP",
+        "artistName": "Mara Quell",
+        "releaseDate": "2015-06-06",
+        "trackCount": 4,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/25/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1025",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1025"
+       }
+      },
+      {
+       "id": "1026",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1026",
+       "attributes": {
+        "name": "Encoder (Single)",
+        "artistName": "Mara Quell",
+        "releaseDate": "2016-07-07",
+        "trackCount": 1,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/26/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1026",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1026"
+       }
+      },
+      {
+       "id": "1027",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1027",
+       "attributes": {
+        "name": "Halo - EP",
+        "artistName": "Mara Quell",
+        "releaseDate": "2017-08-08",
+        "trackCount": 4,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/27/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1027",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1027"
+       }
+      },
+      {
+       "id": "1028",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1028",
+       "attributes": {
+        "name": "Fasten Your Seatbelt - EP",
+        "artistName": "Mara Quell",
+        "releaseDate": "2018-09-09",
+        "trackCount": 4,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/28/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1028",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1028"
+       }
+      },
+      {
+       "id": "1029",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1029",
+       "attributes": {
+        "name": "Through the Loop (Single)",
+        "artistName": "Mara Quell",
+        "releaseDate": "2019-10-10",
+        "trackCount": 1,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/29/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1029",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1029"
+       }
+      },
+      {
+       "id": "1030",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1030",
+       "attributes": {
+        "name": "Comprachicos - EP",
+        "artistName": "Mara Quell",
+        "releaseDate": "2020-11-11",
+        "trackCount": 4,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/30/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1030",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1030"
+       }
+      },
+      {
+       "id": "1031",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1031",
+       "attributes": {
+        "name": "Self vs Self - EP",
+        "artistName": "Mara Quell",
+        "releaseDate": "2021-12-12",
+        "trackCount": 4,
+        "isSingle": true,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/31/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1031",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1031"
+       }
+      }
+     ]
+    },
+    "live-albums": {
+     "href": "/v1/x",
+     "attributes": {
+      "title": "Live Albums"
+     },
+     "data": []
+    },
+    "compilation-albums": {
+     "href": "/v1/x",
+     "attributes": {
+      "title": "Compilations"
+     },
+     "data": [
+      {
+       "id": "1040",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1040",
+       "attributes": {
+        "name": "The Reworks",
+        "artistName": "Mara Quell",
+        "releaseDate": "2018-03-02",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/40/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1040",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1040"
+       }
+      },
+      {
+       "id": "1041",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1041",
+       "attributes": {
+        "name": "Mara Quell: Greatest Hits",
+        "artistName": "Mara Quell",
+        "releaseDate": "",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/41/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1041",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1041"
+       }
+      }
+     ]
+    },
+    "appears-on-albums": {
+     "href": "/v1/x",
+     "attributes": {
+      "title": "Appears On"
+     },
+     "data": [
+      {
+       "id": "1050",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1050",
+       "attributes": {
+        "name": "Fabric Live 12 (Various Artists)",
+        "artistName": "Various Artists",
+        "releaseDate": "2011-01-15",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/50/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1050",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1050"
+       }
+      },
+      {
+       "id": "1051",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1051",
+       "attributes": {
+        "name": "Ministry Anthems (Various Artists)",
+        "artistName": "Various Artists",
+        "releaseDate": "2012-02-15",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/51/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1051",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1051"
+       }
+      },
+      {
+       "id": "1052",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1052",
+       "attributes": {
+        "name": "UKF Bass (Various Artists)",
+        "artistName": "Various Artists",
+        "releaseDate": "2013-03-15",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/52/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1052",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1052"
+       }
+      },
+      {
+       "id": "1053",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1053",
+       "attributes": {
+        "name": "Hospitality 2015 (Various Artists)",
+        "artistName": "Various Artists",
+        "releaseDate": "2014-04-15",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/53/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1053",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1053"
+       }
+      },
+      {
+       "id": "1054",
+       "type": "albums",
+       "href": "/v1/catalog/us/albums/1054",
+       "attributes": {
+        "name": "Winter Selection (Various Artists)",
+        "artistName": "Various Artists",
+        "releaseDate": "2015-05-15",
+        "trackCount": 10,
+        "isSingle": false,
+        "genreNames": [
+         "Electronic",
+         "Music"
+        ],
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/54/{w}x{h}bb.{f}",
+         "width": 3000,
+         "height": 3000,
+         "bgColor": "1a1a1a"
+        },
+        "playParams": {
+         "id": "1054",
+         "kind": "album"
+        },
+        "url": "https://music.apple.com/us/album/x/1054"
+       }
+      }
+     ]
+    },
+    "featured-playlists": {
+     "href": "/v1/x",
+     "attributes": {
+      "title": "Playlists"
+     },
+     "data": [
+      {
+       "id": "pl.0",
+       "type": "playlists",
+       "attributes": {
+        "name": "Mara Quell Essentials",
+        "curatorName": "Apple Music Electronic",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/60/{w}x{h}bb.{f}",
+         "width": 1080,
+         "height": 1080
+        },
+        "playParams": {
+         "id": "pl.0",
+         "kind": "playlist"
+        }
+       }
+      },
+      {
+       "id": "pl.1",
+       "type": "playlists",
+       "attributes": {
+        "name": "Mara Quell: Deep Cuts",
+        "curatorName": "Apple Music Electronic",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/61/{w}x{h}bb.{f}",
+         "width": 1080,
+         "height": 1080
+        },
+        "playParams": {
+         "id": "pl.1",
+         "kind": "playlist"
+        }
+       }
+      },
+      {
+       "id": "pl.2",
+       "type": "playlists",
+       "attributes": {
+        "name": "Inspired by Mara Quell",
+        "curatorName": "Apple Music Electronic",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/62/{w}x{h}bb.{f}",
+         "width": 1080,
+         "height": 1080
+        },
+        "playParams": {
+         "id": "pl.2",
+         "kind": "playlist"
+        }
+       }
+      }
+     ]
+    },
+    "similar-artists": {
+     "href": "/v1/x",
+     "attributes": {
+      "title": "Similar Artists"
+     },
+     "data": [
+      {
+       "id": "9000",
+       "type": "artists",
+       "attributes": {
+        "name": "Ines Rook",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/70/{w}x{h}bb.{f}",
+         "width": 2400,
+         "height": 2400
+        }
+       }
+      },
+      {
+       "id": "9001",
+       "type": "artists",
+       "attributes": {
+        "name": "Halflight",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/71/{w}x{h}bb.{f}",
+         "width": 2400,
+         "height": 2400
+        }
+       }
+      },
+      {
+       "id": "9002",
+       "type": "artists",
+       "attributes": {
+        "name": "Saltwater Kids",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/72/{w}x{h}bb.{f}",
+         "width": 2400,
+         "height": 2400
+        }
+       }
+      },
+      {
+       "id": "9003",
+       "type": "artists",
+       "attributes": {
+        "name": "Overpass",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/73/{w}x{h}bb.{f}",
+         "width": 2400,
+         "height": 2400
+        }
+       }
+      },
+      {
+       "id": "9004",
+       "type": "artists",
+       "attributes": {
+        "name": "Echo Park Trio",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/74/{w}x{h}bb.{f}",
+         "width": 2400,
+         "height": 2400
+        }
+       }
+      },
+      {
+       "id": "9005",
+       "type": "artists",
+       "attributes": {
+        "name": "Kites & Engines",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/75/{w}x{h}bb.{f}",
+         "width": 2400,
+         "height": 2400
+        }
+       }
+      },
+      {
+       "id": "9006",
+       "type": "artists",
+       "attributes": {
+        "name": "Night Signal",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/76/{w}x{h}bb.{f}",
+         "width": 2400,
+         "height": 2400
+        }
+       }
+      },
+      {
+       "id": "9007",
+       "type": "artists",
+       "attributes": {
+        "name": "Low Static",
+        "artwork": {
+         "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/v4/aa/77/{w}x{h}bb.{f}",
+         "width": 2400,
+         "height": 2400
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

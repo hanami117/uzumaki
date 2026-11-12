@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Uzumaki
+GenericName=Music Player
+Comment=A Rust, GPU-rendered frontend for Apple Music
+Exec=uzumaki
+Icon=io.github.hanami117.uzumaki
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;apple;player;uzumaki;
+StartupWMClass=io.github.hanami117.uzumaki
+StartupNotify=true

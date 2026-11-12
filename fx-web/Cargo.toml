@@ -1,0 +1,15 @@
+[package]
+name = "uzumaki-fx-web"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+description = "uzumaki-fx as a WebAssembly module with a plain C ABI, for the website's demo (see docs/ROADMAP.md, \"fx-web\")"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+uzumaki-fx = { path = "../fx" }
+image = { version = "0.25", default-features = false }

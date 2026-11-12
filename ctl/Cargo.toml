@@ -1,0 +1,26 @@
+[package]
+name = "uzumaki-ctl"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+description = "uzu: an mpc-style command line for a running Uzumaki, and the control protocol it speaks"
+
+[lib]
+name = "uzumaki_ctl"
+path = "src/lib.rs"
+
+[[bin]]
+name = "uzu"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Terminal size (TIOCGWINSZ), raw-free signal handling for `uzu watch`. Already in the lock file.
+libc = "0.2"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+# The cover in the player (`tui/cover.rs`): kitty, sixel and iTerm2 graphics, halfblocks otherwise.
+# No `chafa` (it links libchafa); `image` decodes the cached JPEG (PNG comes with ratatui-image).
+ratatui-image = { version = "11.1", default-features = false, features = ["crossterm"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

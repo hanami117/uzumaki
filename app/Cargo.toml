@@ -1,0 +1,44 @@
+[package]
+name = "uzumaki"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+description = "Uzumaki: a Rust, GPU-rendered frontend for Apple Music (Rune UI)"
+
+[dependencies]
+# Rune is pre-release: pin a dev rev (same rev tsun builds against).
+rune = { git = "https://github.com/anomalyco/rune", rev = "f3d04f3f2069d177d04c963b0ba9f6b2065e46eb", features = ["native-file-dialog"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "3"
+# Same zbus 5 that Rune's accessibility stack already builds (no extra copy); blocking API for MPRIS.
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+uzumaki-fx = { path = "../fx" }
+# The `uzu` control protocol and socket (the app answers, `uzu` asks).
+uzumaki-ctl = { path = "../ctl" }
+roxmltree = "0.20"
+# Local files (batch D): in-process playback and tags. rodio drives cpal (ALSA → PipeWire via
+# pipewire-alsa) and decodes with symphonia; lofty reads tags and embedded covers.
+rodio = { version = "0.21", default-features = false, features = ["playback", "symphonia-flac", "symphonia-mp3", "symphonia-aac", "symphonia-isomp4", "symphonia-alac", "symphonia-vorbis", "symphonia-ogg", "symphonia-wav", "symphonia-pcm"] }
+lofty = "0.25"
+# Script hooks (hooks.rs): geteuid, killpg. On macOS also stderr into ~/Library/Logs/Uzumaki (logfile.rs): dup2.
+libc = "0.2"
+
+# macOS only, on the objc2 0.6 stack Rune already builds (minimal features: no extra frameworks).
+# Media keys and Control Center (nowplaying.rs): MPRemoteCommandCenter / MPNowPlayingInfoCenter.
+# The menu bar icon (tray_mac.rs): NSStatusItem and NSMenu.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSString", "NSDictionary", "NSValue", "NSArray", "NSData", "NSProcessInfo", "NSGeometry", "NSObject"] }
+objc2-media-player = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSImage", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSMenu", "NSMenuItem"] }
+block2 = "0.6"
+dispatch2 = "0.3"
+
+# macOS: the menu bar's AppKit tidy on a real NSApplication menu, on the main thread, with no
+# window and no event loop (the same pattern as Rune's own menu tests). A no-op elsewhere.
+[[test]]
+name = "menu_bar_macos"
+harness = false
