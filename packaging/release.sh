@@ -4,6 +4,15 @@
 #
 #   packaging/release.sh             checks, DMG (macOS), source tarball, checksums, notes, latest.json
 #   packaging/release.sh --no-dmg    the same without the DMG (e.g. on Linux)
+#   packaging/release.sh --assets DIR
+#                                    reuse the files already on the (draft) release instead of
+#                                    making them again: DIR holds what `gh release download <tag>`
+#                                    fetched. The source tarball is taken from DIR, not rebuilt (its
+#                                    bytes depend on the machine's git/gzip, and the AUR pins its
+#                                    sha256), after checking that it unpacks to exactly the tag;
+#                                    the AppImage files in DIR are copied too, so SHA256SUMS lists
+#                                    everything. The usual split: tarball + AppImage on Linux, then
+#                                    the DMG with --assets on the Mac.
 #
 # Before: the version in Cargo.toml's [workspace.package] and bridge/package.json, the build
 # number in BUILD, a CHANGELOG.md section "## [<version>]", everything committed, and an
@@ -40,12 +49,19 @@ REPO=hanami117/uzumaki
 DMG_LATEST=Uzumaki-macOS.dmg
 APPIMAGE_LATEST=Uzumaki-x86_64.AppImage
 dmg=1
-case "${1:-}" in
-    --no-dmg) dmg=0 ;;
-    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit ;;
-    "") ;;
-    *) die "unknown option '$1' (try --help)" ;;
-esac
+assets=
+while (($#)); do
+    case "$1" in
+        --no-dmg) dmg=0 ;;
+        --assets)
+            [[ -n ${2:-} && -d $2 ]] || die "--assets needs a folder (gh release download <tag> -D <folder>)"
+            assets=$(cd "$2" && pwd)
+            shift ;;
+        -h|--help) sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'; exit ;;
+        *) die "unknown option '$1' (try --help)" ;;
+    esac
+    shift
+done
 
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 
@@ -97,14 +113,27 @@ if ((dmg)); then
 fi
 
 # --- Source tarball -----------------------------------------------------------------------------
-say "Making the source tarball from $tag"
 src=uzumaki-$release.tar.gz
-git archive --format=tar.gz --prefix="uzumaki-$version/" -o "$out/$src" "$tag"
+if [[ -n $assets ]]; then
+    say "Reusing $src from $assets (not rebuilt)"
+    [[ -f $assets/$src ]] || die "no $src in $assets"
+    # Same files as the tag? Compare the uncompressed tar streams (git archive's tar is stable).
+    cmp -s <(gzip -dc "$assets/$src") <(git archive --format=tar --prefix="uzumaki-$version/" "$tag") ||
+        die "$assets/$src doesn't unpack to exactly $tag (git archive): wrong file or wrong tag"
+    cp "$assets/$src" "$out/"
+    # The AppImage built on Linux (with its stable-name copy and .zsync), so SHA256SUMS has it.
+    for f in "Uzumaki-$release-x86_64.AppImage" "$APPIMAGE_LATEST" "$APPIMAGE_LATEST.zsync"; do
+        if [[ -f $assets/$f ]]; then cp "$assets/$f" "$out/"; else warn "no $f in $assets"; fi
+    done
+else
+    say "Making the source tarball from $tag"
+    git archive --format=tar.gz --prefix="uzumaki-$version/" -o "$out/$src" "$tag"
+fi
 
 # --- Checksums ----------------------------------------------------------------------------------
 say "Writing checksums"
 : >"$out/SHA256SUMS"
-for f in "$out"/*.dmg "$out"/*.tar.gz; do
+for f in "$out"/*.dmg "$out"/*.tar.gz "$out"/*.AppImage; do
     [[ -e $f ]] || continue
     name=$(basename "$f")
     sum=$(sha256 "$f")
@@ -133,7 +162,8 @@ say "Writing release notes from CHANGELOG.md"
   app is not notarized, so on first launch macOS refuses it: open **System Settings → Privacy & Security** and click
   **Open Anyway** (or run \`xattr -dr com.apple.quarantine /Applications/Uzumaki.app\`).
   With Homebrew: \`brew install --cask hanami117/uzumaki/uzumaki\`.
-- **Arch Linux**: \`yay -S uzumaki\` (AUR, builds from source).
+- **Arch Linux**: \`yay -S uzumaki\` (AUR, builds from source) or \`yay -S uzumaki-bin\` (AUR, the prebuilt
+  AppImage's files).
 - **Other Linux** (x86_64): download \`Uzumaki-$release-x86_64.AppImage\`, \`chmod +x\` it and run it. It needs FUSE
   (\`fuse2\` or \`fuse3\`); without it, run it with \`--appimage-extract-and-run\`. Or build from source: download
   \`$src\`, unpack it and run \`./install.sh\` (needs Rust, Node.js and npm).
@@ -169,6 +199,18 @@ python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$out/latest.json" 2>
 if ((build == 1)); then cask_version=$version; else cask_version=$version,$build; fi
 shopt -s nullglob
 files=$(printf '%s ' "$out"/*.dmg "$out"/*.tar.gz "$out"/*.sha256 "$out/SHA256SUMS")
+if [[ -n $assets ]]; then
+    new=$(printf '%s ' "$out"/*.dmg "$out"/*.dmg.sha256 "$out/SHA256SUMS")
+    cat <<DONE
+
+$(say "Ready in $out. Nothing was published.")
+
+The tarball and the AppImage are already on the release; add the rest (SHA256SUMS replaces the old one):
+
+   gh release upload $tag --repo $REPO --clobber $new
+DONE
+    exit 0
+fi
 cat <<DONE
 
 $(say "Ready in $out. Nothing was published.")
