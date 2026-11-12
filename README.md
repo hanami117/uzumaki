@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="site/assets/icon.svg" width="96" alt="Uzumaki icon">
+  <img src="site/assets/icon-coral.svg" width="96" alt="Uzumaki icon">
 </p>
 
 <h1 align="center">Uzumaki</h1>
