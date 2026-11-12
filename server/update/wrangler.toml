@@ -21,4 +21,4 @@ LATEST_SOURCE = "https://getuzumaki.app/latest.json"
 binding = "DB"
 database_name = "uzumaki-updates"
 # From `wrangler d1 create uzumaki-updates`. Not a secret, but specific to one account.
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "557de934-a57a-4ff1-8278-a0f1bd95eb05"
