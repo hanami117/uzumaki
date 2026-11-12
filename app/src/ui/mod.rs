@@ -164,10 +164,10 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
     }
     // Rows snapped to their old places last frame start moving (render-side, no view run).
     s.ui.up_next_anim.poll(t, tx);
-    let a = dnd::poll(s, t, tx);
     // Data that landed since the last frame makes this frame's commit instant: the lyrics
-    // views then hold a line change back a frame so it glides (see `State::landing`).
+    // views and a pin drag then hold a change back a frame so it glides (see `State::landing`).
     let landed = crate::state::take_landed();
+    let a = dnd::poll(s, t, landed, tx);
     let b = now_playing::poll(s, landed, tx);
     let c = right_panel::poll(s, landed, tx);
     let d = new_playlist::poll(s);

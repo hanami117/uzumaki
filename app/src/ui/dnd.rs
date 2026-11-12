@@ -54,8 +54,15 @@ pub struct Over {
 pub struct PinDrag {
     pub id: String,
     pub from: usize,
+    /// The slot the neighbours make room at (what the view shows).
     pub to: usize,
+    /// The slot under the pointer. `poll` moves `to` here, a frame later when data landed in
+    /// this frame: that frame's commit is instant and the neighbours would jump.
+    want: usize,
     pub pitch: f32,
+    /// Released: the pointer's travel and whether the drag was cancelled. `poll` drops it, a
+    /// frame later when data landed in this frame, like `want`.
+    released: Option<(f32, bool)>,
 }
 
 enum Settle {
@@ -177,12 +184,16 @@ fn pin_drag(s: &mut State, d: &mut Drag, tx: &mut Tx, id: &str, k: usize) {
         }
         Phase::Move => {
             let dd = &mut s.ui.dnd;
-            let Some(p) = dd.pin.as_mut() else {
+            let Some(p) = dd.pin.as_mut().filter(|p| p.released.is_none()) else {
+                if dd.pin.is_some() {
+                    tx.live_only();
+                    return;
+                }
                 if dist(d) < PIN_SLOP || n < 2 {
                     tx.live_only();
                     return;
                 }
-                dd.pin = Some(PinDrag { id: id.to_string(), from: k, to: k, pitch: d.h.max(1.0) });
+                dd.pin = Some(PinDrag { id: id.to_string(), from: k, to: k, want: k, pitch: d.h.max(1.0), released: None });
                 dd.lifted = Some(id.to_string());
                 dd.settle = Settle::None;
                 dd.pin_dy.snap([0.0, d.dy]);
@@ -191,36 +202,45 @@ fn pin_drag(s: &mut State, d: &mut Drag, tx: &mut Tx, id: &str, k: usize) {
                 return;
             };
             dd.pin_dy.snap([0.0, d.dy]);
-            let to = (p.from as f32 + (d.dy / p.pitch).round()).clamp(0.0, (n - 1) as f32) as usize;
-            if to != p.to {
-                p.to = to;
-                dd.rev += 1;
-                tx.animated();
-            } else {
-                tx.live_only();
+            p.want = (p.from as f32 + (d.dy / p.pitch).round()).clamp(0.0, (n - 1) as f32) as usize;
+            if p.want != p.to {
+                // `poll` moves the neighbours, this frame unless data landed in it.
+                tx.wake_after(Duration::ZERO);
             }
+            tx.live_only();
         }
         Phase::Up => {
-            let Some(p) = s.ui.dnd.pin.take() else {
+            let dd = &mut s.ui.dnd;
+            let Some(p) = dd.pin.as_mut().filter(|p| p.released.is_none()) else {
                 tx.live_only();
                 return;
             };
-            let moved = !d.cancelled() && p.to != p.from;
-            // Where the row sits relative to the slot it lands in, so it glides in from there.
-            let residual = if moved { d.dy - (p.to as f32 - p.from as f32) * p.pitch } else { d.dy };
-            if moved {
-                s.move_pin_to(&p.id, p.to);
-            }
-            let dd = &mut s.ui.dnd;
-            dd.pin_dy.snap([0.0, residual]);
-            dd.settle = Settle::Kick;
+            // `poll` drops it, this frame unless data landed in it. The click that ends the drag
+            // is swallowed now.
+            p.released = Some((d.dy, d.cancelled()));
             dd.swallow = true;
             dd.swallow_aged = false;
-            dd.rev += 1;
-            tx.animated();
-            tx.wake_after(TICK);
+            tx.wake_after(Duration::ZERO);
+            tx.live_only();
         }
     }
+}
+
+/// The released pin `p` lands in the slot under the pointer (`poll`, in an animated commit).
+fn drop_pin(s: &mut State, p: PinDrag) {
+    let (dy, cancelled) = p.released.unwrap_or((0.0, true));
+    // The slot under the pointer, even if the neighbours haven't made room there yet.
+    if !cancelled && p.want != p.from {
+        s.move_pin_to(&p.id, p.want);
+    }
+    // The drop moves the row to its new slot in the (virtual) list. Rune carries that move over
+    // as an offset from its old slot that springs away (as for the neighbours), so the live
+    // offset keeps the drag's whole travel from the old slot: the row is drawn where it was
+    // released, then both settle to 0 in the new slot.
+    let dd = &mut s.ui.dnd;
+    dd.pin_dy.snap([0.0, dy]);
+    dd.settle = Settle::Kick;
+    dd.rev += 1;
 }
 
 // ---- songs ----
@@ -428,15 +448,34 @@ pub fn sidebar_scroll(s: &State, e: El) -> El {
 
 /// `AppSpec::poll`'s share: auto-scroll ticks and a dropped pin settling. True when the view
 /// must rebuild.
-pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
+/// It also moves a dragged pin's neighbours to the slot under the pointer and drops a released
+/// pin. `landed`: this frame's commit is instant (`State::landing`), so both wait a frame (the
+/// neighbours would jump, the dropped row would land off its drawn place).
+pub fn poll(s: &mut State, t: f64, landed: bool, tx: &mut Tx) -> bool {
     let dt = (t - s.ui.dnd.last_t).clamp(0.0, 0.05) as f32;
     s.ui.dnd.last_t = t;
+    let dd = &mut s.ui.dnd;
+    let mut dirty = false;
+    let pending = dd.pin.as_ref().is_some_and(|p| p.want != p.to || p.released.is_some());
+    let mut dropped = false;
+    if pending && landed {
+        tx.wake_after(Duration::ZERO);
+    } else if pending {
+        dirty = true;
+        tx.animated();
+        if let Some(p) = dd.pin.take_if(|p| p.released.is_some()) {
+            drop_pin(s, p);
+            dropped = true;
+        } else if let Some(p) = dd.pin.as_mut() {
+            p.to = p.want;
+            dd.rev += 1;
+        }
+    }
     let dd = &mut s.ui.dnd;
     if dd.swallow && std::mem::replace(&mut dd.swallow_aged, true) {
         dd.swallow = false;
         dd.swallow_aged = false;
     }
-    let mut dirty = false;
     if dd.active && dd.scroll_v != 0.0 {
         let [off, max, _, _] = dd.scroll.get();
         let to = (off + dd.scroll_v * dt.max(0.001)).clamp(0.0, max);
@@ -451,6 +490,8 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
         tx.wake_after(TICK);
     }
     match dd.settle {
+        // The next poll: the drop's frame draws the row where it was released first.
+        Settle::Kick if dropped => tx.wake_after(TICK),
         Settle::Kick => {
             dd.pin_dy.set([0.0, 0.0]);
             dd.settle = Settle::Clear(t + SETTLE_SECS);
@@ -490,7 +531,7 @@ pub fn ghost(s: &State) -> El {
 pub fn scene_drag_pin(s: &mut State, from: usize, to: usize, dy: f32) {
     let id = s.settings.pins[from].id.clone();
     let dd = &mut s.ui.dnd;
-    dd.pin = Some(PinDrag { id: id.clone(), from, to, pitch: 34.0 });
+    dd.pin = Some(PinDrag { id: id.clone(), from, to, want: to, pitch: 34.0, released: None });
     dd.lifted = Some(id);
     dd.pin_dy.snap([0.0, dy]);
     dd.rev += 1;
@@ -522,6 +563,7 @@ mod tests {
         let mut s = State::offline();
         (crate::scenes::SCENES.iter().find(|(n, _)| *n == scene).unwrap().1)(&mut s);
         let mut rt = Runtime::new(s, crate::ui::view, (1180.0, 900.0), Env { system_dark: true, scale: 1.0 });
+        rt.poll = Some(crate::ui::poll); // as `AppSpec::poll` in the app
         rt.frame(0.0);
         rt
     }
@@ -584,6 +626,7 @@ mod tests {
         (crate::scenes::SCENES.iter().find(|(n, _)| *n == "sidebar-pins").unwrap().1)(&mut s);
         s.settings.sidebar_collapsed = true;
         let mut rt = Runtime::new(s, crate::ui::view, (1180.0, 1400.0), Env { system_dark: true, scale: 1.0 });
+        rt.poll = Some(crate::ui::poll);
         rt.frame(0.0);
         step(&mut rt);
         assert_eq!(pin_ids(&mut rt), ["a2", "ar12", "ra.3"]);
@@ -615,6 +658,7 @@ mod tests {
             s.art.test_arrive(&art(i), crate::art::SMALL_PX, 8, [200, 40 * i as u8, 40]);
         }
         let mut rt = Runtime::new(s, crate::ui::view, (1180.0, 900.0), Env { system_dark: true, scale: 1.0 });
+        rt.poll = Some(crate::ui::poll);
         rt.frame(0.0);
         // Past the thumbnails' first fade-in.
         for _ in 0..60 {
@@ -623,38 +667,146 @@ mod tests {
         rt
     }
 
+    /// Both pin setups: the scene's (album, artist, station) and three playlists with loaded
+    /// thumbnails (`Art::held`). Ids top to bottom.
+    fn pin_setups() -> [(Runtime<State>, [&'static str; 3]); 2] {
+        [(rt("sidebar-pins"), ["a2", "ar12", "ra.3"]), (rt_pinned_pictures(), ["p.pin0", "p.pin1", "p.pin2"])]
+    }
+
+    /// Presses the bottom pin and lifts it (past the slop, still in its slot). Returns its centre
+    /// and the row pitch.
+    fn lift_last(rt: &mut Runtime<State>, ids: &[&str; 3]) -> (f32, f32, f32) {
+        let (x, y) = center(rt, &format!("pin-{}", ids[2]));
+        let pitch = center(rt, &format!("pin-{}", ids[1])).1 - center(rt, &format!("pin-{}", ids[0])).1;
+        rt.pointer_move(x, y);
+        step(rt);
+        rt.pointer_down(x, y);
+        rt.pointer_move(x, y - 8.0);
+        step(rt);
+        (x, y, pitch)
+    }
+
+    /// The middle pin's drawn y, relative to `start`, over 30 frames. `landing`: data lands
+    /// (`State::landing`, an instant commit) in the first two frames: the one the pointer event
+    /// is handled in and the next, where `poll` moves the neighbours.
+    fn middle_track(rt: &mut Runtime<State>, ids: &[&str; 3], start: f32, landing: bool) -> Vec<f32> {
+        (0..30)
+            .map(|f| {
+                if landing && f == 1 {
+                    rt.update(|s, tx| s.landing(tx));
+                }
+                rt.frame(1.0 / 60.0);
+                pin_y(rt, ids[1]) - start
+            })
+            .collect()
+    }
+
+    fn assert_slides(ys: &[f32], to: f32, what: &str) {
+        assert!((ys[ys.len() - 1] - to).abs() < 0.5, "{what}: reaches its new slot: {ys:?}");
+        let between = ys.iter().filter(|d| (**d - to).abs() > 0.5 && d.abs() > 0.5).count();
+        assert!(between >= 4, "{what}: slides over several frames, not a jump: {ys:?}");
+    }
+
     /// While a pin is dragged past its neighbours, they slide aside over several frames
-    /// instead of jumping to their new slot, with and without loaded thumbnails (`Art::held`).
+    /// instead of jumping to their new slot.
     #[test]
     fn neighbours_slide_aside_while_a_pin_is_dragged() {
-        for pictures in [false, true] {
-            let (mut rt, ids) = if pictures {
-                (rt_pinned_pictures(), ["p.pin0", "p.pin1", "p.pin2"])
-            } else {
-                (rt("sidebar-pins"), ["a2", "ar12", "ra.3"])
-            };
-            let [first, middle, last] = ids.map(|i| format!("pin-{i}"));
-            let (x, y) = center(&rt, &last);
-            let pitch = center(&rt, &middle).1 - center(&rt, &first).1;
-            rt.pointer_move(x, y);
-            step(&mut rt);
-            rt.pointer_down(x, y);
-            // Lift it (past the slop), still in its own slot.
-            rt.pointer_move(x, y - 8.0);
-            step(&mut rt);
+        for (mut rt, ids) in pin_setups() {
+            let (x, y, pitch) = lift_last(&mut rt, &ids);
             let start = pin_y(&rt, ids[1]);
             // Over the row above: the middle one steps down by one pitch.
             rt.pointer_move(x, y - pitch * 0.9);
-            let mut ys = Vec::new();
-            for _ in 0..30 {
-                rt.frame(1.0 / 60.0);
-                ys.push(pin_y(&rt, ids[1]) - start);
-            }
-            assert!((ys[29] - pitch).abs() < 0.5, "pictures {pictures}: the middle pin reaches its new slot: {ys:?}");
-            let between = ys.iter().filter(|d| **d > 0.5 && **d < pitch - 0.5).count();
-            assert!(between >= 4, "pictures {pictures}: the middle pin slides over several frames, not a jump: {ys:?}");
+            let ys = middle_track(&mut rt, &ids, start, false);
+            assert_slides(&ys, pitch, &format!("{ids:?} middle pin"));
             rt.pointer_up(x, y - pitch * 0.9);
             step(&mut rt);
+        }
+    }
+
+    /// A bridge message landing (`State::landing`, an instant commit) in the very frame the
+    /// dragged pin changes slot must not make its neighbours jump.
+    #[test]
+    fn neighbours_slide_even_when_data_lands_in_the_same_frame() {
+        for (mut rt, ids) in pin_setups() {
+            let (x, y, pitch) = lift_last(&mut rt, &ids);
+            let start = pin_y(&rt, ids[1]);
+            rt.update(|s, tx| s.landing(tx));
+            rt.pointer_move(x, y - pitch * 0.9);
+            let ys = middle_track(&mut rt, &ids, start, true);
+            assert_slides(&ys, pitch, &format!("{ids:?} middle pin, data landing"));
+            rt.pointer_up(x, y - pitch * 0.9);
+            step(&mut rt);
+        }
+    }
+
+    /// Released, the dragged pin settles from where it was dropped into its new slot: its
+    /// drawn y is continuous across the release and glides over several frames; the
+    /// neighbours, already in their new places, don't move. (It used to be drawn near its old
+    /// slot on release and slide ~80 pt from there.) Also when data lands in the release frame.
+    #[test]
+    fn a_dropped_pin_settles_from_where_it_was_released() {
+        for ((mut rt, ids), landing) in pin_setups().into_iter().chain(pin_setups()).zip([false, false, true, true]) {
+            let slot0 = pin_y(&rt, ids[0]);
+            let (x, y, pitch) = lift_last(&mut rt, &ids);
+            for i in 1..=10 {
+                rt.pointer_move(x, y - pitch * 1.6 * i as f32 / 10.0);
+                rt.frame(1.0 / 60.0);
+            }
+            for _ in 0..40 {
+                rt.frame(1.0 / 60.0);
+            }
+            let ys = |rt: &Runtime<State>| ids.map(|i| pin_y(rt, i));
+            let before = ys(&rt);
+            if landing {
+                rt.update(|s, tx| s.landing(tx));
+            }
+            rt.pointer_up(x, y - pitch * 1.6);
+            let mut track = vec![before];
+            for f in 0..40 {
+                if landing && f == 1 {
+                    rt.update(|s, tx| s.landing(tx));
+                }
+                rt.frame(1.0 / 60.0);
+                track.push(ys(&rt));
+            }
+            let what = format!("{ids:?} landing {landing}: {track:?}");
+            assert_eq!(pin_ids(&mut rt), [ids[2], ids[0], ids[1]], "{what}");
+            for w in track.windows(2) {
+                assert!((w[1][2] - w[0][2]).abs() < 6.0, "the dropped pin moves smoothly, no jump: {what}");
+                for n in 0..2 {
+                    assert!((w[1][n] - before[n]).abs() < 0.5, "the neighbours stay put: {what}");
+                }
+            }
+            let dropped: Vec<f32> = track.iter().map(|r| r[2] - slot0).collect();
+            assert!(dropped[dropped.len() - 1].abs() < 0.5, "it ends in the top slot: {what}");
+            assert!(dropped.iter().filter(|d| d.abs() > 0.5).count() >= 4, "it glides there over several frames: {what}");
+        }
+    }
+
+    /// Released while its neighbours are still stepping aside: they go on from where they are
+    /// drawn, no jump.
+    #[test]
+    fn a_quick_drop_lets_the_neighbours_finish_their_slide() {
+        for (mut rt, ids) in pin_setups() {
+            let (x, y, pitch) = lift_last(&mut rt, &ids);
+            rt.pointer_move(x, y - pitch * 0.9);
+            for _ in 0..3 {
+                rt.frame(1.0 / 60.0);
+            }
+            let ys = |rt: &Runtime<State>| ids.map(|i| pin_y(rt, i));
+            let mut track = vec![ys(&rt)];
+            rt.pointer_up(x, y - pitch * 0.9);
+            for _ in 0..40 {
+                rt.frame(1.0 / 60.0);
+                track.push(ys(&rt));
+            }
+            let what = format!("{ids:?}: {track:?}");
+            assert_eq!(pin_ids(&mut rt), [ids[0], ids[2], ids[1]], "{what}");
+            for w in track.windows(2) {
+                for n in 0..3 {
+                    assert!((w[1][n] - w[0][n]).abs() < 8.0, "row {n} moves smoothly across the drop: {what}");
+                }
+            }
         }
     }
 
@@ -779,10 +931,8 @@ mod tests {
         let top = |rt: &Runtime<State>| rt.presented("pl-p.0").unwrap().0[1];
         let before = top(&rt);
         drag(&mut rt, "t5-pl-5", (110.0, 805.0), false);
-        let mut t = 1.0;
+        // The runtime polls before every frame (`ui::poll`), as the app does.
         for _ in 0..90 {
-            t += 1.0 / 60.0;
-            rt.update_if(|s, tx| crate::ui::poll(s, t, tx));
             rt.frame(1.0 / 60.0);
         }
         assert!(top(&rt) < before - 200.0, "scrolled {}", before - top(&rt));
