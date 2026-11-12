@@ -11,8 +11,10 @@
 #
 # homebrew/cask proper needs a notarized app; the tap doesn't. The app is signed ad hoc, so the
 # first launch is refused by Gatekeeper (the caveats below say what to do).
-# The app's update notice sees the cask's receipt (Caskroom/uzumaki/.metadata) and says
-# "update with your package manager" instead of offering the DMG (app/src/update.rs).
+# The cask installs the same DMG as the website, so no build-time channel can be set here. The app
+# sees the cask's receipt (Caskroom/uzumaki/.metadata) instead: its update notice says "Update with
+# your package manager: brew update && brew upgrade --cask uzumaki" instead of offering the DMG,
+# and its update check reports the channel "homebrew" (app/src/update.rs).
 cask "uzumaki" do
   version "0.1.0"
   # FILL AT RELEASE: the DMG's sha256 (packaging/release.sh prints it).

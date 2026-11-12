@@ -1,10 +1,12 @@
 // Uzumaki's update endpoint (a Cloudflare Worker).
 //
-//   GET /latest.json?v=0.2.0&os=linux&arch=x86_64&ch=appimage
+//   GET /latest.json?v=0.2.0&os=linux&arch=x86_64&ch=appimage[&w=1][&m=1]
 //
 // answers what the newest release is (the site's own latest.json, passed through) and adds one to
-// a counter for that day (UTC) and that (version, os, arch, channel). That counter is the only
-// thing kept: no IP address, no install id, no cookie, no user agent, no time finer than the day.
+// a counter for that day (UTC) and that (version, os, arch, channel). `w=1` (the app's first check
+// of the ISO week, UTC) and `m=1` (its first of the calendar month) add one to two more counters in
+// the same row, so weekly and monthly actives can be read without any id. Those counters are the
+// only thing kept: no IP address, no install id, no cookie, no user agent, no time finer than the day.
 // A request without a readable version and OS is answered but not counted, and so is one with
 // `repeat=1` (the app sends it when it already checked earlier that day, e.g. "Check now").
 //
@@ -33,7 +35,14 @@ export function bucket(params) {
   const os = params.get("os") || "";
   if (!VERSION.test(version) || !OS.has(os)) return null;
   const pick = (value, allowed) => (allowed.has(value) ? value : "unknown");
-  return { version, os, arch: pick(params.get("arch"), ARCH), channel: pick(params.get("ch"), CHANNEL) };
+  return {
+    version,
+    os,
+    arch: pick(params.get("arch"), ARCH),
+    channel: pick(params.get("ch"), CHANNEL),
+    week: params.get("w") === "1" ? 1 : 0,
+    month: params.get("m") === "1" ? 1 : 0,
+  };
 }
 
 /** The UTC day, `2026-11-12`. */
@@ -54,11 +63,11 @@ export function normalize(latest) {
 }
 
 const UPSERT =
-  "INSERT INTO checks (day, version, os, arch, channel, n) VALUES (?1, ?2, ?3, ?4, ?5, 1) " +
-  "ON CONFLICT (day, version, os, arch, channel) DO UPDATE SET n = n + 1";
+  "INSERT INTO checks (day, version, os, arch, channel, n, w, m) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7) " +
+  "ON CONFLICT (day, version, os, arch, channel) DO UPDATE SET n = n + 1, w = w + excluded.w, m = m + excluded.m";
 
 export async function count(db, today, b) {
-  await db.prepare(UPSERT).bind(today, b.version, b.os, b.arch, b.channel).run();
+  await db.prepare(UPSERT).bind(today, b.version, b.os, b.arch, b.channel, b.week, b.month).run();
 }
 
 function json(body, status = 200, extra = {}) {
@@ -106,17 +115,23 @@ async function stats(request, env, now) {
   const days = Number.isFinite(asked) ? Math.min(Math.max(asked, 1), MAX_STATS_DAYS) : 30;
   const from = day(new Date(now.getTime() - (days - 1) * 86_400_000));
   const { results } = await env.DB.prepare(
-    "SELECT day, version, os, arch, channel, n FROM checks WHERE day >= ?1 " +
+    "SELECT day, version, os, arch, channel, n, w, m FROM checks WHERE day >= ?1 " +
       "ORDER BY day DESC, n DESC, version, os, arch, channel",
   )
     .bind(from)
     .all();
   const perDay = new Map();
-  for (const r of results) perDay.set(r.day, (perDay.get(r.day) || 0) + r.n);
+  for (const r of results) {
+    const t = perDay.get(r.day) || { day: r.day, n: 0, w: 0, m: 0 };
+    t.n += r.n;
+    t.w += r.w || 0;
+    t.m += r.m || 0;
+    perDay.set(r.day, t);
+  }
   return json({
     from,
     to: day(now),
-    per_day: [...perDay].map(([d, n]) => ({ day: d, n })),
+    per_day: [...perDay.values()],
     rows: results,
   });
 }

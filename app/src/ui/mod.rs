@@ -388,7 +388,8 @@ fn banners(s: &State) -> El {
 }
 
 /// A newer version is out (`update.rs`): a quiet banner. What's new and Download open the
-/// browser; nothing is downloaded by the app. Package installs get no Download button.
+/// browser; nothing is downloaded by the app. Package installs get no Download button. Below
+/// `minimum_supported` it is a warning (danger colours) without Skip and ✕.
 fn update_notice(n: &crate::update::Notice) -> El {
     let open = |key: &'static str, label: &'static str, url: String| {
         small_button(key, label).on_press_tx(move |s: &mut State, tx: &mut rune::Tx| {
@@ -397,13 +398,16 @@ fn update_notice(n: &crate::update::Notice) -> El {
             }
         })
     };
-    let mut b = banner("update-notice", PAL.chip)
-        .child(text(n.message()).font(BODY14).color(PAL.text2).grow(1.0).min_w(0.0).wrap());
+    let (bg, fg) = if n.required { (PAL.danger_bg, PAL.danger_text) } else { (PAL.chip, PAL.text2) };
+    let mut b = banner("update-notice", bg).child(text(n.message()).font(BODY14).color(fg).grow(1.0).min_w(0.0).wrap());
     if crate::update::is_web(&n.notes_url) {
         b = b.child(open("update-notes", "What\u{2019}s new", n.notes_url.clone()));
     }
     if let Some(url) = &n.download {
         b = b.child(open("update-download", "Download", url.clone()));
+    }
+    if n.required {
+        return b;
     }
     b.child(
         el().key("update-skip").role("button").label("Skip this version").focusable(true).h(30.0).px(10.0).radius(15.0).center()

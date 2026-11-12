@@ -72,7 +72,20 @@ test("bucket: a full, valid check", () => {
     os: "linux",
     arch: "x86_64",
     channel: "appimage",
+    week: 0,
+    month: 0,
   });
+});
+
+test("bucket: w=1 and m=1 mark the first check of the week and of the month", () => {
+  const b = bucket(q("v=0.2.0&os=linux&arch=x86_64&ch=aur&w=1&m=1"));
+  assert.equal(b.week, 1);
+  assert.equal(b.month, 1);
+  assert.equal(bucket(q("v=0.2.0&os=linux&w=1")).month, 0);
+  for (const odd of ["w=0", "w=2", "w=yes", "w=", "w=1x"]) {
+    assert.equal(bucket(q(`v=0.2.0&os=linux&${odd}`)).week, 0, odd);
+  }
+  assert.equal(bucket(q("v=0.2.0&os=linux&w=1&m=1&repeat=1")), null, "a repeat counts nowhere");
 });
 
 test("bucket: a leading v and a pre-release are fine", () => {
@@ -125,8 +138,15 @@ test("GET /latest.json answers the site's file and counts once", async () => {
   assert.equal(fetcher.calls[0].url, "https://getuzumaki.app/latest.json");
   assert.ok(fetcher.calls[0].init.cf.cacheTtl > 0, "the source is cached");
   assert.equal(db.runs.length, 1);
-  assert.deepEqual(db.runs[0].args, ["2026-11-12", "0.1.0", "macos", "aarch64", "homebrew"]);
-  assert.match(db.runs[0].sql, /ON CONFLICT .* DO UPDATE SET n = n \+ 1/);
+  assert.deepEqual(db.runs[0].args, ["2026-11-12", "0.1.0", "macos", "aarch64", "homebrew", 0, 0]);
+  assert.match(db.runs[0].sql, /ON CONFLICT .* DO UPDATE SET n = n \+ 1, w = w \+ excluded\.w, m = m \+ excluded\.m/);
+});
+
+test("the week and month flags go into the same row", async () => {
+  const { db } = await run("/latest.json?v=0.2.0&os=linux&arch=x86_64&ch=aur&w=1&m=1");
+  assert.deepEqual(db.runs[0].args, ["2026-11-12", "0.2.0", "linux", "x86_64", "aur", 1, 1]);
+  const { db: only } = await run("/latest.json?v=0.2.0&os=linux&arch=x86_64&ch=aur&w=1");
+  assert.deepEqual(only.runs[0].args.slice(5), [1, 0]);
 });
 
 test("nothing but the bucket reaches the database", async () => {
@@ -198,9 +218,9 @@ test("/stats wants the token", async () => {
 
 test("/stats returns the rows and per-day totals", async () => {
   const rows = [
-    { day: "2026-11-12", version: "0.2.0", os: "linux", arch: "x86_64", channel: "aur", n: 5 },
-    { day: "2026-11-12", version: "0.1.0", os: "macos", arch: "aarch64", channel: "dmg", n: 2 },
-    { day: "2026-11-11", version: "0.1.0", os: "macos", arch: "aarch64", channel: "dmg", n: 3 },
+    { day: "2026-11-12", version: "0.2.0", os: "linux", arch: "x86_64", channel: "aur", n: 5, w: 2, m: 1 },
+    { day: "2026-11-12", version: "0.1.0", os: "macos", arch: "aarch64", channel: "dmg", n: 2, w: 1, m: 0 },
+    { day: "2026-11-11", version: "0.1.0", os: "macos", arch: "aarch64", channel: "dmg", n: 3, w: 0, m: 0 },
   ];
   const { resp, body, db } = await run("/stats?days=7", {
     env: { STATS_TOKEN: "s3cret", DB: fakeDb(rows) },
@@ -210,8 +230,8 @@ test("/stats returns the rows and per-day totals", async () => {
   assert.equal(body.from, "2026-11-06");
   assert.equal(body.to, "2026-11-12");
   assert.deepEqual(body.per_day, [
-    { day: "2026-11-12", n: 7 },
-    { day: "2026-11-11", n: 3 },
+    { day: "2026-11-12", n: 7, w: 3, m: 1 },
+    { day: "2026-11-11", n: 3, w: 0, m: 0 },
   ]);
   assert.deepEqual(body.rows, rows);
   assert.deepEqual(db.queries[0].args, ["2026-11-06"]);

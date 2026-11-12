@@ -573,13 +573,15 @@ fn row_el(r: &Rx, id: Row) -> El {
         Row::CheckUpdates => setting(
             narrow,
             "Check for updates",
-            Some("Once a day, asks getuzumaki.app whether a new version is out, and says so. Nothing about you is sent; nothing is downloaded.".to_string()),
+            Some("Once a day, asks getuzumaki.app whether a new version is out, and says so. The check sends only the Uzumaki version, the system, the processor type and how Uzumaki was installed; the server keeps a daily count and nothing else. Nothing is downloaded.".to_string()),
             switch("settings/check-updates", "Check for updates", s.settings.check_updates, true, |s, on| s.set_check_updates(on)),
         ),
         Row::CheckNow => {
             let st = &s.update_check;
             let mut note = crate::update::last_checked(st.last_check);
-            if let Some(result) = &st.result {
+            if let Some(n) = s.update.as_ref().filter(|n| n.required) {
+                note = format!("{} {note}.", n.message());
+            } else if let Some(result) = &st.result {
                 note = format!("{result} {note}.");
             } else {
                 note.push('.');
