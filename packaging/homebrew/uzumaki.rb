@@ -1,4 +1,5 @@
-# Draft of the Homebrew Cask for the tap hanami117/homebrew-uzumaki (file Casks/uzumaki.rb there).
+# The Homebrew Cask for the tap hanami117/homebrew-uzumaki. The published copy lives in that repo
+# (Casks/uzumaki.rb) and must be kept in sync with this file: change both, or neither.
 # Users install it with: brew install --cask hanami117/uzumaki/uzumaki
 #
 # Fill in at release time (packaging/release.sh prints both values):
@@ -38,7 +39,7 @@ cask "uzumaki" do
   # The app's own update notice only points here; it never replaces itself.
   auto_updates false
   depends_on arch: :arm64
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Uzumaki.app"
   binary "#{appdir}/Uzumaki.app/Contents/MacOS/uzu"

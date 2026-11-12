@@ -89,7 +89,7 @@
     <h2>Install with Homebrew</h2>
     <p>The cask comes from Uzumaki&rsquo;s own tap. It puts Uzumaki in Applications and adds the <code>uzu</code> command. The first-launch steps above still apply.</p>
     <span class="cmd"><i>$</i> brew install --cask hanami117/uzumaki/uzumaki</span>
-<p class="cmd-note">Coming in 0.1.1.</p>
+    <p>Homebrew 7 only installs third-party casks you trust. The full name above trusts the cask for you. If you ran <code>brew tap hanami117/uzumaki</code> first and install by the short name, run <code>brew trust --cask hanami117/uzumaki/uzumaki</code> once.</p>
 
     <h2>Updates</h2>
     <p>Once a day Uzumaki asks this site whether a new version is out, and shows a notice if there is. It never downloads or installs anything by itself. Settings &rarr; General turns the check off.</p>
@@ -97,8 +97,7 @@
       <li><b>Disk image:</b> download the new DMG, quit Uzumaki, and drag the new app over the old one in Applications.</li>
       <li><b>Homebrew:</b> the notice tells you to update with Homebrew.</li>
     </ul>
-    <span class="cmd"><i>$</i> brew upgrade --cask uzumaki</span>
-<p class="cmd-note">Coming in 0.1.1.</p>
+    <span class="cmd"><i>$</i> brew update &amp;&amp; brew upgrade --cask uzumaki</span>
 
     <h2>Uninstall</h2>
     <p>Quit Uzumaki first.</p>

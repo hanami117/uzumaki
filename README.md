@@ -71,7 +71,7 @@ The screenshots use made-up albums and artists.
 
 ## Install
 
-> **Uzumaki 0.1.0 is out for macOS.** The AUR package, the AppImage and the Homebrew tap follow in 0.1.1.
+> **Uzumaki 0.1.0 is out for macOS**, as a disk image and with Homebrew. The AUR package and the AppImage follow in 0.1.1.
 > Until then, on Linux you can build from source (below). The install pages on
 > [getuzumaki.app](https://getuzumaki.app/#download) have the same steps.
 
@@ -125,13 +125,21 @@ xattr -dr com.apple.quarantine /Applications/Uzumaki.app
 
 ### macOS (Homebrew)
 
-*Coming in 0.1.1.*
-
 ```sh
 brew install --cask hanami117/uzumaki/uzumaki
 ```
 
 This puts Uzumaki in Applications and adds the `uzu` command. The first-launch steps above still apply.
+
+Homebrew 7 only installs third-party casks you trust. Installing with the full name above trusts the cask for you. If you ran `brew tap hanami117/uzumaki` first and install by the short name, run `brew trust --cask hanami117/uzumaki/uzumaki` once.
+
+To update, and to uninstall (`--zap` also removes your settings and caches):
+
+```sh
+brew update && brew upgrade --cask uzumaki
+brew uninstall --cask uzumaki
+brew uninstall --cask --zap uzumaki
+```
 
 ### From source (Linux)
 
@@ -165,7 +173,7 @@ How you update depends on how you installed it. Quit Uzumaki first.
 - **AUR:** with the rest of your system (`yay -Syu`). The notice tells you to use your package manager.
 - **AppImage:** the notice has a Download button. Replace the old file with the new one.
 - **Disk image:** download the new DMG and drag the new app over the old one in Applications.
-- **Homebrew:** `brew upgrade --cask uzumaki`.
+- **Homebrew:** `brew update && brew upgrade --cask uzumaki`.
 - **From source:** `git pull && ./install.sh`.
 
 ## Using Uzumaki
