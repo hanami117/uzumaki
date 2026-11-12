@@ -13,6 +13,9 @@ pub struct AutoCheck {
     /// The (version, build) whose notice was closed with ✕: "until the next start" holds for the
     /// timer too.
     dismissed: Option<(String, u32)>,
+    /// The last failed attempt since the last answer (`update.json`): the timer retries an hour
+    /// after it.
+    last_attempt: Option<u64>,
 }
 
 impl State {
@@ -66,17 +69,19 @@ impl State {
     pub fn auto_check_wanted(&self, now: u64) -> bool {
         update::auto_wanted(
             self.settings.check_updates,
-            self.update.is_some(),
             self.update_auto.running || self.update_check.running,
             self.update_check.last_check,
+            self.update_auto.last_attempt,
             now,
         )
     }
 
-    /// What the check knows: show the notice if a newer, unskipped version is out.
+    /// What the check knows: show the notice if a newer, unskipped version is out (or this one is
+    /// below `minimum_supported`, which no skip or ✕ hides).
     pub fn update_known(&mut self, rec: &Record, install: Install) {
         self.update_auto.running = false;
         self.update_check.last_check = rec.last_check;
+        self.update_auto.last_attempt = rec.last_attempt;
         if !self.settings.check_updates {
             return;
         }
@@ -85,7 +90,7 @@ impl State {
             .latest
             .as_ref()
             .and_then(|l| update::notice(l, (crate::VERSION, crate::BUILD), rec.skipped(), install, cfg!(target_os = "macos")))
-            .filter(|n| dismissed.is_none_or(|(v, b)| *v != n.version || *b != n.build));
+            .filter(|n| n.required || dismissed.is_none_or(|(v, b)| *v != n.version || *b != n.build));
     }
 
     /// Settings → General → Check for updates. On: check now (still at most once a day). Off:
@@ -117,9 +122,12 @@ impl State {
         }
         self.update_check.running = true;
         self.update_check.result = None;
-        update::spawn_manual(move |answer, last_check| {
+        update::spawn_manual(move |answer, rec| {
             let install = update::this_install();
-            handle.update(move |s: &mut State, _tx| s.manual_answer(answer, last_check, install));
+            handle.update(move |s: &mut State, _tx| {
+                s.update_auto.last_attempt = rec.last_attempt;
+                s.manual_answer(answer, rec.last_check, install)
+            });
         });
     }
 
@@ -143,13 +151,20 @@ impl State {
         self.update_check.result = Some(line);
     }
 
-    /// ✕ on the notice: gone until the next start.
+    /// ✕ on the notice: gone until the next start. Not for the below-minimum warning.
     pub fn dismiss_update(&mut self) {
+        if self.update.as_ref().is_some_and(|n| n.required) {
+            return;
+        }
         self.update_auto.dismissed = self.update.take().map(|n| (n.version, n.build));
     }
 
-    /// "Skip this version": gone, and this version never shows again (a newer one will).
+    /// "Skip this version": gone, and this version never shows again (a newer one will). Not for
+    /// the below-minimum warning.
     pub fn skip_update(&mut self) {
+        if self.update.as_ref().is_some_and(|n| n.required) {
+            return;
+        }
         if let Some(n) = self.update.take() {
             if self.handle.is_some() {
                 update::skip(n.version, n.build);
@@ -206,13 +221,42 @@ mod tests {
 
     #[test]
     fn package_installs_have_no_download_button() {
-        for scene in ["update-notice-package", "update-notice-homebrew"] {
+        for scene in ["update-notice-package", "update-notice-aur", "update-notice-homebrew"] {
             let rt = window(scene);
             assert!(rt.presented("update-notice").is_some(), "{scene}");
             assert!(rt.presented("update-notes").is_some(), "{scene}: What's new stays");
             assert!(rt.presented("update-download").is_none(), "{scene}: no Download");
             assert!(rt.state.update.as_ref().unwrap().message().contains("Update with your package manager"));
         }
+    }
+
+    #[test]
+    fn below_minimum_supported_the_warning_has_no_skip_or_close() {
+        for (scene, download) in [("update-required", true), ("update-required-aur", false)] {
+            let mut rt = window(scene);
+            let n = rt.state.update.clone().expect(scene);
+            assert!(n.required, "{scene}");
+            assert!(n.message().starts_with("This version of Uzumaki no longer works with Apple Music."), "{scene}");
+            assert!(rt.presented("update-notice").is_some(), "{scene}");
+            assert!(rt.presented("update-notes").is_some(), "{scene}");
+            assert_eq!(rt.presented("update-download").is_some(), download, "{scene}");
+            assert!(rt.presented("update-skip").is_none() && rt.presented("update-dismiss").is_none(), "{scene}");
+            // Even asked directly (a shortcut, a stale button), it stays.
+            rt.update(|s, _| {
+                s.dismiss_update();
+                s.skip_update();
+            });
+            settle(&mut rt);
+            assert_eq!(rt.state.update.as_ref(), Some(&n), "{scene}");
+        }
+        // A version skipped or closed earlier doesn't hide it.
+        let mut s = State::offline();
+        let mut rec = record("99.0.0", 1);
+        rec.latest.as_mut().unwrap().minimum_supported = Some("98.0.0".into());
+        rec.skipped = Some("99.0.0".into());
+        s.update_auto.dismissed = Some(("99.0.0".into(), 1));
+        s.update_known(&rec, Install::Direct);
+        assert!(s.update.as_ref().is_some_and(|n| n.required));
     }
 
     #[test]
@@ -305,9 +349,9 @@ mod tests {
     }
 
     #[test]
-    fn the_timer_asks_again_a_day_after_the_last_check() {
+    fn the_timer_asks_again_each_utc_day_and_retries_a_failure() {
         use crate::update::{DAY, RECHECK};
-        let t0 = 1_800_000_000;
+        let t0 = 1_794_441_600 + 12 * 3600; // 2026-11-12 12:00 UTC
         let mut s = State::offline();
         s.update_known(&record(crate::VERSION, t0), Install::Direct); // the start-up check's answer
         let mut checks = 0;
@@ -318,9 +362,17 @@ mod tests {
                 s.update_known(&record(crate::VERSION, now), Install::Direct);
             }
         }
-        assert_eq!(checks, 2, "hours 24 and 48 of a fake clock");
-        assert!(!s.auto_check_wanted(t0 + 50 * RECHECK.as_secs()));
-        assert!(s.auto_check_wanted(t0 + 50 * RECHECK.as_secs() + DAY));
+        assert_eq!(checks, 2, "the first ticks after the next two UTC midnights");
+        let now = t0 + 50 * RECHECK.as_secs();
+        assert!(!s.auto_check_wanted(now));
+        assert!(s.auto_check_wanted(now + DAY));
+        // A failure: retried at the next tick, not before.
+        let mut failed = record(crate::VERSION, now - DAY);
+        failed.latest = None;
+        failed.last_attempt = Some(now);
+        s.update_known(&failed, Install::Direct);
+        assert!(!s.auto_check_wanted(now + 60));
+        assert!(s.auto_check_wanted(now + RECHECK.as_secs()));
     }
 
     #[test]
@@ -334,10 +386,10 @@ mod tests {
         s.settings.check_updates = false;
         assert!(!s.auto_check_wanted(late));
         s.settings.check_updates = true;
-        // A notice already showing is not asked for again.
+        // A notice showing doesn't stop the day's check (it is still counted, and kept current).
         s.update_known(&record("99.0.0", t0), Install::Direct);
         assert!(s.update.is_some());
-        assert!(!s.auto_check_wanted(late));
+        assert!(s.auto_check_wanted(late));
         // Closed with ✕: the same version stays closed when a later check finds it again, a newer
         // one shows.
         s.dismiss_update();

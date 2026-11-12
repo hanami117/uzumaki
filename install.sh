@@ -88,7 +88,8 @@ running && die "Uzumaki is running from $PREFIX. Quit it first (Ctrl+Q), then ru
 
 # --- Build --------------------------------------------------------------------------------------
 say "Building Uzumaki (release; the first build takes several minutes)"
-cargo build --release --locked -p uzumaki -p uzumaki-ctl
+# UZUMAKI_CHANNEL: the daily update check reports this copy as installed by install.sh.
+UZUMAKI_CHANNEL=install-sh cargo build --release --locked -p uzumaki -p uzumaki-ctl
 target="${CARGO_TARGET_DIR:-target}/release/uzumaki"
 [[ -x $target ]] || die "build finished but $target is missing"
 [[ -x ${target%uzumaki}uzu ]] || die "build finished but ${target%uzumaki}uzu is missing"

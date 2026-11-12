@@ -166,7 +166,8 @@ The first build takes a few minutes. To remove it: `./install.sh --uninstall`.
 
 Once a day, Uzumaki asks [getuzumaki.app](https://getuzumaki.app) if there is a new version, and shows a
 quiet notice when there is. It never downloads or installs anything by itself. Settings → General has the
-switch and a **Check now** button.
+switch and a **Check now** button. If a version stops working with Apple Music, the notice says so and
+stays until you update; the app keeps running.
 
 How you update depends on how you installed it. Quit Uzumaki first.
 
@@ -237,11 +238,16 @@ For the details, see [docs/bridge-protocol.md](docs/bridge-protocol.md).
 
 ## Privacy
 
-- **No telemetry, no analytics, no accounts of our own.** Uzumaki has no server that collects anything.
+- **No telemetry, no analytics, no accounts of our own.** The update check below is the only thing Uzumaki
+  sends us.
 - **Apple Music:** you sign in to Apple directly, in Apple's own sign-in window. Uzumaki never sees your
   password. Your login stays on your computer, in the hidden player's profile.
-- **Update check:** once a day, a plain GET of `https://getuzumaki.app/latest.json` with the User-Agent
-  `Uzumaki/<version>` and nothing else. You can turn it off in Settings → General.
+- **Update check:** once a day, a plain GET of `https://updates.getuzumaki.app/latest.json` with the
+  User-Agent `Uzumaki/<version>` and four values: the Uzumaki version, the OS (Linux or macOS), the processor
+  type (x86_64 or arm64) and how it was installed (AppImage, AUR, Homebrew, DMG, …), plus a flag on the first
+  check of a week and of a month. The server adds one to a counter for that day and that combination; those
+  daily counts are all it keeps: no IP address, no install or device id, no cookies. The code is in
+  [server/update](server/update). You can turn the check off in Settings → General; then nothing is sent.
 - **Covers and lyrics** come from Apple, the same as in the web player.
 
 ## Build from source and contribute

@@ -99,6 +99,9 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("update-notice", update_notice),
     ("update-notice-package", update_notice_package),
     ("update-notice-homebrew", update_notice_homebrew),
+    ("update-notice-aur", update_notice_aur),
+    ("update-required", update_required),
+    ("update-required-aur", update_required_aur),
     ("update-notice-narrow", update_notice),
     ("settings-keyboard-edit", settings_keyboard_edit),
     ("menu-now-playing", menu_now_playing),
@@ -822,7 +825,26 @@ fn update_notice_homebrew(s: &mut State) {
     update_scene(s, crate::update::Install::Homebrew);
 }
 
+/// Built for the AUR (`UZUMAKI_CHANNEL=aur`): the package manager's command, no Download.
+fn update_notice_aur(s: &mut State) {
+    update_scene(s, crate::update::Install::Aur);
+}
+
+/// This version is below `minimum_supported`: the warning without Skip or ✕.
+fn update_required(s: &mut State) {
+    update_scene_with(s, crate::update::Install::Direct, Some("99.0.0"));
+}
+
+/// The same for the AUR build.
+fn update_required_aur(s: &mut State) {
+    update_scene_with(s, crate::update::Install::Aur, Some("99.0.0"));
+}
+
 fn update_scene(s: &mut State, install: crate::update::Install) {
+    update_scene_with(s, install, None);
+}
+
+fn update_scene_with(s: &mut State, install: crate::update::Install, minimum: Option<&str>) {
     home(s);
     let latest = crate::update::Latest {
         version: "0.2.0".into(),
@@ -834,8 +856,9 @@ fn update_scene(s: &mut State, install: crate::update::Install) {
             linux_tarball: "https://github.com/hanami117/uzumaki/releases/download/v0.2.0/uzumaki-0.2.0.tar.gz".into(),
             ..Default::default()
         },
+        minimum_supported: minimum.map(str::to_string),
     };
-    let rec = crate::update::Record { last_check: Some(0), latest: Some(latest), skipped: None, skipped_build: None };
+    let rec = crate::update::Record { last_check: Some(0), latest: Some(latest), ..Default::default() };
     s.update_known(&rec, install);
 }
 

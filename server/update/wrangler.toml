@@ -1,0 +1,24 @@
+# Uzumaki's update endpoint. See README.md here for what it keeps and how to deploy it.
+# No account id or secret belongs in this file: wrangler takes the account from `wrangler login`,
+# and the optional stats token is set with `wrangler secret put STATS_TOKEN`.
+name = "uzumaki-updates"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+# Only reachable at its own host: no *.workers.dev address, no preview URLs.
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "updates.getuzumaki.app", custom_domain = true }]
+
+# No request logs, no traces: Cloudflare keeps nothing about single requests for us.
+[observability]
+enabled = false
+
+[vars]
+LATEST_SOURCE = "https://getuzumaki.app/latest.json"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "uzumaki-updates"
+# From `wrangler d1 create uzumaki-updates`. Not a secret, but specific to one account.
+database_id = "557de934-a57a-4ff1-8278-a0f1bd95eb05"

@@ -256,8 +256,9 @@ pub struct Settings {
     /// A desktop notification (title, artist and album, cover) when a new song starts while
     /// the window isn't in front (Settings → General; `notify.rs`). Off by default.
     pub notify_song_change: bool,
-    /// Once a day at start, ask getuzumaki.app for the latest version and show a notice when a
-    /// newer one is out (Settings → General; `update.rs`). On by default.
+    /// Once per UTC day, ask updates.getuzumaki.app for the latest version (sending the version,
+    /// OS, architecture and install channel, which the server counts) and show a notice when a
+    /// newer one is out (Settings → General; `update.rs`). On by default; off sends nothing.
     pub check_updates: bool,
     /// Resume where you left off: the last song, its position and the queue come back paused
     /// at the next start (Settings → Playback; `resume.rs`). On by default.

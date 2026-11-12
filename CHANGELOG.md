@@ -10,6 +10,18 @@ takes each release's notes from its section here.
   code changes. It shows in About ("Version 0.1.0 (1)"), Settings → General → About and `uzumaki --version` /
   `uzu --version` ("0.1.0 (build 1)"), and is the macOS bundle's `CFBundleVersion`. The update check compares
   version, then build: a higher build of the same version is an update, and "Skip this version" skips one build.
+- An anonymous count of update checks. The daily check now asks `updates.getuzumaki.app` (code in
+  `server/update`) and sends the version, OS, processor type and install channel, plus a flag on the first check
+  of a week and of a month; the server keeps only daily totals per combination (no IP address, no id). If that
+  server is down, the check falls back to `getuzumaki.app/latest.json`. Turning the check off sends nothing.
+- A version too old to work with Apple Music (below `minimum_supported` in `latest.json`) shows a warning that
+  can't be closed or skipped, with the download or the package manager's command. The app keeps running.
+
+### Changed
+- The update check goes by UTC day (once per day the app runs, not 24 hours after the last one), and a failed
+  check is tried again an hour later instead of the next day. A notice already showing no longer stops it.
+- Package builds say how to update: the AUR package (built with `UZUMAKI_CHANNEL=aur`) "yay -Syu uzumaki",
+  the Homebrew cask "brew update && brew upgrade --cask uzumaki".
 
 ## [0.1.0] - 2026-11-12
 
