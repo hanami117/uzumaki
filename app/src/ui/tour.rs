@@ -1,4 +1,4 @@
-//! The onboarding's shortcuts tour (docs/ONBOARDING.md, step 4).
+//! The onboarding's shortcuts tour (its last step).
 //!
 //! One card per shortcut, built from `keys::BINDINGS` with the user's own chords (a removed
 //! shortcut drops its card) and Rune's keycaps for the platform ("Ctrl" "Shift" "B" on Linux,
@@ -10,7 +10,7 @@
 //! lists the rest (number keys, Settings, every shortcut) and ends the tour with Finish.
 //!
 //! Local only mode: no lyrics (the Lyrics and Up Next card is Up Next only) and the number keys
-//! name the local tabs (1–4), as in stage 2b.
+//! name the local tabs (1–4).
 //!
 //! The picture is one element tree whose sizes follow `Mini`; a key press changes `Mini` once
 //! and Rune springs the rest (no per-frame view runs). It stays mounted from card to card, so

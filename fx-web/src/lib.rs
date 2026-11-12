@@ -3,8 +3,11 @@
 //! thread when it has one core, which is what `std::thread::available_parallelism` reports on
 //! wasm32), no JS glue beyond reading and writing linear memory.
 //!
-//! Build: `cargo build -p uzumaki-fx-web --target wasm32-unknown-unknown --profile web`
-//! (`docs/ROADMAP.md`, "fx-web", has the whole recipe).
+//! Build: `cargo build -p uzumaki-fx-web --target wasm32-unknown-unknown --profile web` (the
+//! `web` profile in the root `Cargo.toml`; the desktop release is untouched), then copy
+//! `target/wasm32-unknown-unknown/web/uzumaki_fx_web.wasm` to `site/demo/fx.wasm`. Parity with
+//! the app: `cargo run --release -p uzumaki-fx-web --example parity` and
+//! `node fx-web/parity.mjs <wasm>` print the same hash for every effect.
 //!
 //! Usage from JS (all numbers are u32/i32):
 //! ```text

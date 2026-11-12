@@ -29,13 +29,13 @@ pub enum MusicSource {
     /// Apple Music through the bridge; music folders still work.
     #[default]
     Apple,
-    /// Music folders only: no Apple account (stage 2 of docs/ONBOARDING.md hides the Apple pages
-    /// and never starts Electron).
+    /// Music folders only: no Apple account. The Apple pages are hidden and Electron never
+    /// starts.
     LocalOnly,
 }
 
 /// The Apple Music storefront (country store) of the signed-in account, read from MusicKit after
-/// sign-in (docs/ONBOARDING.md, stage 3). Shown read-only in Settings → Account (decision 6).
+/// the guided sign-in. Shown read-only in Settings → Account.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Storefront {
     /// Apple's id, the country code: "it".

@@ -1,4 +1,4 @@
-//! Palette and type styles, from docs/design-spec.md.
+//! Palette and type styles: dark and minimal, Inter, a coral accent (#ff7a8a).
 
 use std::sync::LazyLock;
 use std::cell::Cell;

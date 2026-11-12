@@ -9,7 +9,7 @@
 //!
 //! The icon is always a template image: black with alpha, derived from the app's tray swirl, so
 //! macOS tints it for light and dark menu bars. It does not follow Settings → Appearance → App
-//! icon (the user prefers the plain swirl in the menu bar); the Dock and the bundle do.
+//! icon (the menu bar keeps the plain swirl); the Dock and the bundle do.
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;

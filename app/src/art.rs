@@ -6,7 +6,7 @@
 //! hand the pixels to the UI thread (`Art::loaded`), which gives them to Rune's `ImageCache`.
 //! Decoded covers are kept within `MEMORY_BUDGET`, least recently drawn first out, but a cover
 //! the last view drew is never let go (`Lru::next_frame`): when a page shows more covers than the
-//! budget holds, evicting drawn ones made them load again and push out others, a loop the user saw
+//! budget holds, evicting drawn ones made them load again and push out others, a loop that showed
 //! as covers flickering back to their placeholder tiles (the New page on a 2× screen).
 //!
 //! The threads take the newest request first, so what is on screen now goes ahead of covers

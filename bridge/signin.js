@@ -1,5 +1,5 @@
-// The guided sign-in's window (docs/ONBOARDING.md, stage 3): its size and place, the `window`
-// event, and the light CSS layer around Apple's sign-in dialog (decision 3). Plain functions with
+// The guided sign-in's window: its size and place, the `window` event, and the light CSS layer
+// around Apple's sign-in dialog. Plain functions with
 // no Electron in them, so `node --test bridge/signin.test.js` checks them.
 //
 // The CSS layer is the only thing here that styles music.apple.com. To remove it, delete

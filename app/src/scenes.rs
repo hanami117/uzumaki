@@ -825,6 +825,7 @@ fn update_scene(s: &mut State, install: crate::update::Install) {
     home(s);
     let latest = crate::update::Latest {
         version: "0.2.0".into(),
+        build: 1,
         date: "2026-12-01".into(),
         notes_url: "https://github.com/hanami117/uzumaki/releases/tag/v0.2.0".into(),
         downloads: crate::update::Downloads {
@@ -833,7 +834,7 @@ fn update_scene(s: &mut State, install: crate::update::Install) {
             ..Default::default()
         },
     };
-    let rec = crate::update::Record { last_check: Some(0), latest: Some(latest), skipped: None };
+    let rec = crate::update::Record { last_check: Some(0), latest: Some(latest), skipped: None, skipped_build: None };
     s.update_known(&rec, install);
 }
 
@@ -1543,7 +1544,7 @@ fn save_temp_png(name: &str, img: &image::RgbaImage) -> std::path::PathBuf {
     path
 }
 
-/// Home with a Picture background and `effect`, at the user's 2026-11-10 settings (opacity and
+/// Home with a Picture background and `effect`, at typical settings (opacity and
 /// list opacity 0.35, every page, fade on, Now Playing on the app's picture with Blur).
 fn bg_picture(s: &mut State, effect: crate::appearance::Effect) {
     home(s);
@@ -1574,8 +1575,8 @@ fn picture_bg(s: &mut State, effect: crate::appearance::Effect) {
     }
 }
 
-/// The Songs table of a playlist with long titles over the Picture + Halftone background (the
-/// user's look), for checking text contrast on a song list.
+/// The Songs table of a playlist with long titles over the Picture + Halftone background, for
+/// checking text contrast on a song list.
 fn bg_picture_songs(s: &mut State) {
     playlist_songs(s);
     picture_bg(s, crate::appearance::Effect::Halftone);
@@ -1756,7 +1757,7 @@ fn bar_long_title_floating(s: &mut State) {
     s.settings.player_style = crate::settings::PlayerStyle::Floating;
 }
 
-// ---- local only mode: Songs, Artists, Albums, Folders (onboarding stage 2b) ----
+// ---- local only mode: Songs, Artists, Albums, Folders ----
 
 use crate::local::LocalTrack;
 

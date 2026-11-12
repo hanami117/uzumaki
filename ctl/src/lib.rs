@@ -17,6 +17,39 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+/// The build number: a whole number that goes up with every package built from the same version
+/// (a DMG or AppImage rebuilt without code changes gets the next one). Its one source is the
+/// `BUILD` file at the top of the repo; the packaging scripts read it too. 0.1.0 is build 1.
+pub const BUILD: u32 = parse_build(include_str!("../../BUILD"));
+
+/// `BUILD`'s number, at compile time: digits, optional spaces and newlines around them, above 0.
+/// Anything else stops the build.
+const fn parse_build(s: &str) -> u32 {
+    let b = s.as_bytes();
+    let (mut i, mut n, mut digits) = (0, 0u32, 0);
+    while i < b.len() {
+        match b[i] {
+            b'0'..=b'9' if digits == 0 || i == 0 || b[i - 1].is_ascii_digit() => {
+                n = match n.checked_mul(10) {
+                    Some(m) => m + (b[i] - b'0') as u32,
+                    None => panic!("BUILD is too large"),
+                };
+                digits += 1;
+            }
+            b' ' | b'\t' | b'\n' | b'\r' => {}
+            _ => panic!("BUILD must hold one whole number"),
+        }
+        i += 1;
+    }
+    assert!(digits > 0 && n > 0, "BUILD must hold a number above 0");
+    n
+}
+
+/// The version and build as `--version` prints them: `0.1.0 (build 1)`.
+pub fn version_line() -> String {
+    format!("{} (build {BUILD})", env!("CARGO_PKG_VERSION"))
+}
+
 /// `$UZUMAKI_CTL_SOCKET`, else `<runtime dir>/uzumaki.sock` (see [`runtime_dir`]).
 pub fn socket_path() -> PathBuf {
     if let Some(p) = std::env::var_os("UZUMAKI_CTL_SOCKET").filter(|v| !v.is_empty()) {
@@ -712,5 +745,31 @@ mod history_protocol_tests {
         assert_eq!(serde_json::from_str::<Queue>(&serde_json::to_string(&queue).unwrap()).unwrap(), queue);
         let request = Request::History { index: 2 };
         assert_eq!(serde_json::from_str::<Request>(&serde_json::to_string(&request).unwrap()).unwrap(), request);
+    }
+}
+
+#[cfg(test)]
+mod build_tests {
+    use super::*;
+
+    #[test]
+    fn the_build_file_reads_as_a_number() {
+        assert_eq!(parse_build("1\n"), 1);
+        assert_eq!(parse_build(" 12 \r\n"), 12);
+        assert!(BUILD >= 1);
+        assert_eq!(BUILD.to_string(), include_str!("../../BUILD").trim());
+        assert_eq!(version_line(), format!("{} (build {BUILD})", env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    #[should_panic]
+    fn two_numbers_are_refused() {
+        parse_build("1 2");
+    }
+
+    #[test]
+    #[should_panic]
+    fn zero_is_refused() {
+        parse_build("0");
     }
 }

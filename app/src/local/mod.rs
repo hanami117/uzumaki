@@ -1,4 +1,4 @@
-//! Local files (batch D): music folders on disk, played in-process (no bridge, no mpd).
+//! Local files: music folders on disk, played in-process (no bridge, no mpd).
 //!
 //! - `scan`: walks the music folders, reads tags with lofty, keeps an index on disk
 //!   (`$XDG_CACHE_HOME/uzumaki/local_index.json`) and cover thumbnails (`…/uzumaki/local_art/`).

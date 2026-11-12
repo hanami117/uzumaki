@@ -7,7 +7,7 @@ edition = "2024"
 description = "Uzumaki: a Rust, GPU-rendered frontend for Apple Music (Rune UI)"
 
 [dependencies]
-# Rune is pre-release: pin a dev rev (same rev tsun builds against).
+# Rune is pre-release: pin a rev of its dev branch.
 rune = { git = "https://github.com/anomalyco/rune", rev = "f3d04f3f2069d177d04c963b0ba9f6b2065e46eb", features = ["native-file-dialog"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -19,7 +19,7 @@ uzumaki-fx = { path = "../fx" }
 # The `uzu` control protocol and socket (the app answers, `uzu` asks).
 uzumaki-ctl = { path = "../ctl" }
 roxmltree = "0.20"
-# Local files (batch D): in-process playback and tags. rodio drives cpal (ALSA → PipeWire via
+# Local files: in-process playback and tags. rodio drives cpal (ALSA → PipeWire via
 # pipewire-alsa) and decodes with symphonia; lofty reads tags and embedded covers.
 rodio = { version = "0.21", default-features = false, features = ["playback", "symphonia-flac", "symphonia-mp3", "symphonia-aac", "symphonia-isomp4", "symphonia-alac", "symphonia-vorbis", "symphonia-ogg", "symphonia-wav", "symphonia-pcm"] }
 lofty = "0.25"

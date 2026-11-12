@@ -594,7 +594,7 @@ fn row_el(r: &Rx, id: Row) -> El {
         Row::About => setting(
             narrow,
             if r.search { "About Uzumaki" } else { "Uzumaki" },
-            Some(format!("Version {}. {}. Free software under the GNU General Public License, version 3 or later.", crate::VERSION, crate::COPYRIGHT)),
+            Some(format!("Version {} ({}). {}. Free software under the GNU General Public License, version 3 or later.", crate::VERSION, crate::BUILD, crate::COPYRIGHT)),
             small_button("settings/website", "getuzumaki.app").on_press_tx(|s: &mut State, tx: &mut Tx| {
                 if tx.open_url("https://getuzumaki.app").is_err() {
                     s.toast = Some("Couldn't open the link.".into());
@@ -615,8 +615,8 @@ fn row_el(r: &Rx, id: Row) -> El {
     }
 }
 
-/// Account → Music source: Apple Music, or local files only (docs/ONBOARDING.md, decision 4:
-/// switching keeps the sign-in and the caches).
+/// Account → Music source: Apple Music, or local files only (switching keeps the sign-in and
+/// the caches).
 fn music_source(s: &State, narrow: bool) -> El {
     let local = s.local_only();
     let desc = if local {
@@ -646,7 +646,7 @@ fn apple_music(s: &State, narrow: bool) -> El {
     let status = if !ses.bridge_up {
         "Playback engine starting\u{2026}".to_string()
     } else if ses.authorized {
-        // Read-only (decision 6): the account's store, saved after sign-in.
+        // Read-only: the account's store, saved after sign-in.
         match &s.settings.storefront {
             Some(f) => format!("Signed in \u{b7} Store: {}", f.label()),
             None => "Signed in".to_string(),

@@ -4,7 +4,7 @@ version.workspace = true
 license.workspace = true
 repository.workspace = true
 edition = "2024"
-description = "uzumaki-fx as a WebAssembly module with a plain C ABI, for the website's demo (see docs/ROADMAP.md, \"fx-web\")"
+description = "uzumaki-fx as a WebAssembly module with a plain C ABI, for the website's demo"
 publish = false
 
 [lib]

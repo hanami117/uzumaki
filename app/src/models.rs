@@ -116,7 +116,7 @@ impl Song {
         self.catalog_id.as_deref().unwrap_or(&self.id)
     }
 
-    /// A local file (batch D): its id is `file://` + the absolute path. Plays in-process
+    /// A local file: its id is `file://` + the absolute path. Plays in-process
     /// (`local::player`), never through the bridge.
     pub fn is_local(&self) -> bool {
         self.id.starts_with(LOCAL_PREFIX)

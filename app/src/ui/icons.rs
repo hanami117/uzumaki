@@ -1,4 +1,4 @@
-//! Mockup icons (design-spec Appendix A), all on a 24-unit grid. Tinted by `.color()`.
+//! The app's icons, all on a 24-unit grid. Tinted by `.color()`.
 
 use rune::Icon;
 use std::sync::LazyLock;

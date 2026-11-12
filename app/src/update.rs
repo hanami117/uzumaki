@@ -1,4 +1,4 @@
-//! The update notice (docs/ROADMAP.md "Updates and distribution", stage 1).
+//! The update notice.
 //!
 //! At start, and again while the app stays open whenever a day has passed (a timer wakes once an
 //! hour and asks `auto_wanted`), at most once a day, a worker thread reads `latest.json` from getuzumaki.app: a plain
@@ -30,11 +30,14 @@ pub const RECHECK: Duration = Duration::from_secs(3600);
 /// The whole request (connect, TLS, body); a slow site never holds anything up.
 const TIMEOUT: Duration = Duration::from_secs(6);
 
-/// `latest.json`: `{version, date, notes_url, downloads: {macos_dmg, linux_tarball, appimage, aur, brew}}`.
-/// Every field but `version` may be missing (older files have no `appimage`).
+/// `latest.json`: `{version, build, date, notes_url, downloads: {macos_dmg, linux_tarball, appimage, aur, brew}}`.
+/// Every field but `version` may be missing (older files have no `appimage` and no `build`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Latest {
     pub version: String,
+    /// The build of that version (see `crate::BUILD`). Missing reads as 0, which counts as 1 (`build_of`).
+    #[serde(default)]
+    pub build: u32,
     #[serde(default)]
     pub date: String,
     #[serde(default)]
@@ -129,10 +132,16 @@ impl PartialOrd for Version {
     }
 }
 
-/// `candidate` is a newer version than `current`. Anything unreadable is never newer.
-pub fn is_newer(candidate: &str, current: &str) -> bool {
-    match (Version::parse(candidate), Version::parse(current)) {
-        (Some(a), Some(b)) => a > b,
+/// A build number as compared: 0 (a file written before builds existed) is build 1.
+pub fn build_of(build: u32) -> u32 {
+    build.max(1)
+}
+
+/// `candidate` (version, build) is newer than `current`: a newer version, or the same version
+/// with a higher build. Anything unreadable is never newer.
+pub fn is_newer(candidate: (&str, u32), current: (&str, u32)) -> bool {
+    match (Version::parse(candidate.0), Version::parse(current.0)) {
+        (Some(a), Some(b)) => a.cmp(&b).then(build_of(candidate.1).cmp(&build_of(current.1))) == Ordering::Greater,
         _ => false,
     }
 }
@@ -149,6 +158,16 @@ pub struct Record {
     pub latest: Option<Latest>,
     /// "Skip this version": never show this one again (a newer one shows).
     pub skipped: Option<String>,
+    /// The build of the skipped version; missing (older records) counts as 1. A higher build of
+    /// the same version shows again.
+    pub skipped_build: Option<u32>,
+}
+
+impl Record {
+    /// The skipped (version, build), if any.
+    pub fn skipped(&self) -> Option<(&str, u32)> {
+        self.skipped.as_deref().map(|v| (v, build_of(self.skipped_build.unwrap_or(1))))
+    }
 }
 
 /// A check is due: never checked, a day has passed, or the clock went back.
@@ -351,6 +370,8 @@ pub fn this_install() -> Install {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
     pub version: String,
+    /// The build of `version` (1 and up).
+    pub build: u32,
     pub notes_url: String,
     /// The Download button's page; `None` for package installs (and when the file has none).
     pub download: Option<String>,
@@ -360,7 +381,10 @@ pub struct Notice {
 impl Notice {
     /// The banner's line.
     pub fn message(&self) -> String {
-        let head = format!("Uzumaki {} is available.", self.version);
+        let head = match self.build {
+            0 | 1 => format!("Uzumaki {} is available.", self.version),
+            b => format!("Uzumaki {} (build {b}) is available.", self.version),
+        };
         match self.install {
             Install::Direct | Install::AppImage => head,
             Install::System => format!("{head} Update with your package manager."),
@@ -369,9 +393,11 @@ impl Notice {
     }
 }
 
-/// The notice for `latest`, if it is newer than `current` and not skipped.
-pub fn notice(latest: &Latest, current: &str, skipped: Option<&str>, install: Install, mac: bool) -> Option<Notice> {
-    if !is_newer(&latest.version, current) || skipped == Some(latest.version.as_str()) {
+/// The notice for `latest`, if it is newer than `current` (version, build) and not skipped.
+/// A skip holds for one (version, build): a higher build of the same version shows again.
+pub fn notice(latest: &Latest, current: (&str, u32), skipped: Option<(&str, u32)>, install: Install, mac: bool) -> Option<Notice> {
+    let build = build_of(latest.build);
+    if !is_newer((&latest.version, build), current) || skipped.is_some_and(|(v, b)| same_version(v, &latest.version) && build_of(b) == build) {
         return None;
     }
     let d = &latest.downloads;
@@ -386,7 +412,12 @@ pub fn notice(latest: &Latest, current: &str, skipped: Option<&str>, install: In
         Install::Direct | Install::AppImage => Some(file).filter(|u| is_web(u)).or(Some(&latest.notes_url).filter(|u| is_web(u))).cloned(),
         Install::System | Install::Homebrew => None,
     };
-    Some(Notice { version: latest.version.clone(), notes_url: latest.notes_url.clone(), download, install })
+    Some(Notice { version: latest.version.clone(), build, notes_url: latest.notes_url.clone(), download, install })
+}
+
+/// Two version strings name the same version (`v0.2.0` and `0.2.0` do).
+fn same_version(a: &str, b: &str) -> bool {
+    a == b || matches!((Version::parse(a), Version::parse(b)), (Some(x), Some(y)) if x == y)
 }
 
 /// Only web links are opened from the file (never `file:` or a custom scheme).
@@ -453,12 +484,14 @@ pub fn spawn_manual(done: impl FnOnce(Result<Latest, String>, Option<u64>) + Sen
         .ok();
 }
 
-/// Remembers "Skip this version" (on a worker thread: the UI never waits on the disk).
-pub fn skip(version: String) {
+/// Remembers "Skip this version" for this (version, build) (on a worker thread: the UI never
+/// waits on the disk).
+pub fn skip(version: String, build: u32) {
     std::thread::spawn(move || {
         let Some(path) = record_path() else { return };
         let mut rec = Record::load(&path);
         rec.skipped = Some(version);
+        rec.skipped_build = Some(build_of(build));
         rec.save(&path);
     });
 }
@@ -467,39 +500,61 @@ pub fn skip(version: String) {
 mod tests {
     use super::*;
 
+    /// `is_newer` for two builds 1.
+    fn newer(a: &str, b: &str) -> bool {
+        is_newer((a, 1), (b, 1))
+    }
+
     fn v(s: &str) -> Version {
         Version::parse(s).unwrap_or_else(|| panic!("{s}"))
     }
 
     #[test]
     fn versions_compare_like_semver() {
-        assert!(is_newer("0.2.0", "0.1.0"));
-        assert!(is_newer("0.1.1", "0.1.0"));
-        assert!(is_newer("1.0.0", "0.99.99"));
-        assert!(is_newer("0.10.0", "0.9.0"), "numbers, not text");
-        assert!(is_newer("v0.2.0", "0.1.0"), "a leading v is fine");
-        assert!(!is_newer("0.1.0", "0.1.0"));
-        assert!(!is_newer("0.0.9", "0.1.0"));
+        assert!(newer("0.2.0", "0.1.0"));
+        assert!(newer("0.1.1", "0.1.0"));
+        assert!(newer("1.0.0", "0.99.99"));
+        assert!(newer("0.10.0", "0.9.0"), "numbers, not text");
+        assert!(newer("v0.2.0", "0.1.0"), "a leading v is fine");
+        assert!(!newer("0.1.0", "0.1.0"));
+        assert!(!newer("0.0.9", "0.1.0"));
         // Pre-releases come before their release.
-        assert!(is_newer("0.2.0", "0.2.0-beta.1"));
-        assert!(!is_newer("0.2.0-beta.1", "0.2.0"));
-        assert!(is_newer("0.2.0-beta.1", "0.1.0"));
-        assert!(is_newer("0.2.0-beta.10", "0.2.0-beta.2"));
-        assert!(is_newer("0.2.0-rc.1", "0.2.0-beta.9"));
-        assert!(is_newer("0.2.0-beta.1.1", "0.2.0-beta.1"));
-        assert!(is_newer("0.2.0-beta", "0.2.0-1"), "words after numbers");
+        assert!(newer("0.2.0", "0.2.0-beta.1"));
+        assert!(!newer("0.2.0-beta.1", "0.2.0"));
+        assert!(newer("0.2.0-beta.1", "0.1.0"));
+        assert!(newer("0.2.0-beta.10", "0.2.0-beta.2"));
+        assert!(newer("0.2.0-rc.1", "0.2.0-beta.9"));
+        assert!(newer("0.2.0-beta.1.1", "0.2.0-beta.1"));
+        assert!(newer("0.2.0-beta", "0.2.0-1"), "words after numbers");
         // Build data doesn't count.
-        assert!(!is_newer("0.1.0+abc", "0.1.0"));
+        assert!(!newer("0.1.0+abc", "0.1.0"));
         // Unreadable is never newer.
         for bad in ["", "1", "1.2", "1.2.3.4", "x.y.z", "1.2.-3", "1.2.3-", "1.2.3-a..b", "latest"] {
             assert!(Version::parse(bad).is_none(), "{bad}");
-            assert!(!is_newer(bad, "0.1.0"), "{bad}");
+            assert!(!newer(bad, "0.1.0"), "{bad}");
         }
         assert_eq!(v("1.2.3-alpha.1"), Version { major: 1, minor: 2, patch: 3, pre: vec!["alpha".into(), "1".into()] });
     }
 
     #[test]
+    fn a_higher_build_of_the_same_version_is_newer() {
+        assert!(is_newer(("0.1.0", 2), ("0.1.0", 1)));
+        assert!(!is_newer(("0.1.0", 1), ("0.1.0", 2)), "running a later build");
+        assert!(!is_newer(("0.1.0", 1), ("0.1.0", 1)));
+        assert!(is_newer(("v0.1.0", 3), ("0.1.0", 2)), "a leading v is the same version");
+        // The version wins over the build.
+        assert!(is_newer(("0.2.0", 1), ("0.1.0", 9)));
+        assert!(!is_newer(("0.1.0", 9), ("0.2.0", 1)));
+        // Build 0 (a file without `build`) is build 1.
+        assert!(!is_newer(("0.1.0", 0), ("0.1.0", 1)));
+        assert!(!is_newer(("0.1.0", 1), ("0.1.0", 0)));
+        assert!(is_newer(("0.1.0", 2), ("0.1.0", 0)));
+        assert!(!is_newer(("latest", 5), ("0.1.0", 1)), "unreadable is never newer");
+    }
+
+    #[test]
     fn this_build_reads_as_a_version() {
+        assert!(crate::BUILD >= 1);
         assert!(Version::parse(crate::VERSION).is_some());
     }
 
@@ -619,6 +674,7 @@ mod tests {
             last_check: Some(42),
             latest: Some(Latest { version: "0.3.0".into(), notes_url: "https://x/n".into(), ..Default::default() }),
             skipped: Some("0.2.0".into()),
+            skipped_build: Some(2),
         };
         rec.save(&path);
         assert_eq!(Record::load(&path), rec);
@@ -650,38 +706,61 @@ mod tests {
         // A file from before the AppImage: no `appimage`, the rest as it was.
         let old: Latest = serde_json::from_str(r#"{"version":"0.2.0","downloads":{"macos_dmg":"https://x/U.dmg","linux_tarball":"https://x/u.tar.gz"}}"#).unwrap();
         assert_eq!((old.downloads.appimage.as_str(), old.downloads.linux_tarball.as_str()), ("", "https://x/u.tar.gz"));
+        // No `build` (every file before builds existed): 0, compared as build 1.
+        assert_eq!((l.build, bare.build), (0, 0));
+        assert!(notice(&bare, ("0.2.0", 1), None, Install::Direct, true).is_none(), "the same release");
+        let built: Latest = serde_json::from_str(r#"{"version":"0.2.0","build":3}"#).unwrap();
+        assert_eq!(built.build, 3);
+    }
+
+    #[test]
+    fn a_rebuild_shows_with_its_build_and_skips_per_build() {
+        let l = Latest { build: 2, ..sample() };
+        let n = notice(&l, ("0.2.0", 1), None, Install::Direct, true).unwrap();
+        assert_eq!((n.version.as_str(), n.build), ("0.2.0", 2));
+        assert_eq!(n.message(), "Uzumaki 0.2.0 (build 2) is available.");
+        assert!(notice(&l, ("0.2.0", 2), None, Install::Direct, true).is_none(), "already on build 2");
+        // Skipping build 1 of 0.2.0 doesn't hide build 2; skipping build 2 does.
+        assert!(notice(&l, ("0.1.0", 1), Some(("0.2.0", 1)), Install::Direct, true).is_some());
+        assert!(notice(&l, ("0.1.0", 1), Some(("0.2.0", 2)), Install::Direct, true).is_none());
+        assert!(notice(&l, ("0.1.0", 1), Some(("v0.2.0", 2)), Install::Direct, true).is_none());
+        // A record from before builds: its skip is build 1.
+        let old: Record = serde_json::from_str(r#"{"last_check":1,"skipped":"0.2.0"}"#).unwrap();
+        assert_eq!(old.skipped(), Some(("0.2.0", 1)));
+        assert!(notice(&sample(), ("0.1.0", 1), old.skipped(), Install::Direct, true).is_none());
+        assert!(notice(&l, ("0.1.0", 1), old.skipped(), Install::Direct, true).is_some());
     }
 
     #[test]
     fn skip_hides_only_that_version() {
         let l = sample();
-        assert!(notice(&l, "0.1.0", None, Install::Direct, true).is_some());
-        assert!(notice(&l, "0.1.0", Some("0.2.0"), Install::Direct, true).is_none());
+        assert!(notice(&l, ("0.1.0", 1), None, Install::Direct, true).is_some());
+        assert!(notice(&l, ("0.1.0", 1), Some(("0.2.0", 1)), Install::Direct, true).is_none());
         let newer = Latest { version: "0.2.1".into(), ..l.clone() };
-        assert!(notice(&newer, "0.1.0", Some("0.2.0"), Install::Direct, true).is_some(), "a newer one shows again");
-        assert!(notice(&l, "0.2.0", None, Install::Direct, true).is_none(), "already up to date");
-        assert!(notice(&l, "0.3.0", None, Install::Direct, true).is_none(), "running a newer build");
+        assert!(notice(&newer, ("0.1.0", 1), Some(("0.2.0", 1)), Install::Direct, true).is_some(), "a newer one shows again");
+        assert!(notice(&l, ("0.2.0", 1), None, Install::Direct, true).is_none(), "already up to date");
+        assert!(notice(&l, ("0.3.0", 1), None, Install::Direct, true).is_none(), "running a newer build");
     }
 
     #[test]
     fn download_goes_to_this_systems_file() {
         let l = sample();
-        let mac = notice(&l, "0.1.0", None, Install::Direct, true).unwrap();
+        let mac = notice(&l, ("0.1.0", 1), None, Install::Direct, true).unwrap();
         assert_eq!(mac.download.as_deref(), Some(l.downloads.macos_dmg.as_str()));
         assert_eq!(mac.message(), "Uzumaki 0.2.0 is available.");
-        let linux = notice(&l, "0.1.0", None, Install::Direct, false).unwrap();
+        let linux = notice(&l, ("0.1.0", 1), None, Install::Direct, false).unwrap();
         assert_eq!(linux.download.as_deref(), Some(l.downloads.linux_tarball.as_str()));
-        let appimage = notice(&l, "0.1.0", None, Install::AppImage, false).unwrap();
+        let appimage = notice(&l, ("0.1.0", 1), None, Install::AppImage, false).unwrap();
         assert_eq!(appimage.download.as_deref(), Some(l.downloads.appimage.as_str()));
         assert_eq!(appimage.message(), "Uzumaki 0.2.0 is available.");
         // An older latest.json without the AppImage: the release page, not the tarball.
         let no_appimage = Latest { downloads: Downloads { appimage: String::new(), ..l.downloads.clone() }, ..l.clone() };
-        assert_eq!(notice(&no_appimage, "0.1.0", None, Install::AppImage, false).unwrap().download.as_deref(), Some(l.notes_url.as_str()));
+        assert_eq!(notice(&no_appimage, ("0.1.0", 1), None, Install::AppImage, false).unwrap().download.as_deref(), Some(l.notes_url.as_str()));
         // No file for this system: the release page; nothing usable: no button.
         let no_file = Latest { downloads: Downloads::default(), ..l.clone() };
-        assert_eq!(notice(&no_file, "0.1.0", None, Install::Direct, true).unwrap().download.as_deref(), Some(l.notes_url.as_str()));
+        assert_eq!(notice(&no_file, ("0.1.0", 1), None, Install::Direct, true).unwrap().download.as_deref(), Some(l.notes_url.as_str()));
         let odd = Latest { notes_url: "javascript:alert(1)".into(), downloads: Downloads { macos_dmg: "file:///etc/passwd".into(), ..Default::default() }, ..l };
-        assert_eq!(notice(&odd, "0.1.0", None, Install::Direct, true).unwrap().download, None);
+        assert_eq!(notice(&odd, ("0.1.0", 1), None, Install::Direct, true).unwrap().download, None);
     }
 
     #[test]
@@ -691,7 +770,7 @@ mod tests {
             (Install::System, " Update with your package manager."),
             (Install::Homebrew, " Update with your package manager (brew upgrade uzumaki)."),
         ] {
-            let n = notice(&l, "0.1.0", None, install, install == Install::Homebrew).unwrap();
+            let n = notice(&l, ("0.1.0", 1), None, install, install == Install::Homebrew).unwrap();
             assert_eq!(n.download, None);
             assert_eq!(n.message(), format!("Uzumaki 0.2.0 is available.{tail}"));
             assert!(n.message().contains("Update with your package manager"));

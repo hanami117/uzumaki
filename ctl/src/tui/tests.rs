@@ -2704,7 +2704,7 @@ mod lyrics_screen {
         }
     }
 
-    /// The user's report (about 1065×950 px: 105-120 columns by 40-48 rows): solo, `l`, lyrics
+    /// A roughly square window (about 1065×950 px: 105-120 columns by 40-48 rows): solo, `l`, lyrics
     /// still loading at first, then synced. They sit right of the cover at every such size.
     #[test]
     fn l_puts_the_lyrics_right_of_the_cover_in_a_roughly_square_window() {

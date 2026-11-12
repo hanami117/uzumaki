@@ -76,7 +76,7 @@ fn execute(inv: &Invocation) -> Result<(), Fail> {
         return Ok(());
     }
     if inv.cmd == Command::Version {
-        println!("uzu {}", env!("CARGO_PKG_VERSION"));
+        println!("uzu {}", uzumaki_ctl::version_line());
         return Ok(());
     }
     if inv.cmd == Command::CoverInfo {

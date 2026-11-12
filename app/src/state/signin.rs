@@ -1,4 +1,4 @@
-//! The guided Apple sign-in (docs/ONBOARDING.md, stage 3), state side: the sign-in window, the
+//! The guided Apple sign-in (the onboarding's Sign in step), state side: the sign-in window, the
 //! account's storefront (saved in settings, shown read-only in Settings → Account) and restarting
 //! a bridge that failed. The steps themselves are `ui::onboarding`'s.
 

@@ -1,6 +1,6 @@
-//! Where the music comes from: Apple Music (through the bridge) or local files only
-//! (docs/ONBOARDING.md, stage 2). The bridge starts when Apple Music is wanted and stops for
-//! local only; the Apple sign-in, caches and settings stay either way (decision 4).
+//! Where the music comes from: Apple Music (through the bridge) or local files only. The bridge
+//! starts when Apple Music is wanted and stops for local only; the Apple sign-in, caches and
+//! settings stay either way.
 
 use super::*;
 use crate::settings::MusicSource;

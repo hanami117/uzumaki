@@ -1,5 +1,5 @@
 /* Uzumaki in-browser demo: HTML/CSS replica of the main window (1100x690 design size).
-   Colours, radii and spacing follow the real app (docs/design-spec.md + headless renders). */
+   Colours, radii and spacing follow the real app (its theme and headless renders). */
 .demo-hero { padding: 0; overflow: clip; --fit: .5; }
 .demo-hero .swirl { position: absolute; top: -10%; bottom: auto; }
 .demo-sticky { position: sticky; top: 0; padding: 56px 0 24px; }

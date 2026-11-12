@@ -25,7 +25,7 @@ ipcRenderer.on('cadence:cmd', async (_e, msg) => {
 
 webFrame.executeJavaScript(`(${pageBridge})();`);
 
-// ---- the sign-in window's CSS layer (bridge/signin.js, decision 3)
+// ---- the sign-in window's CSS layer (bridge/signin.js)
 // While the window shows for `signIn`, main sends the CSS and the sign-in hosts. This marks
 // music.apple.com's own elements around Apple's sign-in frame (the dialog's box and its
 // ancestors), so the CSS can fade the rest of the page into our background. It never touches the

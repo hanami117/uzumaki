@@ -3,6 +3,7 @@
 # it runs on isn't quarantined, so it opens without Gatekeeper warnings).
 #
 #   packaging/macos/build.sh      → target/macos.noindex/Uzumaki.app and Uzumaki-<version>.dmg there
+#                                   (Uzumaki-<version>-<build>.dmg from build 2 on: see BUILD)
 #
 # The build copy is kept out of Launchpad, Spotlight and Open With (only the installed copy
 # should show): the folder ends in .noindex, so Spotlight never indexes it (and so never hands the
@@ -29,6 +30,13 @@ command -v rsvg-convert >/dev/null || die "rsvg-convert is missing (brew install
 version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 [[ -n $version ]] || die "no version in Cargo.toml's [workspace.package]"
 grep -q "\"version\": \"$version\"" bridge/package.json || die "bridge/package.json's version isn't $version"
+# The build number: BUILD at the top of the repo (also About, `--version`, the update check). It
+# goes up when a package is rebuilt without code changes. Info.plist's CFBundleVersion is the build,
+# CFBundleShortVersionString the version.
+build=$(tr -d '[:space:]' <BUILD)
+[[ $build =~ ^[1-9][0-9]*$ ]] || die "BUILD must hold a whole number above 0 (got '$build')"
+# File names carry the build from build 2 on: Uzumaki-0.1.0.dmg, then Uzumaki-0.1.0-2.dmg.
+if ((build == 1)); then release=$version; else release=$version-$build; fi
 out=${CARGO_TARGET_DIR:-target}/macos.noindex
 app=$out/Uzumaki.app
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
@@ -50,7 +58,7 @@ for v in dark:uzumaki light:uzumaki-light coral:uzumaki-coral; do
 done
 
 # --- Build --------------------------------------------------------------------------------------
-say "Building Uzumaki $version (release)"
+say "Building Uzumaki $version (build $build, release)"
 cargo build --release --locked -p uzumaki -p uzumaki-ctl
 bin=${CARGO_TARGET_DIR:-target}/release
 
@@ -121,7 +129,7 @@ cat >"$app/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>Uzumaki</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$version</string>
-    <key>CFBundleVersion</key><string>$version</string>
+    <key>CFBundleVersion</key><string>$build</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
@@ -143,7 +151,7 @@ if [[ -x $evs ]]; then
 fi
 
 # --- Disk image ---------------------------------------------------------------------------------
-dmg=$out/Uzumaki-$version.dmg
+dmg=$out/Uzumaki-$release.dmg
 say "Making $dmg"
 stage=$work/dmg
 mkdir "$stage"

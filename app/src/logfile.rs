@@ -23,7 +23,7 @@ pub fn redirect_stderr() {
     // its own descriptor when it drops.
     if unsafe { libc::dup2(file.as_raw_fd(), 2) } >= 0 {
         let secs = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        eprintln!("--- uzumaki {} started, pid {}, unix time {secs}", env!("CARGO_PKG_VERSION"), std::process::id());
+        eprintln!("--- uzumaki {} started, pid {}, unix time {secs}", uzumaki_ctl::version_line(), std::process::id());
     }
 }
 

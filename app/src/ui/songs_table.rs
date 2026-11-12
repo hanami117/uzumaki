@@ -47,7 +47,7 @@ pub struct TableView {
 }
 
 impl Default for TableView {
-    /// Playlists open as Songs, newest additions on top (the user's preference); the library
+    /// Playlists open as Songs, newest additions on top; the library
     /// by title; local files in folder order.
     fn default() -> Self {
         Self {

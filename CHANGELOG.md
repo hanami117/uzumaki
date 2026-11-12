@@ -3,6 +3,14 @@
 All notable changes to Uzumaki. Versions follow [semantic versioning](https://semver.org/); `packaging/release.sh`
 takes each release's notes from its section here.
 
+## [Unreleased]
+
+### Added
+- A build number beside the version (the `BUILD` file; 0.1.0 is build 1), so the packages can be rebuilt without
+  code changes. It shows in About ("Version 0.1.0 (1)"), Settings → General → About and `uzumaki --version` /
+  `uzu --version` ("0.1.0 (build 1)"), and is the macOS bundle's `CFBundleVersion`. The update check compares
+  version, then build: a higher build of the same version is an update, and "Skip this version" skips one build.
+
 ## [0.1.0] - 2026-11-12
 
 The first public release: a public beta for Linux and macOS. You need an Apple Music subscription. Uzumaki is not

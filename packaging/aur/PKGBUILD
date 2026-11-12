@@ -1,9 +1,12 @@
 # Maintainer: hanami117 <hello at getuzumaki dot app>
 #
 # Draft for the AUR package `uzumaki`, built from the release's source tarball.
-# Fill in at release time (packaging/release.sh prints both values):
+# Fill in at release time (packaging/release.sh prints these values):
 #   - pkgver        the release version, without the v
+#   - _build        the upstream build number (the BUILD file; 1 for a new version)
 #   - sha256sums    the tarball's checksum (uzumaki-<version>.tar.gz.sha256 on the release)
+#   - pkgrel        1 for a new version. One more for a change to this PKGBUILD only (the same
+#                   tarball), and for a new upstream build of the same version.
 # Then: makepkg --printsrcinfo > .SRCINFO, test (makepkg -si, namcap PKGBUILD *.pkg.tar.zst,
 # extra-x86_64-build), and push PKGBUILD + .SRCINFO to ssh://aur@aur.archlinux.org/uzumaki.git.
 #
@@ -32,6 +35,10 @@
 
 pkgname=uzumaki
 pkgver=0.1.0
+# The upstream build: 1 is tag v<version>, a rebuild of the same version is v<version>-<build>
+# (tarball uzumaki-<version>-<build>.tar.gz, still unpacking to uzumaki-<version>/).
+_build=1
+if ((_build > 1)); then _rel=$pkgver-$_build; else _rel=$pkgver; fi
 pkgrel=1
 pkgdesc='Native desktop client for Apple Music, GPU-rendered in Rust (needs a subscription)'
 # castLabs Electron is fetched for the build machine's architecture; only x86_64 is tested.
@@ -82,7 +89,7 @@ optdepends=(
 # fetches castLabs Electron from its git repository.
 makedepends=('cargo' 'npm' 'git' 'pkgconf')
 options=('!lto')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/hanami117/uzumaki/releases/download/v$pkgver/uzumaki-$pkgver.tar.gz")
+source=("$pkgname-$_rel.tar.gz::https://github.com/hanami117/uzumaki/releases/download/v$_rel/uzumaki-$_rel.tar.gz")
 # FILL AT RELEASE: the tarball's sha256 (packaging/release.sh prints it).
 sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
 

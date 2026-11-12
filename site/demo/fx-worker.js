@@ -1,5 +1,5 @@
 /* Uzumaki demo: renders the app's real background effects (crate uzumaki-fx, compiled to fx.wasm:
-   see docs/ROADMAP.md "fx-web") off the main thread.
+   built from fx-web/) off the main thread.
    in:  {slot, id, url, w, h, unit, effect, bitmap?}   (newest job per slot wins; older queued ones are dropped).
         `url` is the picture's address and its cache key; with `bitmap` (an ImageBitmap the page already decoded: the
         "Make it yours" preview's own picture) nothing is fetched and `url` is only a key.

@@ -576,7 +576,7 @@ mod tests {
         assert!(read(&mut rt, |s| s.ui.dnd.pin.is_none()));
     }
 
-    /// The user's sidebar is usually the collapsed rail: pins reorder there too. (A tall
+    /// The sidebar is often the collapsed rail: pins reorder there too. (A tall
     /// window, so the rail doesn't scroll: `Runtime::find` gives layout positions.)
     #[test]
     fn pins_reorder_in_the_collapsed_rail_too() {

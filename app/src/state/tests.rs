@@ -311,7 +311,7 @@ fn signed(date: &str) -> Artwork {
 
 /// A picture someone uploaded to a playlist is a link that dies after a day. The page saved
 /// yesterday has the dead one (Apple answers 406 "wrong time info"), the list just re-fetched has
-/// a live one: the page must show the live one (measured on the user's cache, 2026-11-10).
+/// a live one: the page must show the live one (seen in a real cache).
 #[test]
 fn a_cached_playlist_page_takes_the_lists_fresh_picture_link() {
     let mut s = State::offline();
@@ -616,7 +616,7 @@ fn shuffle_repeat_and_data_saver_are_settings() {
     assert!(!s.hide_on_close(), "no tray in tests: closing quits");
 }
 
-// ---------------------------------------------------------------- local files (batch D)
+// ---------------------------------------------------------------- local files
 
 fn local(name: &str) -> Song {
     Song { id: format!("file:///music/{name}.flac"), title: name.into(), ..song(name) }
@@ -805,7 +805,7 @@ fn removing_a_music_folder_drops_its_songs_at_once() {
     assert_eq!(s.settings.music_folders, [std::path::PathBuf::from("/")], "a parent replaces its children");
 }
 
-// ---------------------------------------------------------------- batch E
+// ---------------------------------------------------------------- new playlists, right sidebar, shortcuts
 
 #[test]
 fn a_new_playlist_request_names_it_and_carries_only_apple_songs() {
@@ -2043,7 +2043,7 @@ fn follow_theme_applies_the_icon_only_when_it_changes_and_touches_no_files_offli
     assert_eq!(requests(), before, "no icon was applied");
 }
 
-// ---------------------------------------------------------------- local only mode (onboarding stage 2)
+// ---------------------------------------------------------------- local only mode
 
 use crate::settings::MusicSource;
 
@@ -2105,7 +2105,7 @@ fn switching_sources_stops_and_starts_the_bridge_and_keeps_the_sign_in() {
     assert_eq!(s.settings.music_source, MusicSource::LocalOnly);
     assert!(s.bridge.is_none() && !running(&s), "stopped");
     assert!(!s.session.bridge_up && s.session.error.is_none());
-    assert!(s.session.authorized && s.session.storefront.is_some(), "the sign-in is kept (decision 4)");
+    assert!(s.session.authorized && s.session.storefront.is_some(), "switching keeps the sign-in");
     assert_eq!(s.route, Route::Search, "a page local only has stays");
     assert!(s.back_stack.iter().all(|r| !r.needs_apple()), "no way back to an Apple page");
     assert_eq!(s.ui.search_tab, crate::ui::SearchTab::Local);
@@ -2119,7 +2119,7 @@ fn switching_sources_stops_and_starts_the_bridge_and_keeps_the_sign_in() {
     assert!(s.session.error.is_none());
 
     // Back to Apple: a new bridge, and (not signed in) the guided sign-in step on its own; Apple's
-    // window waits for its button (stage 3).
+    // window waits for its button.
     s.session.authorized = false;
     s.switch_to_apple();
     assert_eq!(started(&starts), 2);
@@ -2195,7 +2195,7 @@ fn number_keys_skip_the_apple_pages_in_local_only_mode() {
     assert_eq!(crate::ui::slot_target(&s, 5), None);
 }
 
-// ---------------------------------------------------------------- local only library tabs (stage 2b)
+// ---------------------------------------------------------------- local only library tabs
 
 mod local_tabs {
     use super::*;
@@ -2354,7 +2354,7 @@ mod local_tabs {
 }
 
 
-// ---------------------------------------------------------------- storefront (onboarding stage 3)
+// ---------------------------------------------------------------- storefront
 
 fn storefront_asks(s: &State) -> Vec<String> {
     s.sent.borrow().iter().filter(|l| l.contains("storefront")).cloned().collect()

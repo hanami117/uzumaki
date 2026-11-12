@@ -52,6 +52,9 @@ pub const APP_ID: &str = "io.github.hanami117.uzumaki";
 /// The app's version: the workspace's (`Cargo.toml`), the one source for About, Settings,
 /// `--version`, the update check and the macOS bundle (`packaging/macos/build.sh`).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The build number (the `BUILD` file; see `uzumaki_ctl::BUILD`). It goes up when a package is
+/// rebuilt without code changes; the update check compares (version, build).
+pub const BUILD: u32 = uzumaki_ctl::BUILD;
 /// The copyright line (Settings → General → About; the macOS About panel and Info.plist spell it out too).
 pub const COPYRIGHT: &str = "© 2026 Thomas Lonigro";
 
@@ -145,7 +148,7 @@ fn paint_window_bg(handle: &rune::WindowHandle) {
 
 fn main() {
     if std::env::args().skip(1).any(|a| a == "--version" || a == "-V") {
-        println!("uzumaki {VERSION}");
+        println!("uzumaki {}", uzumaki_ctl::version_line());
         return;
     }
     // Wayland app_id / X11 WM_CLASS: the dock, taskbar and window switcher find the icon
@@ -300,7 +303,7 @@ fn main() {
 
     // No library on disk (first start, or the library cache was cleared): the intro waits for it.
     let needs_sync = cache::Cache::default_location().needs_sync();
-    // A new install gets the onboarding instead of the intro (docs/ONBOARDING.md "Who sees it").
+    // A new install gets the onboarding instead of the intro (`onboarding::at_launch` says who).
     // `UZUMAKI_ONBOARDING=1` shows it anyway, for a look on a scratch config.
     let forced = std::env::var_os("UZUMAKI_ONBOARDING").is_some_and(|v| v == "1");
     let fresh = cache::Cache::default_location().fresh();
@@ -311,7 +314,7 @@ fn main() {
         s.engine = Some(ui_engine);
         s.load_local();
         s.background = hidden;
-        // `--login` also keeps Sign in on the bridge's full window (debug; docs/ROADMAP.md).
+        // `--login` also keeps Sign in on the bridge's full window (a debug path).
         s.session.debug_login = debug_login;
         // A `--hidden` start sets the onboarding up too: it shows when the window first opens.
         // A new install starts no bridge until Apple Music is chosen (or the tour skipped).

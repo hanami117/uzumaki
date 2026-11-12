@@ -1,4 +1,4 @@
-//! First-run onboarding (docs/ONBOARDING.md), stage 1: the shell.
+//! First-run onboarding. The shell:
 //!
 //! Welcome → Choice (Apple Music or local files only) → Done, in one full-window layer drawn
 //! where the intro is drawn. The app sits folded behind it (`intro::fold`) and twists out of the
@@ -6,19 +6,19 @@
 //! "Show the tour again" (Settings → General) replays Welcome → Tour → Done; the choice and
 //! sign-in are not replayed.
 //!
-//! Stage 2 (local only): no bridge runs while the onboarding is up until Apple Music is chosen
-//! (decision 1), or the tour is skipped (Apple mode is the default). Choosing Apple starts it, and
+//! Local only: no bridge runs while the onboarding is up until Apple Music is chosen, or the
+//! tour is skipped (Apple mode is the default). Choosing Apple starts it, and
 //! today's sign-in window (`State::show_login`) opens once the app is up. Choosing local files
 //! stops it again (after Back) and adds a Music folders step; the app lands on Local Files.
 //!
-//! Stage 3 (guided sign-in): after choosing Apple Music, the Sign in step explains, then opens
+//! Guided sign-in: after choosing Apple Music, the Sign in step explains, then opens
 //! the bridge's sign-in window (`signIn`: small, centred; Apple's own page, Uzumaki never sees the
 //! password). Its states: getting ready (no `ready` yet), lead-in, waiting, closed without
 //! signing in, signed in (the store chip, then on by itself), and the bridge's error. The library
 //! syncs behind the rest of the tour (no sync screen; a progress line at the bottom). Settings →
 //! Account → Apple Music opens this step on its own (`Mode::SignIn`).
 //!
-//! Stage 4 (shortcuts tour): after the sign-in or the folders, and on a replay, a tour of the
+//! Shortcuts tour: after the sign-in or the folders, and on a replay, a tour of the
 //! main shortcuts (`ui/tour.rs`): cards from `keys::BINDINGS` with the user's own chords, a
 //! small picture of the app that does what each key does, press the key to go on, Next always
 //! works. The tour has its own keys (`key`): the layer is a Rune modal, and the app's shortcuts
@@ -50,11 +50,11 @@ pub const TOUR_VERSION: u32 = 1;
 pub enum Step {
     Welcome,
     Choice,
-    /// Local files only: pick the music folders (docs/ONBOARDING.md 3b).
+    /// Local files only: pick the music folders.
     Folders,
-    /// Apple Music: the guided sign-in (docs/ONBOARDING.md 3a).
+    /// Apple Music: the guided sign-in.
     SignIn,
-    /// The shortcuts tour (docs/ONBOARDING.md 4, `ui/tour.rs`).
+    /// The shortcuts tour (`ui/tour.rs`).
     Tour,
     Done,
 }
@@ -88,7 +88,7 @@ pub enum SignInView {
 pub enum Mode {
     /// A new install: Welcome → Choice → Sign in or Folders → Tour → Done.
     FirstRun,
-    /// Settings → General → Show again: Welcome → Tour → Done (decision 2: no choice, no sign-in).
+    /// Settings → General → Show again: Welcome → Tour → Done (no choice, no sign-in).
     Replay,
     /// Settings → Account → Apple Music while not signed in: the Sign in step on its own.
     SignIn,
@@ -187,7 +187,7 @@ impl Onboarding {
     }
 }
 
-/// Whether a launch shows the onboarding (docs/ONBOARDING.md "Who sees it"): never finished or
+/// Whether a launch shows the onboarding: never finished or
 /// skipped, and nothing on disk from an earlier run (`Cache::fresh`), and not a second test copy.
 /// `forced` (`UZUMAKI_ONBOARDING=1`) shows it anyway, for a look on a scratch config. A
 /// `--hidden` start still sets it up: it shows when the window first opens.
@@ -442,7 +442,7 @@ pub fn menu_press(s: &mut State, action: super::keys::Action, tx: &mut Tx) {
 }
 
 /// Choice: Apple Music or local files only. Stored at once. Apple starts the bridge now
-/// (decision 1: the sign-in waits for it, and Widevine's first download takes a while); local
+/// (the sign-in waits for it, and Widevine's first download takes a while); local
 /// only stops one started by an earlier Apple choice (after Back).
 pub fn choose(s: &mut State, source: MusicSource) {
     let Some(o) = s.ui.onboarding.as_mut() else { return };
@@ -1496,7 +1496,7 @@ mod tests {
         assert!(!s.session.login_window && !s.session.login_after_ready);
     }
 
-    // ---------------------------------------------------------------- stage 3: sign in
+    // ---------------------------------------------------------------- sign in
 
     use crate::bridge::Event;
     use crate::state::Msg;
@@ -1705,7 +1705,7 @@ mod tests {
         assert_eq!(opened, 2);
     }
 
-    // ---------------------------------------------------------------- stage 4: the tour
+    // ---------------------------------------------------------------- the tour
 
     use crate::ui::keys::Action;
     use tour::Card;
@@ -2068,7 +2068,7 @@ mod tests {
         });
     }
 
-    // ------------------------------------------------------------ stage 5: Reduce Motion
+    // ------------------------------------------------------------ Reduce Motion
 
     /// Frames for `secs`, asserting nothing moves: under Reduce Motion every element sits on
     /// its layout goal (no slide, spring or entrance offset), keeps its scale, and nothing

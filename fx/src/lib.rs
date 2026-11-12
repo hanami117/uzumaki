@@ -142,7 +142,7 @@ pub fn render_on(src: &RgbaImage, effect: Effect, target: Target, ground: Ground
 }
 
 /// Darkest a light-ground background gets (sRGB, of 255), at full opacity. Text sits straight on
-/// the picture (no backing), so this trades picture against text: at 90 the user's bright picture
+/// the picture (no backing), so this trades picture against text: at 90 a bright test picture
 /// keeps every text element at 4.5:1 (titles 3:1) up to the 0.9 top strength with the darker
 /// light ink over a picture (`theme::LIGHT_INK`), while showing about as much picture as an
 /// unfloored one at 0.6. A very dark picture at high strength can still bring small grey text below

@@ -11,15 +11,17 @@ use objc2::{MainThreadMarker, sel};
 use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem};
 use objc2_foundation::{NSDictionary, NSString};
 
-/// The standard About panel (name and icon from the bundle). The version is the binary's own
-/// (`CARGO_PKG_VERSION`, the same as `crate::VERSION`), so a `cargo run` outside the bundle shows it too, plus the licence.
+/// The standard About panel (name and icon from the bundle). The version and build are the
+/// binary's own, so a `cargo run` outside the bundle shows them too: AppKit writes
+/// "Version 0.1.0 (1)". Plus the licence. (Spelled out instead of `crate::VERSION` and
+/// `crate::BUILD`: the menu bar test builds this file on its own.)
 pub fn about() {
     let Some(mtm) = MainThreadMarker::new() else { return };
     let app = NSApplication::sharedApplication(mtm);
     let keys = [NSString::from_str("ApplicationVersion"), NSString::from_str("Version"), NSString::from_str("Copyright")];
     let values = [
         NSString::from_str(env!("CARGO_PKG_VERSION")),
-        NSString::from_str(env!("CARGO_PKG_VERSION")),
+        NSString::from_str(&uzumaki_ctl::BUILD.to_string()),
         NSString::from_str("© 2026 Thomas Lonigro\nFree software under the GNU GPL, version 3 or later."),
     ];
     let keys: Vec<&NSString> = keys.iter().map(|k| &**k).collect();

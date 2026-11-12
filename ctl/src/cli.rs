@@ -222,7 +222,7 @@ In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (
   quit                        quit Uzumaki (does nothing if it isn't running)
   restart                     quit and start again (the queue starts empty)
   cover-info                  how the cover is drawn in this terminal (for bug reports)
-  --version                   uzu's version
+  --version                   uzu's version and build
 
 <playlist> and <album> are a number from the list, or part of the name.
 A lone number in 'play <n>' follows the last list printed by playlists, albums, playlist,

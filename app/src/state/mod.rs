@@ -196,7 +196,7 @@ pub struct Session {
     /// The storefront whose name was asked for this session.
     pub storefront_named: Option<String>,
     /// Started with `--login`: Sign in (banner, Settings) opens the bridge's full window, as
-    /// before the guided step (a debug path; docs/ROADMAP.md).
+    /// before the guided step (a debug path).
     pub debug_login: bool,
 }
 

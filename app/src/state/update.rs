@@ -10,8 +10,9 @@ pub struct AutoCheck {
     timer: bool,
     /// An automatic check's worker is out and hasn't answered.
     running: bool,
-    /// The version whose notice was closed with ✕: "until the next start" holds for the timer too.
-    dismissed: Option<String>,
+    /// The (version, build) whose notice was closed with ✕: "until the next start" holds for the
+    /// timer too.
+    dismissed: Option<(String, u32)>,
 }
 
 impl State {
@@ -79,12 +80,12 @@ impl State {
         if !self.settings.check_updates {
             return;
         }
-        let dismissed = self.update_auto.dismissed.as_deref();
+        let dismissed = self.update_auto.dismissed.as_ref();
         self.update = rec
             .latest
             .as_ref()
-            .and_then(|l| update::notice(l, crate::VERSION, rec.skipped.as_deref(), install, cfg!(target_os = "macos")))
-            .filter(|n| dismissed != Some(n.version.as_str()));
+            .and_then(|l| update::notice(l, (crate::VERSION, crate::BUILD), rec.skipped(), install, cfg!(target_os = "macos")))
+            .filter(|n| dismissed.is_none_or(|(v, b)| *v != n.version || *b != n.build));
     }
 
     /// Settings → General → Check for updates. On: check now (still at most once a day). Off:
@@ -127,7 +128,7 @@ impl State {
     pub fn manual_answer(&mut self, answer: Result<update::Latest, String>, last_check: Option<u64>, install: Install) {
         self.update_check.running = false;
         self.update_check.last_check = last_check.or(self.update_check.last_check);
-        let notice = answer.as_ref().ok().and_then(|l| update::notice(l, crate::VERSION, None, install, cfg!(target_os = "macos")));
+        let notice = answer.as_ref().ok().and_then(|l| update::notice(l, (crate::VERSION, crate::BUILD), None, install, cfg!(target_os = "macos")));
         let line = match (&answer, &notice) {
             (_, Some(n)) => n.message(),
             (Ok(_), None) => update::UP_TO_DATE.to_string(),
@@ -144,14 +145,14 @@ impl State {
 
     /// ✕ on the notice: gone until the next start.
     pub fn dismiss_update(&mut self) {
-        self.update_auto.dismissed = self.update.take().map(|n| n.version);
+        self.update_auto.dismissed = self.update.take().map(|n| (n.version, n.build));
     }
 
     /// "Skip this version": gone, and this version never shows again (a newer one will).
     pub fn skip_update(&mut self) {
         if let Some(n) = self.update.take() {
             if self.handle.is_some() {
-                update::skip(n.version);
+                update::skip(n.version, n.build);
             }
         }
     }
@@ -345,12 +346,25 @@ mod tests {
         assert!(s.update.is_none(), "dismissed until the next start");
         s.update_known(&record("99.1.0", late), Install::Direct);
         assert_eq!(s.update.as_ref().unwrap().version, "99.1.0");
+        // A dismissed version's next build shows too.
+        s.dismiss_update();
+        let mut rebuilt = record("99.1.0", late);
+        rebuilt.latest.as_mut().unwrap().build = 2;
+        s.update_known(&record("99.1.0", late), Install::Direct);
+        assert!(s.update.is_none(), "the same build stays closed");
+        s.update_known(&rebuilt, Install::Direct);
+        assert_eq!(s.update.as_ref().map(|n| n.build), Some(2));
         // A skipped version never shows (the record says so), with the package-manager wording kept.
         let mut s = State::offline();
         let mut rec = record("99.0.0", t0);
         rec.skipped = Some("99.0.0".into());
         s.update_known(&rec, Install::System);
         assert!(s.update.is_none());
+        // Skipped build 1; build 2 of the same version shows.
+        rec.latest.as_mut().unwrap().build = 2;
+        s.update_known(&rec, Install::System);
+        assert!(s.update.is_some());
+        rec.latest.as_mut().unwrap().build = 1;
         rec.skipped = None;
         s.update_known(&rec, Install::System);
         let n = s.update.as_ref().unwrap();
@@ -359,7 +373,7 @@ mod tests {
         let mut s = State::offline();
         s.update_check.running = true;
         assert!(!s.auto_check_wanted(late));
-        s.update_auto.dismissed = Some("99.0.0".into());
+        s.update_auto.dismissed = Some(("99.0.0".into(), 1));
         s.manual_answer(Ok(latest("99.0.0")), Some(late), Install::Direct);
         assert!(s.update.is_some());
     }
