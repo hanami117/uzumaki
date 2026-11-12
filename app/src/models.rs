@@ -403,6 +403,12 @@ fn album_id_from_url(url: &str) -> Option<String> {
 pub mod api {
     use super::*;
 
+    /// A read about the signed-in account: its library, history, ratings, recommendations or
+    /// station. Its reply is dropped if the account changed meanwhile (`state::Msg::Account`).
+    pub fn is_personal(path: &str, params: &Value) -> bool {
+        path.starts_with("/v1/me/") || params["filter[identity]"] == "personal"
+    }
+
     pub fn search(term: &str) -> (String, Value) {
         (
             "/v1/catalog/{{storefrontId}}/search".into(),
@@ -623,6 +629,9 @@ mod tests {
     fn album_path_substitutes_storefront_placeholder_literally() {
         assert_eq!(api::album("42").0, "/v1/catalog/{{storefrontId}}/albums/42");
         assert_eq!(api::album("l.x").0, "/v1/me/library/albums/l.x");
+        let personal = |(path, params): (String, Value)| api::is_personal(&path, &params);
+        assert!(personal(api::album("l.x")) && personal(api::library_songs()) && personal(api::personal_station()));
+        assert!(!personal(api::album("42")) && !personal(api::live_radio()) && !personal(api::search("x")));
     }
 
     #[test]

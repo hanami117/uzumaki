@@ -7,6 +7,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::de::DeserializeOwned;
@@ -30,6 +31,10 @@ pub const SESSION: &str = "session.json";
 #[derive(Clone, Debug)]
 pub struct Cache {
     dir: PathBuf,
+    /// The account's generation on disk: `forget_personal` bumps it, and a save of the
+    /// account's data asked under an older one is skipped (it would bring the files back).
+    /// Held while writing and while forgetting, so the two never interleave.
+    account: Arc<Mutex<u64>>,
 }
 
 /// A payload read back with the time it was saved.
@@ -61,7 +66,7 @@ pub fn now_secs() -> u64 {
 
 impl Cache {
     pub fn at(dir: PathBuf) -> Self {
-        Self { dir }
+        Self { dir, account: Arc::default() }
     }
 
     pub fn default_location() -> Self {
@@ -114,7 +119,12 @@ impl Cache {
     /// Serializes and writes on a background thread (failures are only logged).
     pub fn save<T: Serialize + Send + 'static>(&self, name: impl Into<String>, data: T) {
         let (cache, name) = (self.clone(), name.into());
+        let asked_under = *self.account.lock().unwrap_or_else(PoisonError::into_inner);
         let spawned = std::thread::Builder::new().name("cache-write".into()).spawn(move || {
+            let account = cache.account.lock().unwrap_or_else(PoisonError::into_inner);
+            if *account != asked_under && personal_file(&name) {
+                return; // signed out since
+            }
             if let Err(e) = cache.write(&name, &data) {
                 eprintln!("uzumaki: library cache write {name}: {e}");
             } else if name.starts_with("collections/") {
@@ -196,28 +206,33 @@ impl Cache {
         let _ = std::fs::remove_file(self.dir.join(Self::collection_name(id)));
     }
 
-    /// Signed out: removes everything tied to the account (background thread).
+    /// Signed out: removes everything tied to the account, at once (a few files), and drops
+    /// the account's saves still pending (see `account`).
     pub fn forget_personal(&self) {
-        let cache = self.clone();
-        std::thread::spawn(move || {
-            for name in [SONGS, ALBUMS, PLAYLISTS, SHELVES] {
-                let _ = std::fs::remove_file(cache.dir.join(name));
-            }
-            // Library ids start with "l." (albums) or "p." (playlists); catalog ones never do.
-            if let Ok(rd) = std::fs::read_dir(cache.dir.join("collections")) {
-                for e in rd.flatten() {
-                    let n = e.file_name().to_string_lossy().to_string();
-                    if n.starts_with("l.") || n.starts_with("p.") {
-                        let _ = std::fs::remove_file(e.path());
-                    }
+        let mut account = self.account.lock().unwrap_or_else(PoisonError::into_inner);
+        *account += 1;
+        for name in [SONGS, ALBUMS, PLAYLISTS, SHELVES] {
+            let _ = std::fs::remove_file(self.dir.join(name));
+        }
+        if let Ok(rd) = std::fs::read_dir(self.dir.join("collections")) {
+            for e in rd.flatten() {
+                if personal_file(&format!("collections/{}", e.file_name().to_string_lossy())) {
+                    let _ = std::fs::remove_file(e.path());
                 }
             }
-        });
+        }
     }
 
     fn prune_collections(&self, keep: usize) {
         prune_oldest(&self.dir.join("collections"), keep);
     }
+}
+
+/// A file of the account's own data: the library lists, Listen Now's shelves, and library
+/// albums ("l.…") and playlists ("p.…"; catalog ids never start so).
+fn personal_file(name: &str) -> bool {
+    [SONGS, ALBUMS, PLAYLISTS, SHELVES].contains(&name)
+        || name.strip_prefix("collections/").is_some_and(|n| n.starts_with("l.") || n.starts_with("p."))
 }
 
 /// Does the probe (the newest items, newest first) match the cached list's newest ids?

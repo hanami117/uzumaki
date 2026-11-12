@@ -101,3 +101,23 @@ fn fresh_only_with_no_session_and_no_library() {
     c.write(SESSION, &true).unwrap();
     assert!(!c.fresh() && c.signed_in());
 }
+
+/// A save of the library asked before signing out (still on its thread) must not bring the
+/// file back after `forget_personal`; the next account's saves and catalog pages are written.
+#[test]
+fn a_save_from_before_signing_out_is_not_written_after_it() {
+    let c = temp("signout");
+    let wait = || std::thread::sleep(std::time::Duration::from_millis(300));
+    c.write(&Cache::collection_name("1440"), &collection("1440")).unwrap();
+    c.save(PLAYLISTS, vec![collection("p.1")]);
+    c.save(Cache::collection_name("p.1"), collection("p.1"));
+    c.forget_personal();
+    wait();
+    assert!(c.read::<Vec<Collection>>(PLAYLISTS).is_none(), "the old account's list came back");
+    assert!(c.read_collection("p.1").is_none());
+    assert!(c.read_collection("1440").is_some(), "catalog pages stay");
+    c.save(PLAYLISTS, vec![collection("p.2")]);
+    wait();
+    assert!(c.read::<Vec<Collection>>(PLAYLISTS).is_some(), "the next account's list is saved");
+    let _ = std::fs::remove_dir_all(c.dir());
+}

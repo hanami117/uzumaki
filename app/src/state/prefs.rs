@@ -70,11 +70,8 @@ impl State {
         // The auth event may have done this already; do it regardless.
         self.session.authorized = false;
         self.save(cache::SESSION, false);
-        self.clear_personal();
-        self.forget_storefront();
-        if let Some(c) = &self.cache {
-            c.forget_personal();
-        }
+        self.resume = None;
+        self.drop_account();
         self.toast = Some("Signed out of Apple Music.".into());
     }
 

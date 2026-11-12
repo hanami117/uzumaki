@@ -8,18 +8,52 @@ use crate::models::{CollectionKind, Page, api};
 use super::*;
 
 impl State {
+    /// Forgets every list and page of the account in memory (signing in or out), and starts a
+    /// new `Session::account`: replies to what was asked before are dropped when they land.
     pub(super) fn clear_personal(&mut self) {
+        self.session.account += 1;
         self.shelves = Default::default();
         self.shelf_stale = [false; 2];
         self.library_albums = Paged::default();
         self.library_playlists = Paged::default();
         self.library_songs = Paged::default();
-        let personal = |id: &String| id.starts_with("l.") || id.starts_with("p.");
-        self.collections.retain(|id, _| !personal(id));
-        self.coll_cache.retain(|id, _| !personal(id));
-        self.coll_refresh.retain(|id, _| !personal(id));
+        self.library_artists = Paged::default();
+        self.recently_added = Paged::default();
+        self.made_for_you = Load::Idle;
+        self.radio[1] = Load::Idle; // the personal station
+        self.collections.retain(|id, _| !personal_id(id));
+        self.coll_cache.retain(|id, _| !personal_id(id));
+        self.coll_refresh.retain(|id, _| !personal_id(id));
+        self.artist_pages.retain(|id, _| !Artist::is_library_id(id));
+        self.artist_albums.retain(|id, _| !Artist::is_library_id(id));
+        self.pl_rewrites.clear();
+        self.creating_playlist = false;
         self.pl_sync = PlaylistSync::default();
         self.forget_favourites();
+    }
+
+    /// Signed out: the account's data goes, in memory and on disk, and so do the pages and pins
+    /// that showed it. Local files stay.
+    pub(super) fn drop_account(&mut self) {
+        self.clear_personal();
+        self.syncing = false;
+        self.forget_storefront();
+        if let Some(c) = &self.cache {
+            c.forget_personal();
+        }
+        // Apple songs heard this session (the History panel); local ones stay.
+        self.history.tracks.retain(|(_, s)| s.is_local());
+        self.back_stack.retain(|r| !r.personal());
+        if self.route.personal() {
+            self.route = Route::Home;
+            self.ui.route_changed();
+            self.remember_route();
+        }
+        let pins = self.settings.pins.len();
+        self.settings.pins.retain(|p| !personal_id(&p.id) && !Artist::is_library_id(&p.id));
+        if self.settings.pins.len() != pins {
+            self.save_settings();
+        }
     }
 
     // ---------------------------------------------------------------- first sync
@@ -231,6 +265,9 @@ impl State {
     fn lookup_collection_cache(&mut self) {
         let Route::Collection { id, .. } = &self.route else { return };
         let (Some(cache), Some(handle)) = (&self.cache, &self.handle) else { return };
+        if personal_id(id) && !self.session.authorized {
+            return; // signed out: the account's pages are gone from disk too
+        }
         if self.coll_cache.contains_key(id) || matches!(self.collections.get(id), Some(Load::Ready(_))) {
             return;
         }
@@ -338,8 +375,9 @@ impl State {
     ) {
         #[cfg(test)]
         self.sent.borrow_mut().push(format!("{path} {params}"));
+        let account = api::is_personal(&path, &params).then_some(self.session.account);
         if let Some(b) = &self.bridge {
-            b.api(&path, params, move |r| Some(wrap(r.map(|v| parse(&v)))));
+            b.api(&path, params, move |r| Some(stamp(account, wrap(r.map(|v| parse(&v))))));
         }
     }
 
@@ -434,7 +472,7 @@ impl State {
                 self.ensure_library_songs();
                 self.ensure_library_artists();
             }
-            Route::Collection { kind, id } => self.load_collection(kind, &id),
+            Route::Collection { kind, id } if me || !personal_id(&id) => self.load_collection(kind, &id),
             Route::New if self.browse_new == Load::Idle => {
                 self.browse_new = Load::Loading;
                 self.request(api::editorial(), crate::models::parse_editorial, |result| Msg::Browse {
@@ -477,6 +515,20 @@ impl State {
             }
             _ => {}
         }
+    }
+}
+
+/// A library album ("l.…") or playlist ("p.…") id: the account's own.
+pub(super) fn personal_id(id: &str) -> bool {
+    id.starts_with("l.") || id.starts_with("p.")
+}
+
+/// A reply about the account, stamped with the `Session::account` it was asked under (None:
+/// not about the account, passed as it is).
+pub(super) fn stamp(account: Option<u64>, msg: Msg) -> Msg {
+    match account {
+        Some(generation) => Msg::Account { generation, msg: Box::new(msg) },
+        None => msg,
     }
 }
 

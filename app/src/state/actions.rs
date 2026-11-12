@@ -561,8 +561,9 @@ impl State {
             return;
         }
         let (id, name, count) = (playlist.id.clone(), playlist.title.clone(), data.len());
+        let account = Some(self.session.account);
         b.api_post(&format!("/v1/me/library/playlists/{id}/tracks"), serde_json::json!({ "data": data }), move |r| {
-            Some(Msg::AddedToPlaylist { id, name, count, result: r.map(|_| ()) })
+            Some(super::library::stamp(account, Msg::AddedToPlaylist { id, name, count, result: r.map(|_| ()) }))
         });
     }
 

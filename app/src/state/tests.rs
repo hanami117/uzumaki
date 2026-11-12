@@ -2503,3 +2503,134 @@ fn the_storefront_reply_reads_apple_s_list() {
     assert_eq!(super::signin::parse_storefront_for_tests(&v["data"]), Some(("it".into(), Some("Italy".into()))));
     assert_eq!(super::signin::parse_storefront_for_tests(&serde_json::json!({"data": []})), None);
 }
+
+/// A library filled the way a signed-in session fills it, signed in with the bridge up, plus
+/// local files: what `sign_out` must take away (all but the local files).
+fn signed_in_with_a_library() -> State {
+    use crate::settings::{Pin, PinKind};
+    let mut s = State::offline();
+    s.session.bridge_up = true;
+    s.session.authorized = true;
+    s.library_songs = Paged::ready(vec![song("i.mine")]);
+    s.library_albums = Paged::ready(vec![album("l.mine")]);
+    s.library_playlists = Paged::ready(vec![album("p.mine")]);
+    s.library_artists = Paged::ready(vec![crate::models::Artist { id: "r.mine".into(), name: "Artist r.mine".into() }]);
+    s.recently_added = Paged::ready(vec![album("l.mine")]);
+    s.shelves[0] = Load::Ready(Shelf { title: "Recently Played".into(), items: vec![album("p.mine")], songs: vec![], stations: vec![] });
+    s.made_for_you = Load::Ready(vec![]);
+    s.radio = [Load::Ready(vec![]), Load::Ready(vec![])];
+    s.collections.insert("p.mine".into(), Load::Ready(album("p.mine")));
+    s.collections.insert("1440".into(), Load::Ready(album("1440")));
+    s.artist_pages.insert("r.mine".into(), Load::Loading);
+    s.local_lib.songs = vec![song("file:///music/a.flac")];
+    s.local_lib.loaded = true;
+    s.history.tracks = vec![(1, song("i.heard")), (2, song("file:///music/a.flac"))];
+    let pin = |kind, id: &str| Pin { kind, id: id.into(), title: format!("Pin {id}"), artwork: None };
+    s.settings.pins = vec![pin(PinKind::Playlist, "p.mine"), pin(PinKind::Album, "1440"), pin(PinKind::Artist, "r.mine")];
+    s.play_songs(&[song("i.mine")], 0);
+    s.navigate(Route::Collection { kind: CollectionKind::Playlist, id: "p.mine".into() });
+    s
+}
+
+/// Nothing of the account is left in the state; local files, catalog pages and catalog pins are.
+fn assert_nothing_personal(s: &State) {
+    assert!(!s.session.authorized);
+    assert!(s.library_songs.items.is_empty() && s.library_songs.load == Load::Idle, "songs: {:?}", s.library_songs.items.len());
+    assert!(s.library_albums.items.is_empty() && s.library_playlists.items.is_empty());
+    assert!(s.library_artists.items.is_empty() && s.recently_added.items.is_empty());
+    assert_eq!(s.shelves, [Load::Idle, Load::Idle]);
+    assert_eq!(s.made_for_you, Load::Idle);
+    assert_eq!(s.radio[1], Load::Idle, "the personal station");
+    assert!(!s.collections.contains_key("p.mine") && s.collections.contains_key("1440"));
+    assert!(s.collections.keys().all(|id| !id.starts_with("p.") && !id.starts_with("l.")), "{:?}", s.collections.keys());
+    assert!(s.artist_pages.keys().all(|id| !id.starts_with("r.")));
+    assert!(s.playback.song.is_none() && s.queue.current().is_none());
+    assert_eq!(s.route, Route::Home, "the playlist's page closed");
+    assert!(s.back_stack.iter().all(|r| !r.personal()));
+    let pins: Vec<_> = s.settings.pins.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(pins, ["1440"], "library pins go, catalog ones stay");
+    let heard: Vec<_> = s.history.tracks.iter().map(|(_, x)| x.id.as_str()).collect();
+    assert_eq!(heard, ["file:///music/a.flac"]);
+    assert_eq!(s.local_lib.songs.len(), 1, "local files stay");
+}
+
+/// Settings → Account → Sign out, in the bridge's real order: `signOut` unauthorizes MusicKit
+/// (the page's `auth` false), answers, then the page reloads (`ready`, signed out). Meanwhile
+/// replies asked while signed in keep landing: a library page, a playlist, a shelf, the next
+/// page's Unauthorized. None of them may bring the library back (user report, 2026-11-12).
+#[test]
+fn replies_landing_after_a_sign_out_are_dropped() {
+    let mut s = signed_in_with_a_library();
+    let before = s.session.account;
+    let late = |msg: Msg| Msg::Account { generation: before, msg: Box::new(msg) };
+    s.session.signing_out = true;
+    s.apply_msg(Msg::Bridge(Event::Auth { authorized: false, storefront: None }));
+    // A page of the songs refresh, asked before the sign-out, lands between the two.
+    let page = Page { items: vec![song("i.late")], next: Some("/v1/me/library/songs?offset=100".into()), total: Some(500) };
+    assert!(!s.apply_msg(late(Msg::LibrarySongs(Ok(page)))));
+    s.apply_msg(Msg::SignedOut(Ok(())));
+    s.apply_msg(Msg::Bridge(Event::Ready { authorized: false, storefront: None, volume: None }));
+    s.sent.borrow_mut().clear();
+    for msg in [
+        Msg::LibrarySongs(Err("Unauthorized".into())),
+        Msg::LibraryPlaylists(Ok(Page { items: vec![album("p.late")], next: None, total: None })),
+        Msg::LibraryAlbums(Ok(Page { items: vec![album("l.late")], next: Some("/v1/me/library/albums?offset=100".into()), total: None })),
+        Msg::Collection { id: "p.late".into(), result: Ok((album("p.late"), None)) },
+        Msg::Shelf { index: 0, result: Ok(vec![album("l.late")]) },
+        Msg::RecentlyAdded(Ok(Page { items: vec![album("l.late")], next: None, total: None })),
+        Msg::Browse { page: BrowsePage::PersonalStation, result: Ok(vec![]) },
+        Msg::PlaylistCreated { name: "New".into(), songs: vec![], result: Ok(album("p.new")) },
+    ] {
+        assert!(!s.apply_msg(late(msg)));
+    }
+    assert!(s.sent.borrow().is_empty(), "nothing asked of Apple for the old account: {:?}", s.sent.borrow());
+    assert_nothing_personal(&s);
+    assert!(s.toast.as_deref().is_some_and(|t| t.contains("Signed out")));
+
+    // A catalog reply (not about the account) still lands, and so does the next account's.
+    s.apply_msg(Msg::Collection { id: "1441".into(), result: Ok((album("1441"), None)) });
+    assert!(s.collections.contains_key("1441"));
+    s.apply_msg(Msg::Bridge(Event::Auth { authorized: true, storefront: None }));
+    let now = s.session.account;
+    assert_ne!(now, before);
+    let page = Page { items: vec![song("i.new")], next: None, total: None };
+    s.apply_msg(Msg::Account { generation: now, msg: Box::new(Msg::LibrarySongs(Ok(page))) });
+    assert_eq!(s.library_songs.items.len(), 1);
+}
+
+/// The headless path (no bridge to wait for) drops the same things.
+#[test]
+fn signing_out_leaves_nothing_personal_but_keeps_local_files() {
+    let mut s = signed_in_with_a_library();
+    s.sign_out();
+    assert_nothing_personal(&s);
+}
+
+/// What the window draws after signing out on Library → Songs and on a library playlist: no
+/// song, album or playlist of the account anywhere (song table, sidebar, pins, player bar).
+#[test]
+fn the_window_shows_nothing_of_the_account_after_signing_out() {
+    for route in [Route::Library(LibraryTab::Songs), Route::Home, Route::Collection { kind: CollectionKind::Playlist, id: "p.mine".into() }] {
+        let mut s = signed_in_with_a_library();
+        s.settings.onboarded = Some(crate::ui::onboarding::TOUR_VERSION);
+        s.navigate(route.clone());
+        let before = s.session.account;
+        let mut rt = rune::Runtime::new(s, crate::ui::view, (1360.0, 860.0), rune::Env { system_dark: true, scale: 1.0 });
+        rt.frame(0.0);
+        let texts = |rt: &rune::Runtime<State>| -> Vec<String> {
+            rt.elements().into_iter().filter(|e| !e.exiting).flat_map(|e| e.text.into_iter().chain(e.label)).collect()
+        };
+        let mine = |t: &String| t.contains("i.mine") || t.contains("p.mine") || t.contains("l.mine") || t.contains("r.mine") || t.contains("i.heard");
+        assert!(texts(&rt).iter().any(mine), "{route:?}: the fixture shows the account before");
+        rt.update(|s, _| {
+            s.sign_out();
+            let late = Page { items: vec![song("i.mine")], next: None, total: None };
+            s.apply_msg(Msg::Account { generation: before, msg: Box::new(Msg::LibrarySongs(Ok(late))) });
+        });
+        for _ in 0..90 {
+            rt.frame(1.0 / 60.0);
+        }
+        let shown: Vec<String> = texts(&rt).into_iter().filter(mine).collect();
+        assert!(shown.is_empty(), "{route:?}: still shown after signing out: {shown:?}");
+    }
+}

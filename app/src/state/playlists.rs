@@ -55,9 +55,10 @@ impl State {
         self.sent.borrow_mut().push(format!("POST /v1/me/library/playlists {body}"));
         let Some(b) = &self.bridge else { return };
         self.creating_playlist = true;
+        let account = Some(self.session.account);
         b.api_post("/v1/me/library/playlists", body, move |r| {
             let result = r.and_then(|v| v["data"].get(0).and_then(Collection::parse).ok_or_else(|| "Apple sent no playlist back".to_string()));
-            Some(Msg::PlaylistCreated { name, songs: apple, result })
+            Some(super::library::stamp(account, Msg::PlaylistCreated { name, songs: apple, result }))
         });
     }
 
