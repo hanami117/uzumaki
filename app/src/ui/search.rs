@@ -37,7 +37,7 @@ fn field(s: &State) -> El {
     let mut r = row().key("search-box").role("textbox").w_full().max_w(720.0).h(52.0).px(16.0).gap(12.0).center_y().radius(14.0)
         .fill(PAL.field).border(1.0, PAL.field_border).cursor(Cursor::Text)
         .child(icon(&icons::SEARCH, 20.0).color(PAL.dim))
-        .child(
+        .child(super::caret::ink(
             text_input(&s.ui.search, TextStyle::new(18.0, 400.0))
                 .key("search").grow(1.0).single_line().color(PAL.text).placeholder(ph, PAL.dim)
                 .on_edit(|s: &mut State| &mut s.ui.search)
@@ -50,7 +50,8 @@ fn field(s: &State) -> El {
                     }
                     tx.blur();
                 }),
-        );
+            s,
+        ));
     if !s.ui.search.text.is_empty() {
         r = r.child(
             el().key("search-clear").role("button").label("Clear").focusable(true).size(26.0, 26.0).radius(13.0).center()

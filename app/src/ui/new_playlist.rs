@@ -79,6 +79,11 @@ pub fn close(s: &mut State) {
 
 /// Closes the dialog when a create that was running ended with the app on another page.
 /// True when it closed.
+/// The Name and Description fields (`caret.rs` looks for the focused one).
+pub(super) fn edits(d: &Dialog) -> [&TextEdit; 2] {
+    [&d.name, &d.desc]
+}
+
 pub fn poll(s: &mut State) -> bool {
     let now = s.creating_playlist;
     let d = &mut s.ui.new_pl;
@@ -192,6 +197,7 @@ fn picture_part(s: &State) -> (El, El) {
 }
 
 fn field(
+    s: &State,
     key: &'static str,
     label: &'static str,
     edit: &TextEdit,
@@ -214,6 +220,7 @@ fn field(
             }
             false
         });
+    let input = super::caret::ink(input, s);
     col().w_full().gap(6.0)
         .child(text(label).font(SMALL12).color(PAL.dim))
         .child(
@@ -235,8 +242,8 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
     let top = if has_fields(d) {
         // Like Apple's edit sheet: the picture left, the text fields right.
         let fields = col().grow(1.0).min_w(0.0).gap(16.0)
-            .child(field("new-playlist/name", "Name", &d.name, "Playlist name", |s| &mut s.ui.new_pl.name))
-            .child(field("new-playlist/desc", "Description (optional)", &d.desc, "Add a description", |s| &mut s.ui.new_pl.desc));
+            .child(field(s, "new-playlist/name", "Name", &d.name, "Playlist name", |s| &mut s.ui.new_pl.name))
+            .child(field(s, "new-playlist/desc", "Description (optional)", &d.desc, "Add a description", |s| &mut s.ui.new_pl.desc));
         col().w_full().gap(16.0)
             .child(row().w_full().gap(16.0).child(preview).child(fields))
             .child(controls)

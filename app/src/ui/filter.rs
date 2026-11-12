@@ -34,7 +34,7 @@ pub fn bar(s: &State, shown: usize, total: usize) -> Option<El> {
     let field = row().key("filter-box").role("textbox").grow(1.0).max_w(420.0).h(34.0).px(10.0).gap(8.0).center_y().radius(8.0)
         .fill(PAL.field).border(1.0, PAL.field_border).cursor(Cursor::Text)
         .child(icon(&icons::SEARCH, 14.0).color(PAL.dim))
-        .child(
+        .child(super::caret::ink(
             text_input(&s.ui.filter.edit, TextStyle::new(13.5, 400.0))
                 .key("filter").grow(1.0).single_line().color(PAL.text).placeholder("Filter by title, artist or album", PAL.dim)
                 .on_edit(|s: &mut State| &mut s.ui.filter.edit)
@@ -51,7 +51,8 @@ pub fn bar(s: &State, shown: usize, total: usize) -> Option<El> {
                     }
                     false
                 }),
-        )
+            s,
+        ))
         .child(text(counts).font(SMALL12).color(PAL.dim));
     let close_btn = el().key("filter-close").role("button").label("Close filter").focusable(true).size(28.0, 28.0).radius(14.0).center()
         .hover(crate::theme::ov(0.08)).cursor(Cursor::Pointer)

@@ -66,6 +66,7 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("artist-library-fallback", artist_library_fallback),
     ("search-library", search_library),
     ("search-apple", search_apple),
+    ("search-bg", search_bg),
     ("sidebar-pins", sidebar_pins),
     ("sidebar-playlist-art", sidebar_playlist_art),
     ("sidebar-collapsed", sidebar_collapsed),
@@ -1003,6 +1004,15 @@ fn search_apple(s: &mut State) {
     search(s);
     s.ui.search_tab = crate::ui::SearchTab::Apple;
     s.ui.search.text = "night".into();
+}
+
+/// The Search page over a picture background (Plain, the strengths of the defaults), for the
+/// field's caret and selection colours on a tinted page.
+fn search_bg(s: &mut State) {
+    search(s);
+    picture_bg(s, crate::appearance::Effect::Plain);
+    let a = &mut s.settings.appearance;
+    (a.opacity, a.list_opacity, a.light_opacity, a.light_list_opacity) = (0.65, 0.65, 0.9, 0.9);
 }
 
 fn pins() -> Vec<Pin> {

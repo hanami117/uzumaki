@@ -6,6 +6,7 @@ mod artists;
 mod backdrop;
 mod browse;
 mod cards;
+mod caret;
 mod carousel;
 mod collection;
 mod ctx_menu;
@@ -126,6 +127,8 @@ pub struct UiState {
     pub shakes: narrow::Shakes,
     /// Whether the focus came from Tab (Enter presses it) or a click (`keys::KbdFocus`).
     pub kbd: keys::KbdFocus,
+    /// The focused text field's caret blink (`caret.rs`).
+    caret: caret::Blink,
 }
 
 impl UiState {
@@ -173,7 +176,8 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
     let g = player_bar::poll(s, t, tx);
     let h = onboarding::poll(s, t, tx);
     let i = settings::poll(s, t, tx);
-    a || b || c || d || e || f || g || h || i
+    let j = caret::poll(s, t, tx);
+    a || b || c || d || e || f || g || h || i || j
 }
 
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {
@@ -204,6 +208,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     carousel::set_window(win);
     let rail = sidebar::is_rail(s, win[0]);
     let reduced = cx.is_reduced_motion();
+    caret::set_reduced(reduced);
     let compact = win[0] < COMPACT_W;
     // macOS draws the traffic lights over the window's top-left (Rune's full-size content), so the
     // sidebar keeps a band clear for them. None in full screen, and Linux draws its own frame.

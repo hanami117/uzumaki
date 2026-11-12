@@ -938,6 +938,7 @@ fn search_box(s: &State) -> El {
             }
             true
         });
+    let field = super::caret::ink(field, s);
     let mut b = row().key("settings/search-box").role("textbox").w_full().h(30.0).pl(9.0).pr(5.0).gap(7.0).center_y().radius(8.0)
         .fill(PAL.field).border(1.0, PAL.field_border).cursor(Cursor::Text)
         .child(icon(&icons::SEARCH, 13.0).color(PAL.dim))
