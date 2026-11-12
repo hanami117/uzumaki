@@ -330,7 +330,7 @@ details p { color: var(--ink-2); padding: 0 0 20px; max-width: 68ch; }
 }
 @media (max-width: 680px) {
   /* Two rows on phones: brand on top, every section link underneath (none hidden). */
-  .nav-in { flex-wrap: wrap; height: auto; padding-top: 10px; padding-bottom: 8px; row-gap: 6px; }
+  .nav-in { flex-wrap: wrap; justify-content: flex-start; height: auto; padding-top: 10px; padding-bottom: 8px; row-gap: 6px; }
   .nav nav { width: 100%; justify-content: space-between; gap: 8px; order: 3; margin-left: 0; }
   .nav-x { order: 2; margin-left: auto; width: 30px; height: 30px; }
   .nav-x + .nav-x { margin-left: 8px; }
