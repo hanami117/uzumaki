@@ -1997,6 +1997,8 @@ mod tests {
         press(&mut rt, KeyEvent { key: Key::Text("s".into()), mods: rune::Mods { alt: true, ..Default::default() } });
         assert_eq!(tour_now(&mut rt).1.hit, Some(Action::ToggleSidebar), "Alt+S tried it");
         if cfg!(target_os = "linux") {
+            // A hit never moves the tour on by itself: Next shows the right sidebar's card.
+            click(&mut rt, "onb/tour/next");
             run(&mut rt, 0.8);
             assert_eq!(caps(&rt, "onb/tour/caps/toggle_right_panel").as_deref(), Some("Ctrl Shift B"));
         }
