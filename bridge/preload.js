@@ -334,6 +334,18 @@ function pageBridge() {
 
   // Seconds a resumed song should start at, until playback runs there (see `startQueue`).
   let resumeAt = null;
+
+  // The account's storefront, once the app has asked Apple (`setStorefront`). The page keeps its
+  // URL's ("us") otherwise; see applyStorefront in signin.js. Applied again before playback starts,
+  // since music.apple.com sets preview-only again on its own after a sign-in.
+  let accountStorefront = null;
+  const ensureStorefront = () => {
+    if (!accountStorefront || !mk?.isAuthorized || typeof window.__uzumakiApplyStorefront !== 'function') return;
+    try {
+      const r = window.__uzumakiApplyStorefront(mk, accountStorefront);
+      if (r.before !== r.storefront) emit({ event: 'log', message: `storefront ${r.before} -> ${r.storefront} again` });
+    } catch {}
+  };
   async function seekToResume() {
     const at = resumeAt;
     resumeAt = null;
@@ -351,6 +363,7 @@ function pageBridge() {
     status: async () => status(),
     // `at`: a resumed song held paused (setQueue with startPlaying false) starts there.
     play: async ({ at } = {}) => {
+      ensureStorefront();
       if (Number(at) >= 0 && at !== undefined && at !== null) resumeAt = Number(at) > 0 ? Number(at) : null;
       await mk.play();
       await seekToResume();
@@ -412,8 +425,16 @@ function pageBridge() {
       try {
         await mk.stop();
       } catch {}
+      accountStorefront = null;
       await mk.unauthorize();
       return { authorized: !!mk.isAuthorized };
+    },
+    // The account's storefront (the app asked /v1/me/storefront): catalog calls and playback use it.
+    setStorefront: async ({ storefront }) => {
+      if (typeof window.__uzumakiApplyStorefront !== 'function') throw new Error('storefront setter not injected');
+      const r = window.__uzumakiApplyStorefront(mk, storefront);
+      accountStorefront = r.storefront;
+      return r;
     },
     // 256 (best, default) or 64 (data saver).
     setBitrate: async ({ kbps }) => {
@@ -428,6 +449,7 @@ function pageBridge() {
     // songIds: the clicked song first, then what should follow it (see "queue" above).
     setQueue: (args) => {
       const arrived = performance.now();
+      ensureStorefront();
       const gen = ++queueGen;
       pending = [];
       if (args.loop !== undefined) loop = Array.isArray(args.loop) && args.loop.length ? args.loop.map(String) : null;
@@ -529,7 +551,8 @@ function pageBridge() {
       emit({ event: 'time', current: t, duration: inst.currentPlaybackDuration ?? 0 });
     });
     inst.addEventListener('playbackVolumeDidChange', () => emit({ event: 'volume', value: inst.volume }));
-    // After a sign-in MusicKit switches to the account's storefront; the app saves it.
+    // The page's storefront (`storefrontId`, its URL's until `setStorefront`). Not the account's:
+    // the app asks Apple for that (/v1/me/storefront) and sends `setStorefront`.
     let storefrontSent = inst.storefrontId ?? null;
     inst.addEventListener('authorizationStatusDidChange', () => {
       storefrontSent = inst.storefrontId ?? null;

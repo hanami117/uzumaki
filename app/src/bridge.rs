@@ -61,7 +61,8 @@ pub enum Event {
     Ready { authorized: bool, storefront: Option<String>, volume: Option<f64> },
     /// The sign-in changed; `storefront` is MusicKit's storefront at that moment (newer bridges).
     Auth { authorized: bool, storefront: Option<String> },
-    /// MusicKit switched storefront (after a sign-in: the account's country, "it").
+    /// The page's MusicKit reports another `storefrontId`. That is the catalog's, not necessarily
+    /// the account's (`/v1/me/storefront` is asked for that, see `state::signin`).
     Storefront(String),
     NowPlaying(Option<Song>),
     PlayState(PlayState),
@@ -434,6 +435,11 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
     pub fn sign_in(&self, near: Option<[f32; 4]>) {
         self.send(sign_in_cmd(near));
     }
+    /// Puts the page's MusicKit on the account's storefront (`mk.storefrontId`; the page starts on
+    /// its URL's, "us"). The reply says what the page had and has (`applyStorefront` in signin.js).
+    pub fn set_storefront(&self, id: &str, on_reply: impl FnOnce(Result<Value, String>) -> Option<M> + Send + 'static) {
+        self.call(set_storefront_cmd(id), on_reply);
+    }
     pub fn show_window(&self, visible: bool) {
         self.send(json!({"cmd": if visible { "show" } else { "hide" }}));
     }
@@ -602,6 +608,11 @@ fn parse_event(name: &str, msg: &Value) -> Option<Event> {
 }
 
 /// `{"cmd":"signIn","near":{x,y,w,h}}`, `near` left out when unknown (Linux).
+/// `setStorefront`. The id goes as `storefront`: `id` is the message's own (`call` sets it).
+fn set_storefront_cmd(storefront: &str) -> Value {
+    json!({"cmd": "setStorefront", "storefront": storefront})
+}
+
 fn sign_in_cmd(near: Option<[f32; 4]>) -> Value {
     let mut cmd = json!({"cmd": "signIn"});
     if let Some([x, y, w, h]) = near.filter(|r| r.iter().all(|v| v.is_finite()) && r[2] > 0.0 && r[3] > 0.0) {
@@ -627,6 +638,13 @@ mod protocol_tests {
         // An older bridge sends no reason: not a close.
         assert!(!closed(r#"{"event":"window","visible":false}"#));
         assert!(matches!(event(r#"{"event":"window","visible":true}"#), Some(Event::Window { visible: true, closed: false })));
+    }
+
+    #[test]
+    fn set_storefront_keeps_clear_of_the_message_id() {
+        let cmd = set_storefront_cmd("it");
+        assert_eq!(cmd["storefront"], "it");
+        assert!(cmd.get("id").is_none(), "call() puts the message id there");
     }
 
     #[test]

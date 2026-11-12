@@ -2357,62 +2357,143 @@ mod local_tabs {
 // ---------------------------------------------------------------- storefront
 
 fn storefront_asks(s: &State) -> Vec<String> {
-    s.sent.borrow().iter().filter(|l| l.contains("storefront")).cloned().collect()
+    let ours = |l: &&String| ["setStorefront", "/v1/me/storefront", "/v1/storefronts/"].iter().any(|p| l.starts_with(p));
+    s.sent.borrow().iter().filter(ours).cloned().collect()
 }
 
-/// Signed in, the storefront that came with the sign-in is saved (and its name asked for once);
-/// a later `storefront` event replaces it; signing out forgets it.
+fn italy() -> Option<crate::settings::Storefront> {
+    Some(crate::settings::Storefront { id: "it".into(), name: Some("Italy".into()) })
+}
+
+/// The bug report: the page's MusicKit says "us" (its URL's storefront) before and after an Italian
+/// account signs in. That is never saved as the account's: Apple is asked once
+/// (`/v1/me/storefront`), its answer saved, and the page switched to it. Signing out forgets it.
 #[test]
-fn the_storefront_is_saved_after_sign_in() {
+fn the_account_s_storefront_comes_from_apple_not_from_the_page() {
     let mut s = State::offline();
     s.apply_msg(Msg::Bridge(Event::Ready { authorized: false, storefront: Some("us".into()), volume: None }));
     assert_eq!(s.session.storefront.as_deref(), Some("us"), "the page's, for its own requests");
-    assert_eq!(s.settings.storefront, None, "not an account's");
-    assert!(storefront_asks(&s).is_empty());
+    assert!(storefront_asks(&s).is_empty(), "signed out: nothing asked");
 
-    s.apply_msg(Msg::Bridge(Event::Auth { authorized: true, storefront: Some("it".into()) }));
-    assert_eq!(s.settings.storefront, Some(crate::settings::Storefront { id: "it".into(), name: None }));
+    s.apply_msg(Msg::Bridge(Event::Auth { authorized: true, storefront: Some("us".into()) }));
+    assert_eq!(s.settings.storefront, None, "the page's \"us\" isn't the account's");
+    assert_eq!(storefront_asks(&s), ["/v1/me/storefront {}"]);
+    s.apply_msg(Msg::AccountStorefront(Ok(("it".into(), Some("Italy".into())))));
+    assert_eq!(s.settings.storefront, italy());
     assert_eq!(s.session.storefront.as_deref(), Some("it"));
-    assert_eq!(storefront_asks(&s), ["/v1/storefronts/it {}"], "its name, once");
-    s.apply_msg(Msg::Storefront(Ok(("it".into(), Some("Italy".into())))));
-    assert_eq!(s.settings.storefront.as_ref().unwrap().label(), "Italy");
-    // The same again (a page reload's `ready`): nothing new asked, the name kept.
-    s.apply_msg(Msg::Bridge(Event::Ready { authorized: true, storefront: Some("it".into()), volume: None }));
-    assert_eq!(storefront_asks(&s).len(), 1);
-    assert_eq!(s.settings.storefront.as_ref().unwrap().label(), "Italy");
+    assert_eq!(storefront_asks(&s)[1..], ["setStorefront it"], "the page switched, no name lookup");
 
-    // MusicKit switches storefront afterwards.
-    s.apply_msg(Msg::Bridge(Event::Storefront("jp".into())));
-    assert_eq!(s.settings.storefront, Some(crate::settings::Storefront { id: "jp".into(), name: None }));
-    assert_eq!(s.session.storefront.as_deref(), Some("jp"));
+    // A page reload's `ready` (the page on "us" again): switched again, Apple not asked again.
+    s.apply_msg(Msg::Bridge(Event::Ready { authorized: true, storefront: Some("us".into()), volume: None }));
+    assert_eq!(storefront_asks(&s)[2..], ["setStorefront it"]);
+    s.apply_msg(Msg::Bridge(Event::Storefront("it".into())));
+    assert_eq!(storefront_asks(&s).len(), 3, "already there");
 
-    // Signed out: forgotten.
+    // Signed out: forgotten; a reply that lands afterwards is dropped.
     s.apply_msg(Msg::Bridge(Event::Auth { authorized: false, storefront: None }));
     assert_eq!(s.settings.storefront, None);
-    // A reply that lands after signing out is dropped.
-    s.apply_msg(Msg::Storefront(Ok(("jp".into(), Some("Japan".into())))));
+    s.apply_msg(Msg::AccountStorefront(Ok(("jp".into(), Some("Japan".into())))));
     assert_eq!(s.settings.storefront, None);
+    // Signing in again asks again.
+    s.apply_msg(Msg::Bridge(Event::Auth { authorized: true, storefront: Some("us".into()) }));
+    assert_eq!(storefront_asks(&s).iter().filter(|l| l.starts_with("/v1/me/storefront")).count(), 2);
 }
 
-/// No storefront came with the sign-in (an older bridge, or MusicKit didn't know it yet): Apple is
-/// asked once (`/v1/me/storefront`), and its answer saved with the name.
+/// Her settings today: "us" saved by the old code. The next start asks Apple, which says "it":
+/// saved, the page switched, and the catalog pages loaded from the US store asked again.
 #[test]
-fn the_storefront_falls_back_to_asking_apple_once() {
+fn a_wrong_saved_storefront_heals_at_the_next_start() {
     let mut s = State::offline();
-    s.apply_msg(Msg::Bridge(Event::Auth { authorized: true, storefront: None }));
-    assert_eq!(storefront_asks(&s), ["/v1/me/storefront {}"]);
-    s.apply_msg(Msg::Bridge(Event::Ready { authorized: true, storefront: None, volume: None }));
-    assert_eq!(storefront_asks(&s).len(), 1, "once");
-    s.apply_msg(Msg::Storefront(Err("offline".into())));
+    s.session.authorized = true;
+    s.settings.storefront = Some(crate::settings::Storefront { id: "us".into(), name: Some("United States".into()) });
+    s.route = Route::New;
+    s.apply_msg(Msg::Bridge(Event::Ready { authorized: true, storefront: Some("us".into()), volume: None }));
+    assert_eq!(storefront_asks(&s), ["/v1/me/storefront {}"], "the saved one matches the page: no switch yet");
+    assert_eq!(s.browse_new, Load::Loading, "the New page asked the US catalog");
+    let before = s.sent.borrow().len();
+
+    s.apply_msg(Msg::AccountStorefront(Ok(("it".into(), Some("Italy".into())))));
+    assert_eq!(s.settings.storefront, italy());
+    assert_eq!(storefront_asks(&s)[1..], ["setStorefront it"]);
+    let after: Vec<String> = s.sent.borrow()[before..].to_vec();
+    assert!(after.iter().any(|l| l.contains("editorial") || l.contains("groupings")), "New asked again: {after:?}");
+    assert_eq!(s.browse_new, Load::Loading);
+
+    // The start after: the saved "it" goes on the page at `ready`, before anything loads.
+    let mut s = State::offline();
+    s.session.authorized = true;
+    s.settings.storefront = italy();
+    s.route = Route::New;
+    s.apply_msg(Msg::Bridge(Event::Ready { authorized: true, storefront: Some("us".into()), volume: None }));
+    assert_eq!(storefront_asks(&s), ["setStorefront it", "/v1/me/storefront {}"]);
+    let first_catalog = s.sent.borrow().iter().position(|l| l.contains("editorial") || l.contains("groupings"));
+    assert!(first_catalog.is_some_and(|i| i > 0), "the page switched before New loaded");
+    let n = s.sent.borrow().len();
+    s.apply_msg(Msg::AccountStorefront(Ok(("it".into(), Some("Italy".into())))));
+    assert_eq!(s.sent.borrow().len(), n, "Apple agrees: nothing to do");
+}
+
+/// The lookup failed (offline): everything stays as it was, and it isn't asked again this run.
+#[test]
+fn a_failed_storefront_lookup_keeps_what_there_is() {
+    let mut s = State::offline();
+    s.session.authorized = true;
+    s.settings.storefront = italy();
+    s.apply_msg(Msg::Bridge(Event::Ready { authorized: true, storefront: Some("us".into()), volume: None }));
+    s.apply_msg(Msg::AccountStorefront(Err("offline".into())));
+    assert_eq!(s.settings.storefront, italy());
+    assert_eq!(s.session.storefront.as_deref(), Some("it"), "the saved one stays on the page");
+    s.apply_msg(Msg::Bridge(Event::Ready { authorized: true, storefront: Some("it".into()), volume: None }));
+    assert_eq!(storefront_asks(&s), ["setStorefront it", "/v1/me/storefront {}"], "once per start");
+
+    // Nothing saved and offline: nothing saved, the page left alone.
+    let mut s = State::offline();
+    s.apply_msg(Msg::Bridge(Event::Auth { authorized: true, storefront: Some("us".into()) }));
+    s.apply_msg(Msg::AccountStorefront(Err("offline".into())));
     assert_eq!(s.settings.storefront, None);
-    s.apply_msg(Msg::Storefront(Ok(("it".into(), Some("Italy".into())))));
-    assert_eq!(s.settings.storefront.as_ref().map(|f| f.label()), Some("Italy".into()));
-    assert_eq!(storefront_asks(&s).len(), 1, "the answer had the name");
-    // A saved storefront needs no fallback.
+    assert_eq!(storefront_asks(&s), ["/v1/me/storefront {}"]);
+}
+
+/// The decision on its own: saved + page + Apple's answer.
+#[test]
+fn the_account_storefront_decision() {
+    use super::signin::{AccountStorefront, account_storefront};
+    let us = crate::settings::Storefront { id: "us".into(), name: Some("United States".into()) };
+    // Saved "us", page "us", account "it": save it, switch.
+    assert_eq!(
+        account_storefront(Some(&us), Some("us"), Ok(("it".into(), Some("Italy".into())))),
+        Ok(AccountStorefront { id: "it".into(), save: italy(), switch_page: true })
+    );
+    // All the same: nothing.
+    assert_eq!(
+        account_storefront(italy().as_ref(), Some("it"), Ok(("it".into(), Some("Italy".into())))),
+        Ok(AccountStorefront { id: "it".into(), save: None, switch_page: false })
+    );
+    // No name in the answer: the saved name is kept for the same id; upper case is lowered.
+    assert_eq!(
+        account_storefront(italy().as_ref(), Some("it"), Ok(("IT".into(), None))),
+        Ok(AccountStorefront { id: "it".into(), save: None, switch_page: false })
+    );
+    // Nothing saved, page unknown: save, switch.
+    assert_eq!(
+        account_storefront(None, None, Ok(("it".into(), None))),
+        Ok(AccountStorefront { id: "it".into(), save: Some(crate::settings::Storefront { id: "it".into(), name: None }), switch_page: true })
+    );
+    // Lookup failed: keep.
+    assert_eq!(account_storefront(Some(&us), Some("us"), Err("offline".into())), Err("offline".into()));
+}
+
+/// The name, when Apple's answer had none, is asked once and kept with the same storefront only.
+#[test]
+fn the_storefront_name_is_asked_once_when_missing() {
     let mut s = State::offline();
-    s.settings.storefront = Some(crate::settings::Storefront { id: "it".into(), name: Some("Italy".into()) });
-    s.apply_msg(Msg::Bridge(Event::Auth { authorized: true, storefront: None }));
-    assert!(storefront_asks(&s).is_empty());
+    s.apply_msg(Msg::Bridge(Event::Auth { authorized: true, storefront: Some("it".into()) }));
+    s.apply_msg(Msg::AccountStorefront(Ok(("it".into(), None))));
+    assert_eq!(storefront_asks(&s), ["/v1/me/storefront {}", "/v1/storefronts/it {}"]);
+    s.apply_msg(Msg::Storefront(Ok(("jp".into(), Some("Japan".into())))));
+    assert_eq!(s.settings.storefront.as_ref().map(|f| f.label()), Some("IT".into()), "another storefront's name");
+    s.apply_msg(Msg::Storefront(Ok(("it".into(), Some("Italy".into())))));
+    assert_eq!(s.settings.storefront, italy());
 }
 
 #[test]

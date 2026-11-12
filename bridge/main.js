@@ -368,6 +368,8 @@ function createWindow(show) {
     hideCssKey = null; // a new document starts without our CSS
     applyHiddenCss(!win.isVisible());
     sendSignInCss(); // sign-in redirects load the page again
+    // The account's storefront setter (signin.js), for the page bridge's `setStorefront`.
+    win.webContents.executeJavaScript(`window.__uzumakiApplyStorefront = ${signin.applyStorefront};`).catch(() => {});
   });
   win.loadURL(START_URL);
 }

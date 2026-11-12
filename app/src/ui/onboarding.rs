@@ -1560,11 +1560,11 @@ mod tests {
         assert_eq!(view(&s), SignInView::Lead);
 
         open_sign_in(&mut s);
-        bridge(&mut s, Event::Auth { authorized: true, storefront: Some("it".into()) });
-        assert_eq!(view(&s), SignInView::Done(Some("IT".into())));
+        bridge(&mut s, Event::Auth { authorized: true, storefront: Some("us".into()) });
+        assert_eq!(view(&s), SignInView::Done(None), "the page's storefront isn't the account's");
         assert!(!s.session.login_window, "signed in: Apple's window hides");
+        s.apply(Msg::AccountStorefront(Ok(("it".into(), Some("Italy".into())))), &mut Tx::default());
         assert_eq!(s.settings.storefront.as_ref().map(|f| f.id.as_str()), Some("it"));
-        s.apply(Msg::Storefront(Ok(("it".into(), Some("Italy".into())))), &mut Tx::default());
         assert_eq!(view(&s), SignInView::Done(Some("Italy".into())));
         // The library syncs behind the tour: no sync screen.
         assert!(s.syncing && s.ui.intro.is_none());

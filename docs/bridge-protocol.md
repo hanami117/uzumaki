@@ -49,6 +49,7 @@ Commands (stdin), each with an optional numeric `id` that is echoed in the reply
 | `setRepeat` | `mode`: `off` / `one` / `all` | |
 | `timeRate` | `hz` (1–10) | time events per second (4 while synced lyrics show) |
 | `widevine` |                            | → `{available}` (EME check)             |
+| `setStorefront` | `storefront`: a two-letter id (`it`) | puts the page's MusicKit on the account's storefront (`mk.storefrontId`; the page starts on its URL's, `us`) and, signed in on the account's own storefront, lifts the page's preview-only flag; re-applied before `play`/`setQueue` → `{before, storefront, account, previewOnly}` |
 | `setBitrate` | `kbps`: 256 or 64        | streaming quality; MusicKit resets it to 256 on every page load, so the app re-sends it after `ready` |
 | `signOut`  |                            | stops playback, `mk.unauthorize()`, removes the profile's apple.com cookies and music.apple.com storage, reloads the page → `{cookiesRemoved}` |
 | `signIn`   | optional `near`: `{x, y, w, h}`, our window's frame in screen points | the guided sign-in: the window at about 520×740, centred on `near` (macOS) or on the screen (Linux, where it is a dialog-type window so tiling WMs float it), titled "Sign in to Apple Music", then Apple's sign-in; again while it shows: brings it to the front |
@@ -59,8 +60,10 @@ Replies (stdout): `{"id":1,"ok":true,"result":...}` or `{"id":1,"ok":false,"erro
 Events (stdout):
 `{"event":"widevine","ok":true,"status":{...}}`,
 `{"event":"ready","authorized":bool,"storefront":"us"}` (MusicKit found; re-sent after page reloads),
-`{"event":"auth","authorized":bool,"storefront":"it"}` (`storefront`: MusicKit's at that moment),
-`{"event":"storefront","id":"it"}` (MusicKit switched storefront, e.g. to the account's after sign-in),
+`{"event":"auth","authorized":bool,"storefront":"us"}` (`storefront`: MusicKit's `storefrontId` at that moment),
+`{"event":"storefront","id":"it"}` (MusicKit's `storefrontId` changed). `storefront` in these is the page's
+catalog storefront, which stays the page URL's (`us`) after a sign-in: the account's comes from
+`GET /v1/me/storefront`, which the app asks once per start or sign-in and then sends `setStorefront`,
 `{"event":"nowPlaying","item":{id,catalogId,title,artist,album,duration,artwork,artworkBg,hasLyrics}}`,
 `{"event":"playbackState","state":"playing|paused|loading|waiting|stopped|ended|..."}`,
 `{"event":"time","current":s,"duration":s}` (1/s, or `timeRate`),

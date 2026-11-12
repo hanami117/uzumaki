@@ -72,7 +72,36 @@ html[data-uzu-signin] [data-uzu-path] > :not([data-uzu-path]):not([data-uzu-dial
 }
 `;
 
+// ---- the account's storefront
+// `applyStorefront` runs in the page: main.js injects its source at dom-ready as
+// `window.__uzumakiApplyStorefront` (the preload is sandboxed and can't require this file), so it
+// must stay self-contained (no closures, no require).
+//
+// What MusicKit does (music.apple.com's own MusicKit build, read 2026-11-12):
+// - `storefrontCountryCode` is the account's country: StoreKit asks /v1/me/storefront after the
+//   sign-in and keeps it in storage. Signed out it is a default.
+// - `storefrontId` is the catalog's: `_apiStorefrontId || storefrontCountryCode`, and the page
+//   sets `_apiStorefrontId` from its URL (music.apple.com/us/...) in `MusicKit.configure`. So it
+//   stays "us" after an Italian account signs in, unless someone sets it (`mk.storefrontId = id`).
+//   Catalog paths use it (`{{storefrontId}}`), and playback refuses a mismatch
+//   (`assertUserStorefront`, CONTENT_EQUIVALENT) unless `previewOnly`.
+// - The page sets `previewOnly = (its URL's storefront !== storefrontCountryCode)` at load and
+//   after a sign-in (`setPreviewOnlyBasedOnSF`): previews only on a foreign storefront.
+//
+// Sets the storefront and, signed in on the account's own storefront, lifts the page's
+// preview-only flag (never sets it). Returns what it saw and did.
+function applyStorefront(mk, id) {
+  const want = String(id ?? '').toLowerCase();
+  if (!/^[a-z]{2}$/.test(want)) throw new Error(`bad storefront id: ${id}`);
+  const before = mk.storefrontId ?? null;
+  if (before !== want) mk.storefrontId = want;
+  const account = String(mk.storefrontCountryCode ?? '').toLowerCase() || null;
+  if (mk.isAuthorized && account === want && mk.previewOnly === true) mk.previewOnly = false;
+  return { before, storefront: mk.storefrontId ?? null, account, previewOnly: mk.previewOnly ?? null };
+}
+
 module.exports = {
+  applyStorefront,
   SIGN_IN_SIZE, FULL_SIZE, SIGN_IN_BG, SIGN_IN_TITLE, FULL_TITLE, SIGN_IN_HOSTS, SIGN_IN_CSS,
   signInBounds, windowEvent, isSignInFrame,
 };

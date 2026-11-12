@@ -191,8 +191,11 @@ pub struct Session {
     /// The onboarding chose Apple Music before the bridge was up: open the sign-in window when
     /// it is (unless already signed in).
     pub login_after_ready: bool,
-    /// `/v1/me/storefront` was asked this session (no storefront came with the sign-in).
+    /// `/v1/me/storefront` was asked since the start or the sign-in (once each).
     pub storefront_asked: bool,
+    /// The account's storefront as Apple answered it (`/v1/me/storefront`) since the start or the
+    /// sign-in; the page's MusicKit is kept on it.
+    pub account_storefront: Option<String>,
     /// The storefront whose name was asked for this session.
     pub storefront_named: Option<String>,
     /// Started with `--login`: Sign in (banner, Settings) opens the bridge's full window, as
@@ -339,8 +342,10 @@ pub enum Msg {
     AlbumOf { result: Result<Option<String>, String> },
     /// The bridge's answer to `signOut`.
     SignedOut(Result<(), String>),
-    /// Apple's storefront (id, name): the sign-in's fallback or a name lookup.
+    /// Apple's storefront (id, name): a name lookup (`/v1/storefronts/{id}`).
     Storefront(Result<(String, Option<String>), String>),
+    /// The account's storefront (id, name): Apple's answer to `/v1/me/storefront`.
+    AccountStorefront(Result<(String, Option<String>), String>),
     /// Apple's answer to "Add to Library" (`what`: “Title” or "3 songs").
     AddedToLibrary { what: String, result: Result<(), String> },
     /// Apple's answer to removing a library item (`kind`: songs, albums or playlists).
@@ -838,6 +843,7 @@ impl State {
                 return false;
             }
             Msg::Storefront(result) => return self.storefront_reply(result),
+            Msg::AccountStorefront(result) => return self.account_storefront_reply(result),
             Msg::SignedOut(result) => {
                 self.session.signing_out = false;
                 match result {
