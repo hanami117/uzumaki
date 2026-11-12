@@ -19,18 +19,20 @@
 # Installed under /usr, the app's update notice says "update with your package manager" and never
 # offers a download (app/src/update.rs).
 #
-# TO VERIFY ON ARCH BEFORE PUBLISHING (nothing here has been built on Arch yet):
-#   [ ] makepkg -si in a clean chroot (extra-x86_64-build), not only on the dev machine
+# Checked on Arch (0.1.0): makepkg from the release tarball (715 files, chrome-sandbox setuid root).
+# Still to check, with namcap and devtools installed:
+#   [ ] extra-x86_64-build (clean chroot), not only makepkg on the dev machine
 #   [ ] namcap PKGBUILD and namcap on the built *.pkg.tar.zst (dlopen'd libraries are expected
 #       to be missing from its output; every listed depend must be a real package)
-#   [ ] launch in a Wayland session AND in an X11 session (startx/Xorg, or GNOME on Xorg):
-#       window, Vulkan drawing, keyboard and mouse input, tray icon, media keys
-#   [ ] playback through the bridge (sign in, play a song; Widevine CDM downloads on first use)
+# And in a live session after pacman -U:
+#   [ ] a Wayland AND an X11 session: window, Vulkan drawing, keyboard and mouse input, tray icon,
+#       media keys; playback (sign in, play a song; the Widevine CDM downloads on first use)
 #   [ ] Settings -> Appearance -> App icon: a pick writes only under ~/.local/share
 #       (icons/hicolor/*/apps and applications/*.desktop); `pacman -Qkk uzumaki` stays clean;
 #       Dark removes those overrides again
 #   [ ] the update notice for a package install says to update with the package manager
-#   [ ] makepkg --printsrcinfo > .SRCINFO after filling pkgver and sha256sums
+# makepkg warns "Package contains reference to $srcdir": env!("CARGO_MANIFEST_DIR") paths in the
+# binary, the source tree fallbacks a development build uses for its bridge and icons. Harmless.
 # The Widevine CDM is not in this package: Chromium downloads it from Google on first use.
 
 pkgname=uzumaki
@@ -90,8 +92,8 @@ optdepends=(
 makedepends=('cargo' 'npm' 'git' 'pkgconf')
 options=('!lto')
 source=("$pkgname-$_rel.tar.gz::https://github.com/hanami117/uzumaki/releases/download/v$_rel/uzumaki-$_rel.tar.gz")
-# FILL AT RELEASE: the tarball's sha256 (packaging/release.sh prints it).
-sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
+# The tarball's sha256 (packaging/release.sh prints it; uzumaki-<version>.tar.gz.sha256 on the release).
+sha256sums=('93110c312f197e137c7fa4fd155a858e56e88a1cbaf7c0d08a2822367fd065eb')
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -130,6 +132,8 @@ package() {
   install -m644 bridge/main.js bridge/preload.js bridge/signin.js bridge/package.json \
     bridge/package-lock.json bridge/.npmrc "$lib/bridge/"
   cp -a --no-preserve=ownership bridge/node_modules "$lib/bridge/"
+  # Electron's zip has group-writable files (rwxrwxr-x); root-owned files shouldn't be.
+  chmod -R go-w "$lib/bridge"
   # Chromium's sandbox helper, as Electron ships it: root-owned and setuid. Chromium uses it only
   # where unprivileged user namespaces are off (linux-hardened, some sysctl setups); elsewhere it
   # uses the namespace sandbox. Without it there Electron refuses to start ("SUID sandbox helper

@@ -169,7 +169,8 @@ $(say "Ready in $out. Nothing was published.")
        $files
 
    The AppImage can't be built here: build it on Linux x86_64 with build $build
-   (packaging/appimage/build.sh, best in an ubuntu:22.04 container; see its header) and upload all
+   (packaging/appimage/container.sh in a checkout of $tag, or container.sh $src; it builds in an
+   ubuntu:22.04 container, see build.sh) and upload all
    its files to the same release:
    gh release upload $tag --repo $REPO target/appimage/Uzumaki-$release-x86_64.AppImage{,.sha256} \\
        target/appimage/$APPIMAGE_LATEST{,.sha256,.zsync}

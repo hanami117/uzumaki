@@ -15,8 +15,10 @@
 # Build it on an OLD distribution: the AppImage runs only where glibc is at least as new as on the
 # build machine. Ubuntu 22.04 (glibc 2.35) covers Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch.
 # From any x86_64 Docker/Podman host (or an Apple silicon Mac with Rosetta, slower):
-#   docker run --rm --platform linux/amd64 -v "$PWD:/src" -w /src ubuntu:22.04 \
-#       bash -c 'packaging/appimage/deps-ubuntu.sh && . ~/.cargo/env && packaging/appimage/build.sh'
+#   packaging/appimage/container.sh                       this checkout
+#   packaging/appimage/container.sh uzumaki-0.1.0.tar.gz  a release's source tarball, with this
+#                                                         checkout's packaging/appimage scripts
+# (docker or podman, ubuntu:22.04; the result lands in target/appimage/, owned by you).
 #
 # <release> is <version> for build 1 and <version>-<build> after it (BUILD, as in release.sh).
 # Out: target/appimage/
@@ -60,7 +62,9 @@ done
 APP_ID=io.github.hanami117.uzumaki
 version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 [[ -n $version ]] || die "no version in Cargo.toml's [workspace.package]"
-build=$(tr -d '[:space:]' <BUILD)
+# Sources from before the build number (v0.1.0) have no BUILD file: that is build 1.
+build=1
+[[ -f BUILD ]] && build=$(tr -d '[:space:]' <BUILD)
 [[ $build =~ ^[1-9][0-9]*$ ]] || die "BUILD must hold a whole number above 0 (got '$build')"
 if ((build == 1)); then release=$version; else release=$version-$build; fi
 target=${CARGO_TARGET_DIR:-target}
@@ -76,7 +80,13 @@ cargo build --release --locked -p uzumaki -p uzumaki-ctl
 say "Fetching the playback bridge (castLabs Electron)"
 if [[ ! -x bridge/node_modules/electron/dist/electron ]]; then
     (cd bridge && npm ci --no-audit --no-fund)
-    (cd bridge && node node_modules/electron/install.js)
+    # The download (GitHub, ~100 MB) sometimes fails on a flaky connection: try three times.
+    for try in 1 2 3; do
+        (cd bridge && node node_modules/electron/install.js) && break
+        ((try < 3)) || die "the Electron download failed three times"
+        say "Electron download failed, trying again in 10 s"
+        sleep 10
+    done
 fi
 [[ -x bridge/node_modules/electron/dist/electron ]] || die "the Electron download failed"
 
@@ -92,6 +102,23 @@ install -dm755 "$lib/bridge"
 install -m644 bridge/main.js bridge/preload.js bridge/signin.js bridge/package.json \
     bridge/package-lock.json bridge/.npmrc "$lib/bridge/"
 cp -a bridge/node_modules "$lib/bridge/"
+# Since 0.1.1 the app itself passes --no-sandbox to Electron inside an AppImage (bridge.rs,
+# running_from_appimage; see AppRun below for why). The 0.1.0 source predates that, so when this
+# builds it, Electron's own binary gets a wrapper that adds the flag. The wrapper exists only in the
+# AppDir: nothing outside the AppImage is affected, and packaging/aur-bin puts the real binary back
+# (electron.bin -> electron) so a package install keeps the sandbox.
+if ! grep -q 'fn running_from_appimage' app/src/bridge.rs; then
+    say "This source doesn't turn the sandbox off itself: wrapping Electron with --no-sandbox"
+    dist=$lib/bridge/node_modules/electron/dist
+    mv "$dist/electron" "$dist/electron.bin"
+    cat >"$dist/electron" <<'WRAP'
+#!/bin/sh
+# Uzumaki AppImage (built from a source before 0.1.1): Chromium's setuid sandbox helper can't work
+# inside an AppImage (see AppRun), so the bridge's Electron runs with --no-sandbox.
+exec "$(dirname "$(readlink -f "$0")")/electron.bin" --no-sandbox "$@"
+WRAP
+    chmod 755 "$dist/electron"
+fi
 
 # Libraries winit dlopens that some desktops lack (see the top). Copied from this build machine.
 install -dm755 "$lib/lib"
@@ -180,9 +207,11 @@ else
 fi
 # Extract-and-run: works without FUSE (containers, CI).
 # Absolute paths only: run this way, appimagetool resolves relative ones in its own temporary
-# folder (the AppDir isn't found, or the AppImage lands there and is deleted with it).
-ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$(readlink -f "$tool")" "${opts[@]}" \
-    "$(readlink -f "$appdir")" "$(readlink -f "$out")/$name"
+# folder (the AppDir isn't found, or the AppImage lands there and is deleted with it). It writes
+# the .zsync into the current folder, hence the cd.
+tool=$(readlink -f "$tool")
+appdir=$(readlink -f "$appdir")
+(cd "$out" && ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$tool" "${opts[@]}" "$appdir" "$PWD/$name")
 # The .zsync is named after the output; AppImageUpdate looks for the stable name.
 if [[ -f $out/$name.zsync ]]; then
     mv "$out/$name.zsync" "$out/$stable.zsync"
