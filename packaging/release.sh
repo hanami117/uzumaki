@@ -63,7 +63,7 @@ if ((dmg)); then
     [[ $(uname -s) == Darwin ]] || die "the DMG needs a Mac (use --no-dmg elsewhere)"
     say "Building the macOS disk image"
     packaging/macos/build.sh
-    cp "${CARGO_TARGET_DIR:-target}/macos/Uzumaki-$version.dmg" "$out/"
+    cp "${CARGO_TARGET_DIR:-target}/macos.noindex/Uzumaki-$version.dmg" "$out/"
     [[ -z $(git status --porcelain) ]] || die "build.sh changed tracked files (the Dock icons?): $(git status --short)"
 fi
 
