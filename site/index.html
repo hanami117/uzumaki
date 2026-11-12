@@ -78,13 +78,13 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
     <p class="sub">GPU&#8209;rendered and written in Rust. Your library, your playlists, synced lyrics and your own music files, in one fast window that works with your media keys and your terminal.</p>
 
     <div class="cta" id="get">
-      <a class="btn primary two" href="/download/arch/">
+      <a class="btn primary" href="https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-macOS.dmg">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-        <span>Linux &middot; AUR<small>Beta coming soon</small></span>
+        <span>macOS DMG</span>
       </a>
-      <a class="btn two" href="/download/macos/">
+      <a class="btn two" href="/download/arch/">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-        <span>macOS DMG<small>Beta coming soon</small></span>
+        <span>Linux &middot; AUR<small>Coming in 0.1.1</small></span>
       </a>
     </div>
     <p class="soon"><a href="#download">All ways to install</a> &middot; <a href="/download/windows/">Windows: coming soon</a> &middot; <a href="https://github.com/hanami117/uzumaki">Follow on GitHub</a></p>
@@ -551,40 +551,39 @@ Juniper Vale - Small Rooms
 <section class="wrap dl" id="download" aria-labelledby="dl-h">
   <span class="eyebrow reveal"><b>05</b> &middot; download</span>
   <h2 id="dl-h" class="reveal">Get Uzumaki</h2>
-  <p class="lead reveal">The first public beta, version 0.1.0, is coming soon. Free and open source under the GPL. Each system has an install page that says how it will work.</p>
+  <p class="lead reveal">The first public beta, version 0.1.0, is out for macOS. Linux builds (AUR and AppImage) follow in 0.1.1. Free and open source under the GPL. Each system has an install page.</p>
   <div class="dl-grid stagger">
     <div class="card reveal" id="download-macos">
       <h3>macOS</h3>
       <p>macOS 13 or later, Apple silicon. Open the disk image and drag Uzumaki to Applications.</p>
-      <!-- PROVISIONAL: on release day link this to the DMG, drop "two" and the small label -->
-      <a class="btn primary two" href="https://github.com/hanami117/uzumaki">
+      <a class="btn primary" href="https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-macOS.dmg">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-        <span>Download for macOS<small>Beta coming soon</small></span>
+        <span>Download for macOS</span>
       </a>
       <p class="dl-first"><strong>First launch:</strong> Uzumaki isn&rsquo;t notarized by Apple yet, so macOS stops it the first time. Open <b>System Settings &rarr; Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>. Once is enough.</p>
       <p>Or with Homebrew:</p>
       <span class="cmd"><i>$</i> brew install --cask hanami117/uzumaki/uzumaki</span>
-      <p class="cmd-note">Available at release.</p>
+      <p class="cmd-note">Coming in 0.1.1.</p>
       <a class="more" href="/download/macos/">macOS install guide &rarr;</a>
     </div>
     <div class="card reveal" id="download-linux">
       <h3>Arch Linux</h3>
       <p>From the AUR. It builds from source and updates with the rest of your system.</p>
       <span class="cmd"><i>$</i> yay -S uzumaki</span>
-      <p class="cmd-note">Available at release.</p>
+      <p class="cmd-note">Coming in 0.1.1.</p>
       <a class="more" href="/download/arch/">Arch install guide &rarr;</a>
     </div>
     <div class="card reveal" id="download-source">
       <h3>AppImage &middot; any distro</h3>
       <p>One file for any Linux distro on x86_64. Make it executable and run it. No install, no sudo.</p>
-      <!-- PROVISIONAL: on release day link this to the AppImage, drop "two" and the small label -->
+      <!-- PROVISIONAL (0.1.1): link this to the AppImage, drop "two" and the small label -->
       <a class="btn two" href="https://github.com/hanami117/uzumaki">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-        <span>Download the AppImage<small>Beta coming soon</small></span>
+        <span>Download the AppImage<small>Coming in 0.1.1</small></span>
       </a>
       <span class="cmd"><i>$</i> chmod +x Uzumaki-0.1.0-x86_64.AppImage
 <i>$</i> ./Uzumaki-0.1.0-x86_64.AppImage</span>
-      <p class="cmd-note">Available at release.</p>
+      <p class="cmd-note">Coming in 0.1.1.</p>
       <p>Or build it from source: needs Rust, Node.js and npm.</p>
       <a class="more" href="/download/linux/">AppImage and source guide &rarr;</a>
     </div>
@@ -595,7 +594,7 @@ Juniper Vale - Small Rooms
       <a class="more" href="/download/windows/">About Windows &rarr;</a>
     </div>
   </div>
-  <p class="note reveal">Once a day Uzumaki asks this site whether a new version is out and tells you; it never downloads or installs anything by itself. Settings &rarr; General turns it off. Checksums will be on the <a href="https://github.com/hanami117/uzumaki">release page</a>.</p>
+  <p class="note reveal">Once a day Uzumaki asks this site whether a new version is out and tells you; it never downloads or installs anything by itself. Settings &rarr; General turns it off. Checksums are on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.1.0">release page</a>.</p>
 </section>
 
 <section class="wrap faq" id="faq" aria-labelledby="faq-h">
@@ -663,8 +662,7 @@ Juniper Vale - Small Rooms
     </div>
     <p class="foot-social"><a href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg> Follow @Uzumaki_App on X</a></p>
     <p class="foot-contact">Install: <a href="/download/macos/">macOS</a> · <a href="/download/arch/">Arch Linux</a> · <a href="/download/linux/">AppImage · any distro</a> · <a href="/download/windows/">Windows (soon)</a></p>
-    <p class="foot-contact"><a href="https://github.com/hanami117/uzumaki">GitHub</a> <span class="foot-note">Source coming with the beta</span> · <a href="https://github.com/hanami117/uzumaki">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki">GPL-3.0</a></p>
-    <!-- PROVISIONAL (line above): on release day point Changelog to https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md and GPL-3.0 to https://github.com/hanami117/uzumaki/blob/main/LICENSE, and remove the "Source coming with the beta" span -->
+    <p class="foot-contact"><a href="https://github.com/hanami117/uzumaki">GitHub</a> · <a href="https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki/blob/main/LICENSE">GPL-3.0</a></p>
     <p class="foot-contact">Questions or ideas: <a href="mailto:hello@getuzumaki.app">hello@getuzumaki.app</a> · Help with the app: <a href="mailto:support@getuzumaki.app">support@getuzumaki.app</a></p>
     <p class="disclaimer">Uzumaki is an independent project, not affiliated with or endorsed by Apple. Apple Music is a trademark of Apple Inc.</p>
     <p class="fine">Uzumaki streams through Apple's own web player and does not download, convert or decrypt music.</p>

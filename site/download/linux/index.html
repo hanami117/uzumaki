@@ -55,11 +55,11 @@
   <p class="lead">Download one AppImage file, or build from source. No sudo. Wayland and X11.</p>
   <nav class="tabs" aria-label="Install pages"><a href="/download/macos/">macOS</a><a href="/download/arch/">Arch Linux</a><a href="/download/linux/" aria-current="page">AppImage · any distro</a><a href="/download/windows/">Windows</a></nav>
   <div class="body">
-    <p class="status"><span class="pill">Beta coming soon</span> The first beta isn&rsquo;t published yet. Follow the <a href="https://github.com/hanami117/uzumaki">GitHub page</a> for the release.</p>
-    <!-- PROVISIONAL: on release day link this button to the AppImage, drop "two" and the small label -->
+    <p class="status"><span class="pill">Coming in 0.1.1</span> The AppImage comes with version 0.1.1. Until then you can build 0.1.0 from source (option 2); its tarball is on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.1.0">release page</a>.</p>
+    <!-- PROVISIONAL (0.1.1): link this button to the AppImage, drop "two" and the small label -->
     <a class="btn primary two" href="https://github.com/hanami117/uzumaki">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-      <span>Download the AppImage<small>Beta coming soon</small></span>
+      <span>Download the AppImage<small>Coming in 0.1.1</small></span>
     </a>
 
     <h2>What you need</h2>
@@ -79,7 +79,7 @@
     </ol>
     <span class="cmd"><i>$</i> chmod +x Uzumaki-0.1.0-x86_64.AppImage
 <i>$</i> ./Uzumaki-0.1.0-x86_64.AppImage</span>
-<p class="cmd-note">Available at release.</p>
+<p class="cmd-note">Coming in 0.1.1.</p>
     <p>On the first start, sign in to Apple Music from the banner. The Widevine module that plays the music downloads by itself then.</p>
     <p class="callout">If it won&rsquo;t start, your distro may be missing FUSE 2, which AppImages need. Install <code>libfuse2</code> (Debian, Ubuntu) or <code>fuse2</code> (Arch) and try again. Without FUSE you can still run it with <code>./Uzumaki-0.1.0-x86_64.AppImage --appimage-extract-and-run</code>.</p>
 
@@ -93,7 +93,6 @@
     <span class="cmd"><i>$</i> git clone https://github.com/hanami117/uzumaki.git
 <i>$</i> cd uzumaki
 <i>$</i> ./install.sh</span>
-<p class="cmd-note">Available at release. The repository has no code yet.</p>
     <p>You can also unpack the source tarball from the release page and run <code>./install.sh</code> in it.</p>
     <p>It installs into <code>~/.local</code> (set <code>PREFIX=...</code> for another place):</p>
     <ul>
@@ -132,8 +131,7 @@
     </div>
     <p class="foot-social"><a href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg> Follow @Uzumaki_App on X</a></p>
     <p class="foot-contact">Install: <a href="/download/macos/">macOS</a> · <a href="/download/arch/">Arch Linux</a> · <a href="/download/linux/">AppImage · any distro</a> · <a href="/download/windows/">Windows (soon)</a></p>
-    <p class="foot-contact"><a href="https://github.com/hanami117/uzumaki">GitHub</a> <span class="foot-note">Source coming with the beta</span> · <a href="https://github.com/hanami117/uzumaki">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki">GPL-3.0</a></p>
-    <!-- PROVISIONAL (line above): on release day point Changelog to https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md and GPL-3.0 to https://github.com/hanami117/uzumaki/blob/main/LICENSE, and remove the "Source coming with the beta" span -->
+    <p class="foot-contact"><a href="https://github.com/hanami117/uzumaki">GitHub</a> · <a href="https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki/blob/main/LICENSE">GPL-3.0</a></p>
     <p class="foot-contact">Questions or ideas: <a href="mailto:hello@getuzumaki.app">hello@getuzumaki.app</a> · Help with the app: <a href="mailto:support@getuzumaki.app">support@getuzumaki.app</a></p>
     <p class="disclaimer">Uzumaki is an independent project, not affiliated with or endorsed by Apple. Apple Music is a trademark of Apple Inc.</p>
     <p class="fine">Uzumaki streams through Apple's own web player and does not download, convert or decrypt music.</p>

@@ -71,8 +71,8 @@ The screenshots use made-up albums and artists.
 
 ## Install
 
-> **The download links, the AUR package and the Homebrew tap are available with the first release.**
-> Until then, you can build from source (below). The install pages on
+> **Uzumaki 0.1.0 is out for macOS.** The AUR package, the AppImage and the Homebrew tap follow in 0.1.1.
+> Until then, on Linux you can build from source (below). The install pages on
 > [getuzumaki.app](https://getuzumaki.app/#download) have the same steps.
 
 After you install it, start Uzumaki and sign in to Apple Music from the banner (or choose local files only).
@@ -80,7 +80,7 @@ You sign in once, in a small Apple sign-in window.
 
 ### Arch Linux (AUR)
 
-*Available with the first release.*
+*Coming in 0.1.1.*
 
 ```sh
 yay -S uzumaki        # or: paru -S uzumaki
@@ -91,7 +91,7 @@ with `uzumaki` and `uzu` in `/usr/bin`.
 
 ### Other Linux distros (AppImage)
 
-*Available with the first release.*
+*Coming in 0.1.1.*
 
 Download `Uzumaki-<version>-x86_64.AppImage` from the
 [releases page](https://github.com/hanami117/uzumaki/releases), then:
@@ -106,9 +106,8 @@ If it doesn't start, your distro may not have FUSE 2. Install `libfuse2` (Debian
 
 ### macOS (disk image)
 
-*Available with the first release.*
-
-1. Download `Uzumaki-<version>.dmg` from the [releases page](https://github.com/hanami117/uzumaki/releases).
+1. Download [`Uzumaki-macOS.dmg`](https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-macOS.dmg)
+   (the latest version; each version is also on the [releases page](https://github.com/hanami117/uzumaki/releases)).
 2. Open it and drag Uzumaki to your Applications folder.
 
 **First launch.** Apple hasn't notarized Uzumaki yet, so macOS stops it the first time. This is expected,
@@ -126,7 +125,7 @@ xattr -dr com.apple.quarantine /Applications/Uzumaki.app
 
 ### macOS (Homebrew)
 
-*Available with the first release.*
+*Coming in 0.1.1.*
 
 ```sh
 brew install --cask hanami117/uzumaki/uzumaki

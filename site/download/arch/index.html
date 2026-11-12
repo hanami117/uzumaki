@@ -55,7 +55,7 @@
   <p class="lead">Install from the AUR. It builds from source and updates with your system. Wayland and X11.</p>
   <nav class="tabs" aria-label="Install pages"><a href="/download/macos/">macOS</a><a href="/download/arch/" aria-current="page">Arch Linux</a><a href="/download/linux/">AppImage · any distro</a><a href="/download/windows/">Windows</a></nav>
   <div class="body">
-    <p class="status"><span class="pill">Beta coming soon</span> The first beta isn&rsquo;t published yet. Follow the <a href="https://github.com/hanami117/uzumaki">GitHub page</a> for the release.</p>
+    <p class="status"><span class="pill">Coming in 0.1.1</span> The AUR package comes with version 0.1.1. Until then you can build from source, see <a href="/download/linux/">AppImage and source</a>.</p>
 
     <h2>What you need</h2>
     <ul>
@@ -69,7 +69,7 @@
     <p>The package is called <code>uzumaki</code>. Use your AUR helper:</p>
     <span class="cmd"><i>$</i> yay -S uzumaki
 <i>$</i> paru -S uzumaki</span>
-<p class="cmd-note">Available at release. The package isn&rsquo;t in the AUR yet.</p>
+<p class="cmd-note">Coming in 0.1.1. The package isn&rsquo;t in the AUR yet.</p>
     <p>Then start Uzumaki from your app menu and sign in to Apple Music from the banner. The Widevine module that plays the music downloads by itself on that first start.</p>
 
     <h2>What it builds</h2>
@@ -88,7 +88,7 @@
     <h2>Uninstall</h2>
     <span class="cmd"><i>$</i> sudo pacman -Rns uzumaki</span>
     <p>Your login, settings and caches stay in <code>~/.config/uzumaki</code> and <code>~/.cache/uzumaki</code>. Delete those two folders to forget everything.</p>
-    <p>One limit: Settings &rarr; App icon changes the icon only in an install you can write to, like the install on the <a href="/download/linux/">AppImage and source</a> page. Under <code>/usr</code> it does nothing.</p>
+    <p>Settings &rarr; App icon works with the package too. Uzumaki never writes to <code>/usr</code>: for Light or Coral it puts its own icons and a copy of the app-menu entry in <code>~/.local/share</code>, and choosing Dark again removes them.</p>
 
   </div>
 </section>
@@ -102,8 +102,7 @@
     </div>
     <p class="foot-social"><a href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg> Follow @Uzumaki_App on X</a></p>
     <p class="foot-contact">Install: <a href="/download/macos/">macOS</a> · <a href="/download/arch/">Arch Linux</a> · <a href="/download/linux/">AppImage · any distro</a> · <a href="/download/windows/">Windows (soon)</a></p>
-    <p class="foot-contact"><a href="https://github.com/hanami117/uzumaki">GitHub</a> <span class="foot-note">Source coming with the beta</span> · <a href="https://github.com/hanami117/uzumaki">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki">GPL-3.0</a></p>
-    <!-- PROVISIONAL (line above): on release day point Changelog to https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md and GPL-3.0 to https://github.com/hanami117/uzumaki/blob/main/LICENSE, and remove the "Source coming with the beta" span -->
+    <p class="foot-contact"><a href="https://github.com/hanami117/uzumaki">GitHub</a> · <a href="https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki/blob/main/LICENSE">GPL-3.0</a></p>
     <p class="foot-contact">Questions or ideas: <a href="mailto:hello@getuzumaki.app">hello@getuzumaki.app</a> · Help with the app: <a href="mailto:support@getuzumaki.app">support@getuzumaki.app</a></p>
     <p class="disclaimer">Uzumaki is an independent project, not affiliated with or endorsed by Apple. Apple Music is a trademark of Apple Inc.</p>
     <p class="fine">Uzumaki streams through Apple's own web player and does not download, convert or decrypt music.</p>
