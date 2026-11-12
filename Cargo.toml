@@ -5,7 +5,7 @@ members = ["cli", "app", "fx", "ctl", "fx-web"]
 # The one version and license of every crate (and of the app: About, `--version`, Info.plist, the DMG
 # name). bridge/package.json carries the same version; a test checks they match.
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/hanami117/uzumaki"
 

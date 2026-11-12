@@ -5,23 +5,45 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-12
+
+Linux packages, a fixed sign-in and store, and a few fixes. You need an Apple Music subscription.
+
 ### Added
-- A build number beside the version (the `BUILD` file; 0.1.0 is build 1), so the packages can be rebuilt without
-  code changes. It shows in About ("Version 0.1.0 (1)"), Settings → General → About and `uzumaki --version` /
-  `uzu --version` ("0.1.0 (build 1)"), and is the macOS bundle's `CFBundleVersion`. The update check compares
-  version, then build: a higher build of the same version is an update, and "Skip this version" skips one build.
-- An anonymous count of update checks. The daily check now asks `updates.getuzumaki.app` (code in
-  `server/update`) and sends the version, OS, processor type and install channel, plus a flag on the first check
-  of a week and of a month; the server keeps only daily totals per combination (no IP address, no id). If that
-  server is down, the check falls back to `getuzumaki.app/latest.json`. Turning the check off sends nothing.
-- A version too old to work with Apple Music (below `minimum_supported` in `latest.json`) shows a warning that
-  can't be closed or skipped, with the download or the package manager's command. The app keeps running.
+- **Linux packages:** an AppImage for any x86_64 distribution with glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+,
+  Fedora 36+), and two AUR packages: `uzumaki` (builds from source) and `uzumaki-bin` (the AppImage's files,
+  nothing to build). The AppImage carries update information for AppImageUpdate, and `./Uzumaki-x86_64.AppImage uzu …`
+  runs the `uzu` command line. Inside the AppImage the playback engine runs without Chromium's sandbox (an AppImage
+  can't carry the setuid helper it needs); the packages keep the sandbox.
+- **Text fields show where you type:** a coral caret that blinks while the field has the keyboard, and a coral
+  selection, in Search, Settings search, the Ctrl/Cmd+F filter and the playlist name fields. Before, on the Light
+  theme neither was visible, so Ctrl/Cmd+A showed nothing.
+- **A build number** beside the version, so a package can be rebuilt without code changes: About shows
+  "Version 0.1.1 (1)", `uzumaki --version` "0.1.1 (build 1)". The update check compares version, then build.
+- **An anonymous count of update checks.** The daily check now asks `updates.getuzumaki.app` and sends only the
+  Uzumaki version, the OS, the processor type and how it was installed (AppImage, AUR, Homebrew, DMG, …), plus a flag
+  on the first check of a week and of a month. The server keeps daily totals and nothing else: no IP address, no id,
+  no cookies (see Privacy in the README; the server code is in `server/update`). Turning the check off in
+  Settings → General sends nothing.
+- **"Update required" warning:** a version known not to work with Apple Music any more shows a warning that can't
+  be closed or skipped, with the download or the package manager's command. The app keeps running.
 
 ### Changed
-- The update check goes by UTC day (once per day the app runs, not 24 hours after the last one), and a failed
-  check is tried again an hour later instead of the next day. A notice already showing no longer stops it.
-- Package builds say how to update: the AUR package (built with `UZUMAKI_CHANNEL=aur`) "yay -Syu uzumaki",
-  the Homebrew cask "brew update && brew upgrade --cask uzumaki".
+- Package installs say how to update instead of offering a download: the AUR package "yay -Syu uzumaki", the
+  Homebrew cask "brew update && brew upgrade --cask uzumaki", other packages "Update with your package manager".
+- The update check runs once per UTC day, and a failed check is tried again an hour later instead of the next day.
+- **The store is your Apple account's:** Uzumaki used the US store for every account (music.apple.com's default),
+  so New, Radio, artist pages and search showed US content and some songs played only as previews. It now asks
+  Apple for the account's store and switches to it; pages already loaded load again.
+
+### Fixed
+- Signing in didn't work once the sign-in window had been hidden before (for example, closed and opened again).
+- Sign out now clears everything of the account: the library could come back after signing out (replies asked
+  before it arrived later), and artists, Recently Added, Made for You, your station, pins, the resumed song and Apple
+  songs in History stayed. Local files stay.
+- Sidebar pins: a dropped pin settles smoothly into its place from where you let it go (it jumped back up first),
+  and the other pins slide aside while you drag instead of jumping.
+- AppImage: the App icon setting doesn't write desktop overrides that would point at a binary that isn't there.
 
 ## [0.1.0] - 2026-11-12
 
@@ -75,4 +97,5 @@ affiliated with Apple.
   Open Anyway.
 - Music videos, concerts and radio shows on artist pages are not shown.
 
+[0.1.1]: https://github.com/hanami117/uzumaki/releases/tag/v0.1.1
 [0.1.0]: https://github.com/hanami117/uzumaki/releases/tag/v0.1.0
