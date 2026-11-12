@@ -150,6 +150,47 @@ fn bridge_in_libdir(exe: &std::path::Path) -> Option<PathBuf> {
     dir.join("main.js").is_file().then_some(dir)
 }
 
+/// True when this binary runs from inside an AppImage: the AppImage runtime sets `APPIMAGE` (the
+/// .AppImage file) and `APPDIR` (where it mounted or extracted it), and the binary is under `APPDIR`.
+/// Then the bridge's Electron gets `--no-sandbox`. Chromium's sandbox needs either user namespaces
+/// (blocked for unprivileged programs on Ubuntu 24.04+ by AppArmor, and on hardened kernels) or the
+/// `chrome-sandbox` helper owned by root with the setuid bit. An AppImage can't carry a setuid
+/// file (its squashfs is mounted `nosuid` by an unprivileged user), so without the flag Electron
+/// aborts on those systems. The bridge only loads music.apple.com in its own window. Packages
+/// (AUR) and install.sh keep the sandbox. Both variables are checked, together with the path, so
+/// that a stray `APPIMAGE` inherited from another AppImage doesn't turn the sandbox off.
+/// [`in_appimage`] for this process.
+pub fn running_from_appimage() -> bool {
+    let exe = std::env::current_exe().ok();
+    in_appimage(std::env::var_os("APPIMAGE"), std::env::var_os("APPDIR"), exe.as_deref())
+}
+
+fn in_appimage(appimage: Option<std::ffi::OsString>, appdir: Option<std::ffi::OsString>, exe: Option<&std::path::Path>) -> bool {
+    if !cfg!(target_os = "linux") {
+        return false;
+    }
+    let (Some(image), Some(dir), Some(exe)) = (appimage, appdir, exe) else { return false };
+    !image.is_empty() && !dir.is_empty() && exe.starts_with(std::path::Path::new(&dir))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod appimage_tests {
+    use super::in_appimage;
+    use std::path::Path;
+
+    #[test]
+    fn electron_runs_without_the_sandbox_only_inside_an_appimage() {
+        let exe = Path::new("/tmp/.mount_UzumakXYZ/usr/lib/uzumaki/uzumaki");
+        let some = |s: &str| Some(s.into());
+        assert!(in_appimage(some("/home/u/Uzumaki.AppImage"), some("/tmp/.mount_UzumakXYZ"), Some(exe)));
+        // Not an AppImage, or another AppImage's variables leaked into an installed copy.
+        assert!(!in_appimage(None, None, Some(exe)));
+        assert!(!in_appimage(some("/home/u/Other.AppImage"), some("/tmp/.mount_OtherABC"), Some(Path::new("/usr/lib/uzumaki/uzumaki"))));
+        assert!(!in_appimage(some(""), some("/tmp/.mount_UzumakXYZ"), Some(exe)));
+        assert!(!in_appimage(some("/home/u/Uzumaki.AppImage"), None, Some(exe)));
+    }
+}
+
 #[cfg(test)]
 mod install_tests {
     use super::{bridge_beside, bridge_in_bundle, bridge_in_libdir};
@@ -217,6 +258,9 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
         cmd.arg(&dir);
         if show_window {
             cmd.arg("--show");
+        }
+        if running_from_appimage() {
+            cmd.arg("--no-sandbox");
         }
         Self::spawn_command(cmd, log_path, sink)
     }

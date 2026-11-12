@@ -130,6 +130,11 @@ package() {
   install -m644 bridge/main.js bridge/preload.js bridge/signin.js bridge/package.json \
     bridge/package-lock.json bridge/.npmrc "$lib/bridge/"
   cp -a --no-preserve=ownership bridge/node_modules "$lib/bridge/"
+  # Chromium's sandbox helper, as Electron ships it: root-owned and setuid. Chromium uses it only
+  # where unprivileged user namespaces are off (linux-hardened, some sysctl setups); elsewhere it
+  # uses the namespace sandbox. Without it there Electron refuses to start ("SUID sandbox helper
+  # binary was found, but is not configured correctly").
+  chmod 4755 "$lib/bridge/node_modules/electron/dist/chrome-sandbox"
 
   install -Dm644 "assets/io.github.hanami117.uzumaki.desktop" \
     "$pkgdir/usr/share/applications/io.github.hanami117.uzumaki.desktop"

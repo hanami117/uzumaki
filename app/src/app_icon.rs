@@ -151,6 +151,11 @@ pub fn plan_for(exe: &Path, dev: bool, data_home: Option<&Path>) -> Option<Plan>
 
 #[cfg(target_os = "linux")]
 fn current_plan() -> Option<Plan> {
+    // An AppImage's files vanish when it quits, and a user copy of its desktop entry (Exec=uzumaki)
+    // would start nothing: leave the menu entry and icons to the AppImage integration tool.
+    if crate::bridge::running_from_appimage() {
+        return None;
+    }
     let exe = std::env::current_exe().ok()?;
     let dev = std::env::var_os("UZUMAKI_APPLY_ICONS").is_some_and(|v| !v.is_empty() && v != "0");
     plan_for(&exe, dev, data_home().as_deref())

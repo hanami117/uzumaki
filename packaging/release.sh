@@ -23,6 +23,8 @@
 #   SHA256SUMS                              all of them, in `shasum -c` form
 #   notes.md                                release notes (CHANGELOG section + install notes)
 #   latest.json                             for getuzumaki.app/latest.json (the update notice)
+# The AppImage is built on Linux (packaging/appimage/build.sh), also under two names:
+# Uzumaki-<release>-x86_64.AppImage and Uzumaki-x86_64.AppImage (+ .sha256, + .zsync).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -31,10 +33,13 @@ warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die() { printf 'release.sh: %s\n' "$*" >&2; exit 1; }
 
 REPO=hanami117/uzumaki
+# Stable file names (the same bytes as the versioned ones) so links can say releases/latest/download/.
+DMG_LATEST=Uzumaki-macOS.dmg
+APPIMAGE_LATEST=Uzumaki-x86_64.AppImage
 dmg=1
 case "${1:-}" in
     --no-dmg) dmg=0 ;;
-    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit ;;
+    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit ;;
     "") ;;
     *) die "unknown option '$1' (try --help)" ;;
 esac
@@ -77,7 +82,7 @@ if ((dmg)); then
     packaging/macos/build.sh
     cp "${CARGO_TARGET_DIR:-target}/macos.noindex/Uzumaki-$release.dmg" "$out/"
     # A stable name for the newest DMG: .../releases/latest/download/Uzumaki-macOS.dmg.
-    cp "$out/Uzumaki-$release.dmg" "$out/Uzumaki-macOS.dmg"
+    cp "$out/Uzumaki-$release.dmg" "$out/$DMG_LATEST"
     [[ -z $(git status --porcelain) ]] || die "build.sh changed tracked files (the Dock icons?): $(git status --short)"
 fi
 
@@ -119,7 +124,9 @@ say "Writing release notes from CHANGELOG.md"
   **Open Anyway** (or run \`xattr -dr com.apple.quarantine /Applications/Uzumaki.app\`).
   With Homebrew: \`brew install --cask hanami117/uzumaki/uzumaki\`.
 - **Arch Linux**: \`yay -S uzumaki\` (AUR, builds from source).
-- **Other Linux**: download \`$src\`, unpack it and run \`./install.sh\` (needs Rust, Node.js and npm).
+- **Other Linux** (x86_64): download \`Uzumaki-$release-x86_64.AppImage\`, \`chmod +x\` it and run it. It needs FUSE
+  (\`fuse2\` or \`fuse3\`); without it, run it with \`--appimage-extract-and-run\`. Or build from source: download
+  \`$src\`, unpack it and run \`./install.sh\` (needs Rust, Node.js and npm).
 
 Checksums are in \`SHA256SUMS\`.
 NOTES
@@ -127,6 +134,8 @@ NOTES
 
 # --- latest.json --------------------------------------------------------------------------------
 dl=https://github.com/$REPO/releases/download/$tag
+# Always the newest release's file: the site's buttons use these too.
+latest=https://github.com/$REPO/releases/latest/download
 cat >"$out/latest.json" <<JSON
 {
   "version": "$version",
@@ -134,9 +143,9 @@ cat >"$out/latest.json" <<JSON
   "date": "$(git log -1 --format=%cs "$tag")",
   "notes_url": "https://github.com/$REPO/releases/tag/$tag",
   "downloads": {
-    "macos_dmg": "$dl/Uzumaki-$release.dmg",
+    "macos_dmg": "$latest/$DMG_LATEST",
     "linux_tarball": "$dl/$src",
-    "appimage": "$dl/Uzumaki-$release-x86_64.AppImage",
+    "appimage": "$latest/$APPIMAGE_LATEST",
     "aur": "https://aur.archlinux.org/packages/uzumaki",
     "brew": "brew install --cask hanami117/uzumaki/uzumaki"
   }
@@ -159,12 +168,17 @@ $(say "Ready in $out. Nothing was published.")
    gh release create $tag --repo $REPO --title "$title" --notes-file $out/notes.md --verify-tag \\
        $files
 
-   The AppImage (Uzumaki-$release-x86_64.AppImage, linked from latest.json) can't be built here:
-   build it on Linux (x86_64) with build $build, and upload it to the same release with a copy under
-   the stable name Uzumaki-x86_64.AppImage:
-   gh release upload $tag --repo $REPO Uzumaki-$release-x86_64.AppImage Uzumaki-x86_64.AppImage
+   The AppImage can't be built here: build it on Linux x86_64 with build $build
+   (packaging/appimage/build.sh, best in an ubuntu:22.04 container; see its header) and upload all
+   its files to the same release:
+   gh release upload $tag --repo $REPO target/appimage/Uzumaki-$release-x86_64.AppImage{,.sha256} \\
+       target/appimage/$APPIMAGE_LATEST{,.sha256,.zsync}
 
-2. Publish latest.json on the site (site/latest.json on main), after the release is up:
+2. Publish latest.json on the site (site/latest.json on main), after the release is up.
+   The site's download buttons should use the same stable links (they follow each new release):
+     $latest/$DMG_LATEST
+     $latest/$APPIMAGE_LATEST
+   (the source tarball keeps its versioned name: $dl/$src)
 
 $(sed 's/^/   /' "$out/latest.json")
 
