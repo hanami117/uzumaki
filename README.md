@@ -71,8 +71,8 @@ The screenshots use made-up albums and artists.
 
 ## Install
 
-> **Uzumaki 0.1.0 is out for macOS**, as a disk image and with Homebrew. The AUR package and the AppImage follow in 0.1.1.
-> Until then, on Linux you can build from source (below). The install pages on
+> **Uzumaki 0.1.0 is out for macOS and Linux**: a disk image and Homebrew on macOS; the AUR and an AppImage on Linux.
+> The install pages on
 > [getuzumaki.app](https://getuzumaki.app/#download) have the same steps.
 
 After you install it, start Uzumaki and sign in to Apple Music from the banner (or choose local files only).
@@ -80,29 +80,34 @@ You sign in once, in a small Apple sign-in window.
 
 ### Arch Linux (AUR)
 
-*Coming in 0.1.1.*
+Two packages are in the AUR. For a quick install, use `uzumaki-bin`: it takes the prebuilt AppImage.
+
+```sh
+yay -S uzumaki-bin    # or: paru -S uzumaki-bin
+```
+
+If you prefer to build it yourself, use `uzumaki`, which builds from the release's source on your computer
+(it installs into `/usr/lib/uzumaki`, with `uzumaki` and `uzu` in `/usr/bin`):
 
 ```sh
 yay -S uzumaki        # or: paru -S uzumaki
 ```
 
-The package builds Uzumaki from the release's source on your computer. It installs into `/usr/lib/uzumaki`,
-with `uzumaki` and `uzu` in `/usr/bin`.
+The two packages conflict with each other: install only one. Update with `yay -Syu`.
 
 ### Other Linux distros (AppImage)
 
-*Coming in 0.1.1.*
-
-Download `Uzumaki-<version>-x86_64.AppImage` from the
-[releases page](https://github.com/hanami117/uzumaki/releases), then:
+Download [`Uzumaki-x86_64.AppImage`](https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-x86_64.AppImage)
+(the latest version; each version is also on the [releases page](https://github.com/hanami117/uzumaki/releases)).
+It needs glibc 2.35 or newer (Ubuntu 22.04 and later). Then:
 
 ```sh
-chmod +x Uzumaki-*-x86_64.AppImage
-./Uzumaki-*-x86_64.AppImage
+chmod +x Uzumaki-x86_64.AppImage
+./Uzumaki-x86_64.AppImage
 ```
 
-If it doesn't start, your distro may not have FUSE 2. Install `libfuse2` (Debian, Ubuntu) or `fuse2`
-(Arch), or start it with `--appimage-extract-and-run`.
+If it doesn't start, your distro may not have FUSE 2. Install `libfuse2` (`libfuse2t64` on newer Debian and
+Ubuntu) or `fuse2` (Arch), or start it with `--appimage-extract-and-run`.
 
 ### macOS (disk image)
 

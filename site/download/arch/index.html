@@ -52,10 +52,10 @@
 <section class="wrap page">
   <span class="eyebrow"><b>05</b> &middot; <a href="/#download">download</a></span>
   <h1>Uzumaki for Arch Linux</h1>
-  <p class="lead">Install from the AUR. It builds from source and updates with your system. Wayland and X11.</p>
+  <p class="lead">Install from the AUR, prebuilt or from source. It updates with your system. Wayland and X11.</p>
   <nav class="tabs" aria-label="Install pages"><a href="/download/macos/">macOS</a><a href="/download/arch/" aria-current="page">Arch Linux</a><a href="/download/linux/">AppImage · any distro</a><a href="/download/windows/">Windows</a></nav>
   <div class="body">
-    <p class="status"><span class="pill">Coming in 0.1.1</span> The AUR package comes with version 0.1.1. Until then you can build from source, see <a href="/download/linux/">AppImage and source</a>.</p>
+    <p class="status"><span class="pill">Beta</span> Version 0.1.0 is out. Release notes and checksums are on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.1.0">release page</a>.</p>
 
     <h2>What you need</h2>
     <ul>
@@ -66,14 +66,18 @@
     <p>Wayland and X11 both work. On X11 you also need <code>libxkbcommon-x11</code>: Uzumaki loads it at start-up and stops without it.</p>
 
     <h2>Install</h2>
-    <p>The package is called <code>uzumaki</code>. Use your AUR helper:</p>
+    <p>There are two packages. For a quick install, use <code>uzumaki-bin</code>: it takes the prebuilt AppImage and needs no build. Use your AUR helper:</p>
+    <span class="cmd"><i>$</i> yay -S uzumaki-bin
+<i>$</i> paru -S uzumaki-bin</span>
+    <p>If you prefer to build it yourself, install <code>uzumaki</code>, which builds from source:</p>
     <span class="cmd"><i>$</i> yay -S uzumaki
 <i>$</i> paru -S uzumaki</span>
-<p class="cmd-note">Coming in 0.1.1. The package isn&rsquo;t in the AUR yet.</p>
+    <p class="cmd-note">Install only one of them: the two packages conflict with each other.</p>
     <p>Then start Uzumaki from your app menu and sign in to Apple Music from the banner. The Widevine module that plays the music downloads by itself on that first start.</p>
 
     <h2>What it builds</h2>
-    <p>The AUR package builds Uzumaki from the release&rsquo;s source on your machine. The first build takes a few minutes.</p>
+    <p>This section is about the <code>uzumaki</code> package. <code>uzumaki-bin</code> builds nothing: it installs the release&rsquo;s prebuilt AppImage.</p>
+    <p>The <code>uzumaki</code> package builds Uzumaki from the release&rsquo;s source on your machine. The first build takes a few minutes.</p>
     <ul>
       <li>It compiles the app and the <code>uzu</code> command with Rust. Build tools: <code>rust</code>, <code>npm</code>, <code>git</code> and <code>pkgconf</code>.</li>
       <li>It fetches castLabs Electron with npm (about 290 MB). This is the hidden player that plays Apple Music.</li>
@@ -86,7 +90,8 @@
     <span class="cmd"><i>$</i> yay -Syu</span>
 
     <h2>Uninstall</h2>
-    <span class="cmd"><i>$</i> sudo pacman -Rns uzumaki</span>
+    <span class="cmd"><i>$</i> sudo pacman -Rns uzumaki-bin</span>
+    <p>Use <code>uzumaki</code> instead of <code>uzumaki-bin</code> if that is the one you installed.</p>
     <p>Your login, settings and caches stay in <code>~/.config/uzumaki</code> and <code>~/.cache/uzumaki</code>. Delete those two folders to forget everything.</p>
     <p>Settings &rarr; App icon works with the package too. Uzumaki never writes to <code>/usr</code>: for Light or Coral it puts its own icons and a copy of the app-menu entry in <code>~/.local/share</code>, and choosing Dark again removes them.</p>
 

@@ -55,33 +55,31 @@
   <p class="lead">Download one AppImage file, or build from source. No sudo. Wayland and X11.</p>
   <nav class="tabs" aria-label="Install pages"><a href="/download/macos/">macOS</a><a href="/download/arch/">Arch Linux</a><a href="/download/linux/" aria-current="page">AppImage · any distro</a><a href="/download/windows/">Windows</a></nav>
   <div class="body">
-    <p class="status"><span class="pill">Coming in 0.1.1</span> The AppImage comes with version 0.1.1. Until then you can build 0.1.0 from source (option 2); its tarball is on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.1.0">release page</a>.</p>
-    <!-- PROVISIONAL (0.1.1): link this button to the AppImage, drop "two" and the small label -->
-    <a class="btn primary two" href="https://github.com/hanami117/uzumaki">
+    <p class="status"><span class="pill">Beta</span> Version 0.1.0 is out. Release notes and checksums are on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.1.0">release page</a>.</p>
+    <a class="btn primary" href="https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-x86_64.AppImage">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
-      <span>Download the AppImage<small>Coming in 0.1.1</small></span>
+      <span>Download the AppImage</span>
     </a>
 
     <h2>What you need</h2>
     <ul>
-      <li>A 64-bit Intel or AMD PC (x86_64) running Linux.</li>
+      <li>A 64-bit Intel or AMD PC (x86_64) running Linux, with glibc 2.35 or newer (Ubuntu 22.04 and later).</li>
       <li>A GPU with Vulkan: the Vulkan loader and your GPU&rsquo;s driver.</li>
       <li>An Apple Music subscription, to stream. Your own music files play without one.</li>
     </ul>
-    <p>Wayland and X11 both work. On X11 you also need <code>libxkbcommon-x11</code> from your distro (<code>libxkbcommon-x11-0</code> on Debian and Ubuntu): Uzumaki loads it at start-up and stops without it. On Arch, use the <a href="/download/arch/">AUR package</a> instead.</p>
+    <p>Wayland and X11 both work. On X11 you also need <code>libxkbcommon-x11</code> from your distro (<code>libxkbcommon-x11-0</code> on Debian and Ubuntu): Uzumaki loads it at start-up and stops without it. On Arch, use the <a href="/download/arch/">AUR package</a> (<code>uzumaki-bin</code> or <code>uzumaki</code>) instead.</p>
 
     <h2>Option 1: the AppImage</h2>
     <p>One file, no install, no sudo. It works on most distros.</p>
     <ol>
-      <li>Download <code>Uzumaki-0.1.0-x86_64.AppImage</code> from the release page. Keep it anywhere you like, for example in <code>~/Applications</code>.</li>
+      <li>Download the AppImage (the button above, or <code>Uzumaki-0.1.0-x86_64.AppImage</code> from the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.1.0">release page</a>). Keep it anywhere you like, for example in <code>~/Applications</code>.</li>
       <li>Make it executable.</li>
       <li>Run it.</li>
     </ol>
-    <span class="cmd"><i>$</i> chmod +x Uzumaki-0.1.0-x86_64.AppImage
-<i>$</i> ./Uzumaki-0.1.0-x86_64.AppImage</span>
-<p class="cmd-note">Coming in 0.1.1.</p>
+    <span class="cmd"><i>$</i> chmod +x Uzumaki-x86_64.AppImage
+<i>$</i> ./Uzumaki-x86_64.AppImage</span>
     <p>On the first start, sign in to Apple Music from the banner. The Widevine module that plays the music downloads by itself then.</p>
-    <p class="callout">If it won&rsquo;t start, your distro may be missing FUSE 2, which AppImages need. Install <code>libfuse2</code> (Debian, Ubuntu) or <code>fuse2</code> (Arch) and try again. Without FUSE you can still run it with <code>./Uzumaki-0.1.0-x86_64.AppImage --appimage-extract-and-run</code>.</p>
+    <p class="callout">If it won&rsquo;t start, your distro may be missing FUSE 2, which AppImages need. Install <code>libfuse2</code> (<code>libfuse2t64</code> on newer Debian and Ubuntu) or <code>fuse2</code> (Arch) and try again. Without FUSE you can still run it with <code>./Uzumaki-x86_64.AppImage --appimage-extract-and-run</code>.</p>
 
     <h2>Option 2: build from source</h2>
     <p>For when you want to build it yourself. You need:</p>
