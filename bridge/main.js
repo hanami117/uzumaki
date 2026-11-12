@@ -194,7 +194,7 @@ const isApple = (url) => {
 };
 
 // While hidden, cancel image requests and stop the page rendering (html{display:none}); MusicKit keeps playing.
-// Measured about -75 MB (images) and about -12 MB (CSS) renderer PSS. Both are undone (reload / removeCSS) on show.
+// Measured about -75 MB (images) and about -12 MB (CSS) renderer PSS. Both are undone (reload / removeInsertedCSS) on show.
 let hideCssKey = null;
 let imagesBlocked = false;
 async function applyHiddenCss(hidden) {
@@ -204,7 +204,7 @@ async function applyHiddenCss(hidden) {
   else if (!hidden && hideCssKey) {
     const k = hideCssKey;
     hideCssKey = null;
-    await wc.removeCSS(k).catch(() => {});
+    await wc.removeInsertedCSS(k).catch(() => {});
   }
 }
 
