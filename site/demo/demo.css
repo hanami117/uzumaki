@@ -4,7 +4,7 @@
 .demo-hero .swirl { position: absolute; top: -10%; bottom: auto; }
 .demo-sticky { position: sticky; top: 0; padding: 56px 0 24px; }
 .demo-hero .hero-in { width: min(1140px, 100% - 40px); }
-.demo-text { will-change: transform, opacity; }
+.demo-text { position: relative; z-index: 2; will-change: transform, opacity; }
 .demo-stage { position: relative; width: calc(1100px * var(--fit)); height: calc(690px * var(--fit)); margin: 36px auto 0; perspective: 1600px; perspective-origin: 50% 20%; }
 .demo-tilt { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: transform; }
 .demo-note { text-align: center; margin-top: 16px; }
