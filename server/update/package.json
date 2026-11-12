@@ -1,0 +1,9 @@
+{
+  "name": "uzumaki-updates",
+  "private": true,
+  "type": "module",
+  "description": "Uzumaki's update endpoint: latest.json plus an anonymous per-day counter",
+  "scripts": {
+    "test": "node --test test/"
+  }
+}
