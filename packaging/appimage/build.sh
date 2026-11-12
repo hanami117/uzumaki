@@ -75,6 +75,10 @@ update_info="gh-releases-zsync|hanami117|uzumaki|latest|Uzumaki-x86_64.AppImage.
 
 # --- Build --------------------------------------------------------------------------------------
 say "Building Uzumaki $version (build $build, release profile)"
+# No compile-time channel: the app finds out at run time that it is an AppImage (APPIMAGE/APPDIR,
+# update.rs this_install). The AUR's uzumaki-bin installs this same binary under /usr/lib/uzumaki,
+# where it must report a package install ("system"), so "appimage" can't be baked in.
+unset UZUMAKI_CHANNEL
 cargo build --release --locked -p uzumaki -p uzumaki-ctl
 
 say "Fetching the playback bridge (castLabs Electron)"

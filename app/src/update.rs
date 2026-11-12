@@ -515,10 +515,15 @@ pub fn channel_of(install: Install, build: Option<&'static str>, mac: bool) -> &
     }
 }
 
-/// This copy's install kind. An AppImage's binary runs from a temporary mount, so the
-/// runtime's `APPIMAGE` variable (the .AppImage file's path) tells it.
+/// This copy's install kind. An AppImage's binary runs from a temporary mount, so the AppImage
+/// runtime's variables tell it (`APPIMAGE` and `APPDIR` set, and this binary under `APPDIR`:
+/// [`crate::bridge::running_from_appimage`], the same test that turns Electron's sandbox off).
+/// The AppImage is built without `UZUMAKI_CHANNEL` on purpose: the AUR's `uzumaki-bin` installs
+/// that same binary under `/usr/lib/uzumaki`, where it must count as a package (`system`, "update
+/// with your package manager"), and a stray `APPIMAGE` inherited from another AppImage must not
+/// make a package look like one.
 pub fn this_install() -> Install {
-    let runtime = if cfg!(target_os = "linux") && std::env::var_os("APPIMAGE").is_some_and(|v| !v.is_empty()) {
+    let runtime = if crate::bridge::running_from_appimage() {
         Install::AppImage
     } else {
         let exe = std::env::current_exe().and_then(|p| p.canonicalize()).unwrap_or_default();
