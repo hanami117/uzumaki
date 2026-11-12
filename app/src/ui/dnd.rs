@@ -593,6 +593,71 @@ mod tests {
         assert!(read(&mut rt, |s| s.ui.dnd.pin.is_none()));
     }
 
+    /// The drawn y of a pin row, frame by frame (`rect` is where it paints, offset included).
+    /// The virtual list's slot has the same key; the row itself is the button.
+    fn pin_y(rt: &Runtime<State>, id: &str) -> f32 {
+        let key = format!("pin-{id}");
+        rt.elements().iter().find(|e| e.key.as_deref() == Some(key.as_str()) && e.role == "button" && !e.exiting).map(|e| e.rect[1]).unwrap()
+    }
+
+    /// Three pinned playlists whose thumbnails have landed (as in a real sidebar), in a window
+    /// with live covers.
+    fn rt_pinned_pictures() -> Runtime<State> {
+        use crate::models::Artwork;
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == "sidebar-pins").unwrap().1)(&mut s);
+        s.art.test_live(rune::ImageCache::new(std::sync::Arc::new(|| {})));
+        let art = |i: usize| Artwork { template: format!("https://is1-ssl.mzstatic.com/image/thumb/pin{i}/{{w}}x{{h}}bb.jpg"), bg: None };
+        s.settings.pins = (0..3)
+            .map(|i| Pin { kind: PinKind::Playlist, id: format!("p.pin{i}"), title: format!("Pin {i}"), artwork: Some(art(i)) })
+            .collect();
+        for i in 0..3 {
+            s.art.test_arrive(&art(i), crate::art::SMALL_PX, 8, [200, 40 * i as u8, 40]);
+        }
+        let mut rt = Runtime::new(s, crate::ui::view, (1180.0, 900.0), Env { system_dark: true, scale: 1.0 });
+        rt.frame(0.0);
+        // Past the thumbnails' first fade-in.
+        for _ in 0..60 {
+            rt.frame(1.0 / 60.0);
+        }
+        rt
+    }
+
+    /// While a pin is dragged past its neighbours, they slide aside over several frames
+    /// instead of jumping to their new slot, with and without loaded thumbnails (`Art::held`).
+    #[test]
+    fn neighbours_slide_aside_while_a_pin_is_dragged() {
+        for pictures in [false, true] {
+            let (mut rt, ids) = if pictures {
+                (rt_pinned_pictures(), ["p.pin0", "p.pin1", "p.pin2"])
+            } else {
+                (rt("sidebar-pins"), ["a2", "ar12", "ra.3"])
+            };
+            let [first, middle, last] = ids.map(|i| format!("pin-{i}"));
+            let (x, y) = center(&rt, &last);
+            let pitch = center(&rt, &middle).1 - center(&rt, &first).1;
+            rt.pointer_move(x, y);
+            step(&mut rt);
+            rt.pointer_down(x, y);
+            // Lift it (past the slop), still in its own slot.
+            rt.pointer_move(x, y - 8.0);
+            step(&mut rt);
+            let start = pin_y(&rt, ids[1]);
+            // Over the row above: the middle one steps down by one pitch.
+            rt.pointer_move(x, y - pitch * 0.9);
+            let mut ys = Vec::new();
+            for _ in 0..30 {
+                rt.frame(1.0 / 60.0);
+                ys.push(pin_y(&rt, ids[1]) - start);
+            }
+            assert!((ys[29] - pitch).abs() < 0.5, "pictures {pictures}: the middle pin reaches its new slot: {ys:?}");
+            let between = ys.iter().filter(|d| **d > 0.5 && **d < pitch - 0.5).count();
+            assert!(between >= 4, "pictures {pictures}: the middle pin slides over several frames, not a jump: {ys:?}");
+            rt.pointer_up(x, y - pitch * 0.9);
+            step(&mut rt);
+        }
+    }
+
     #[test]
     fn escape_puts_a_dragged_pin_back() {
         let mut rt = rt("sidebar-pins");
