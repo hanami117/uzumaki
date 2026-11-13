@@ -147,7 +147,7 @@ impl UiState {
 
 pub use new_playlist::{open as new_playlist_open, open_edit as edit_playlist_open};
 pub use now_playing::{close as close_now_playing, open as open_now_playing};
-pub use now_playing::{scene_np_cover_only, scene_np_interlude, scene_np_intro, scene_np_lines_only, scene_np_unsynced, scene_np_words};
+pub use now_playing::{scene_np_cover_only, scene_np_motion, scene_np_interlude, scene_np_intro, scene_np_lines_only, scene_np_unsynced, scene_np_words};
 
 /// Page horizontal padding.
 pub const PAGE_PX: f32 = 32.0;
@@ -192,6 +192,8 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     cx.focus_ring(2.0, 2.0, PAL.accent);
     // App icon: Follow theme needs the OS appearance, which only the view sees.
     s.report_system_dark(cx.system_dark());
+    // Animated artwork holds still under Reduce Motion, which only the view sees.
+    s.report_reduced_motion(cx.is_reduced_motion());
     // macOS: the menu bar follows the state and the user's shortcuts (nothing headless).
     #[cfg(target_os = "macos")]
     menu_bar::sync(s);
