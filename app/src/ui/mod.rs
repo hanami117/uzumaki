@@ -26,6 +26,8 @@ mod local_lib;
 mod lyrics_snap_tests;
 #[cfg(test)]
 mod np_keys_tests;
+#[cfg(test)]
+mod volume_wheel_tests;
 mod marquee;
 mod menu;
 #[cfg(any(target_os = "macos", test))]
@@ -80,6 +82,9 @@ pub struct UiState {
     ctx: Option<ctx_menu::CtxMenu>,
     /// The compact player bar's volume popover is open.
     pub volume_open: bool,
+    /// Wheel points over a volume control not yet turned into a volume step
+    /// (`player_bar::wheel_volume`).
+    pub volume_wheel: f32,
     /// Songs-table view mode, sorts and the sorted-order cache.
     pub table: songs_table::TableState,
     /// Full-screen Now Playing is showing.

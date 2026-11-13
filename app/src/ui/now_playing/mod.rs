@@ -10,7 +10,7 @@ mod follow;
 use rune::{Cx, Edge, El, Spring, SpringPair, TextStyle, Transition, Tx, col, el, icon, row, text};
 
 use super::icons;
-use super::player_bar::{icon_button, play_pause, progress, repeat_button, seek_slider, shuffle_button, volume_slider};
+use super::player_bar::{icon_button, play_pause, progress, repeat_button, seek_slider, shuffle_button, volume_slider, wheel_volume};
 use super::widgets::{Size, art, fmt_time};
 use crate::art::{NOW_PLAYING_PX, SMALL_PX};
 use crate::lyrics::Lyrics;
@@ -224,8 +224,11 @@ fn bottom_row(s: &State) -> El {
     let lyrics = lyrics_on(s);
     let queue = s.settings.now_playing_queue;
     row().w_full().justify_center().center_y().gap(8.0)
-        .child(icon(icons::volume(s.playback.volume), 18.0).color(PAL.muted))
-        .child(el().w(160.0).child(volume_slider(s, "np-volume", PAL.text2)))
+        .child(wheel_volume(
+            row().key("np-volume-row").gap(8.0).center_y()
+                .child(icon(icons::volume(s.playback.volume), 18.0).color(PAL.muted))
+                .child(el().w(160.0).child(volume_slider(s, "np-volume", PAL.text2))),
+        ))
         .child(
             icon_button("np-lyrics-toggle", if lyrics { "Hide lyrics" } else { "Show lyrics" }, &LYRICS_ICON, 18.0,
                 if lyrics { PAL.accent } else { PAL.text2 })
