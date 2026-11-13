@@ -47,7 +47,42 @@ const fn parse_build(s: &str) -> u32 {
 
 /// The version and build as `--version` prints them: `0.1.0 (build 1)`.
 pub fn version_line() -> String {
-    format!("{} (build {BUILD})", env!("CARGO_PKG_VERSION"))
+    format!("{} (build {BUILD}){}", env!("CARGO_PKG_VERSION"), dev_suffix())
+}
+
+/// What `build.rs` found in git: the branch, short hash, whether the tree has changes, and whether
+/// HEAD is exactly the release tag for this version and build.
+#[derive(Debug, PartialEq)]
+pub struct GitFacts<'a> {
+    pub branch: &'a str,
+    pub hash: &'a str,
+    pub dirty: bool,
+    pub at_release_tag: bool,
+}
+
+/// The text a dev build adds after the version, for display only (never for update checks, the
+/// User-Agent or any comparison). Empty without git facts (tarball, AUR source build) and for a
+/// clean checkout of the release tag. Otherwise ` · main 20c1fe9`, with ` dirty` if the tree has
+/// changes.
+pub fn git_suffix(facts: Option<GitFacts>) -> String {
+    match facts {
+        Some(f) if !(f.at_release_tag && !f.dirty) => {
+            format!(" \u{b7} {} {}{}", f.branch, f.hash, if f.dirty { " dirty" } else { "" })
+        }
+        _ => String::new(),
+    }
+}
+
+/// `build.rs`'s `UZUMAKI_GIT` (tab separated, or empty), as facts.
+fn parse_facts(s: &str) -> Option<GitFacts<'_>> {
+    let mut p = s.split('\t');
+    let (branch, hash, dirty, tag) = (p.next()?, p.next()?, p.next()?, p.next()?);
+    (!branch.is_empty() && !hash.is_empty()).then_some(GitFacts { branch, hash, dirty: dirty == "1", at_release_tag: tag == "1" })
+}
+
+/// [`git_suffix`] for this build.
+pub fn dev_suffix() -> String {
+    git_suffix(parse_facts(env!("UZUMAKI_GIT")))
 }
 
 /// `$UZUMAKI_CTL_SOCKET`, else `<runtime dir>/uzumaki.sock` (see [`runtime_dir`]).
@@ -758,7 +793,31 @@ mod build_tests {
         assert_eq!(parse_build(" 12 \r\n"), 12);
         assert!(BUILD >= 1);
         assert_eq!(BUILD.to_string(), include_str!("../../BUILD").trim());
-        assert_eq!(version_line(), format!("{} (build {BUILD})", env!("CARGO_PKG_VERSION")));
+        assert_eq!(version_line(), format!("{} (build {BUILD}){}", env!("CARGO_PKG_VERSION"), dev_suffix()));
+    }
+
+    fn facts(branch: &'static str, hash: &'static str, dirty: bool, at_release_tag: bool) -> Option<GitFacts<'static>> {
+        Some(GitFacts { branch, hash, dirty, at_release_tag })
+    }
+
+    #[test]
+    fn the_dev_suffix_follows_the_rule() {
+        // No git info (tarball, AUR source build): nothing.
+        assert_eq!(git_suffix(None), "");
+        // Exactly at the release tag, clean: nothing.
+        assert_eq!(git_suffix(facts("main", "20c1fe9", false, true)), "");
+        // Anywhere else: branch and short hash.
+        assert_eq!(git_suffix(facts("main", "20c1fe9", false, false)), " \u{b7} main 20c1fe9");
+        // Changes in the tree: "dirty", even at the tag.
+        assert_eq!(git_suffix(facts("animated-art", "1a2b3c4", true, false)), " \u{b7} animated-art 1a2b3c4 dirty");
+        assert_eq!(git_suffix(facts("main", "20c1fe9", true, true)), " \u{b7} main 20c1fe9 dirty");
+    }
+
+    #[test]
+    fn the_build_script_facts_parse() {
+        assert_eq!(parse_facts(""), None);
+        assert_eq!(parse_facts("main\t20c1fe9\t1\t0"), facts("main", "20c1fe9", true, false));
+        assert_eq!(parse_facts("main\t20c1fe9"), None);
     }
 
     #[test]
