@@ -628,7 +628,10 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+    // A name of its own per write: two workers fetching the same picture at once (a cover shown
+    // while the sync warms it) must not share a temp file, or the second rename finds it gone.
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let tmp = path.with_extension(format!("tmp{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
     let result = (|| {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
@@ -914,6 +917,37 @@ mod tests {
         assert_ne!(a, cache_path(dir, "https://a/2.jpg"));
         assert_eq!(a.parent(), Some(dir));
         assert_eq!(a.file_name().unwrap().len(), 16);
+    }
+
+    #[test]
+    fn write_atomic_creates_a_missing_directory_and_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join(format!("uzumaki-art-write-test-{}", std::process::id())).join("a").join("art");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+        let path = dir.join("0123456789abcdef");
+        write_atomic(&path, b"jpg").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"jpg");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "only the final file is left");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn write_atomic_survives_two_threads_writing_the_same_picture() {
+        let dir = std::env::temp_dir().join(format!("uzumaki-art-race-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("0123456789abcdef");
+        let bytes = vec![7u8; 256 * 1024];
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| {
+                    for _ in 0..50 {
+                        write_atomic(&path, &bytes).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temp file is left");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
