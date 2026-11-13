@@ -33,6 +33,9 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("now-playing-cover-only", crate::ui::scene_np_cover_only),
     ("now-playing-queue", now_playing_queue),
     ("now-playing-queue-empty", now_playing_queue_empty),
+    ("now-playing-no-art", now_playing_no_art),
+    ("now-playing-no-art-lyrics", now_playing_no_art_lyrics),
+    ("player-bar-no-art", player_bar_no_art),
     ("up-next", up_next),
     ("up-next-station", up_next_station),
     ("now-playing-queue-station", now_playing_queue_station),
@@ -546,6 +549,28 @@ fn now_playing(s: &mut State) {
 fn now_playing_nolyrics(s: &mut State) {
     now_playing_base(s);
     s.lyrics.insert("cat-now".into(), Load::Ready(None));
+}
+
+/// A song with no artwork (a local file without a cover, say): the initials tile, big.
+fn now_playing_no_art(s: &mut State) {
+    now_playing_nolyrics(s);
+    if let Some(now) = s.playback.song.as_mut() {
+        now.artwork = None;
+    }
+}
+
+/// The same beside the lyrics (a smaller cover).
+fn now_playing_no_art_lyrics(s: &mut State) {
+    now_playing(s);
+    if let Some(now) = s.playback.song.as_mut() {
+        now.artwork = None;
+    }
+}
+
+/// Now Playing closed: the player bar's cover for a song with no artwork.
+fn player_bar_no_art(s: &mut State) {
+    now_playing_no_art(s);
+    s.ui.now_playing = false;
 }
 
 fn up_next(s: &mut State) {
