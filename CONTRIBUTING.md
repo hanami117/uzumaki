@@ -42,6 +42,22 @@ python3 -m venv /tmp/evs && /tmp/evs/bin/pip install castlabs-evs
 `packaging/macos/build.sh` then builds `Uzumaki.app` and a DMG in `target/macos.noindex/`. See castLabs'
 [EVS wiki](https://github.com/castlabs/electron-releases/wiki/EVS) for details.
 
+## macOS release files
+
+GitHub Actions builds the Linux files (tarball, AppImage) when a `v*` tag is pushed and makes a draft release.
+The disk image is built on a Mac, because hosted macOS runners are slow and costly. With the draft up, check out
+the tag on the Mac and run:
+
+```sh
+git checkout v0.1.1
+packaging/macos/release.sh v0.1.1 [--repo owner/name] [--dry-run]
+```
+
+It checks the tag (exact HEAD, clean tree) and that the release exists, then downloads the tarball and AppImage
+from it and runs `packaging/release.sh --assets`. It uploads `Uzumaki-<release>.dmg`, `Uzumaki-macOS.dmg`, their
+`.sha256` files and the 12-file `SHA256SUMS` with `--clobber`, then compares GitHub's digests. `--dry-run` builds
+and lists the files without uploading. It stops if a published release already has its DMG.
+
 ## Tests
 
 ```sh
