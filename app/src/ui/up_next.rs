@@ -365,6 +365,9 @@ pub fn list(s: &State, look: Look, cx: &rune::Cx<State>) -> El {
         ROW,
         move |s: &State, i| key_rows.key(s, i),
         move |s: &State, i: usize| {
+            // Rows are built when the list lays out, after `dark_scope` has ended, so Now Playing's own
+            // rows ask for the dark palette again (Now Playing is a dark stage in both themes).
+            let build = || {
             let content = if i < rows.prefix {
                 if i == 0 { row().px(20.0).gap(6.0).center_y().child(icon(&icons::CLOCK, 13.0).color(PAL.dim)).child(text("History").font(SECTION11).color(PAL.dim)) }
                 else {
@@ -413,6 +416,8 @@ pub fn list(s: &State, look: Look, cx: &rune::Cx<State>) -> El {
                 if let Some(f) = &m.fade { r = r.live_opacity(f.smooth(up_next_anim::MOTION)); }
             }
             r
+            };
+            if look == Look::NowPlaying { crate::theme::dark_scope(build) } else { build() }
         },
     )
     .virtual_rows_version(version)
