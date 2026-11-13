@@ -73,6 +73,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("sidebar-pins", sidebar_pins),
     ("sidebar-playlist-art", sidebar_playlist_art),
     ("sidebar-collapsed", sidebar_collapsed),
+    ("sidebar-collapsed-playlists", sidebar_collapsed_playlists),
+    ("drag-songs-rail", drag_songs_rail),
     ("drag-pins", drag_pins),
     ("drag-songs", drag_songs),
     ("narrow", narrow),
@@ -1119,6 +1121,21 @@ fn drag_songs(s: &mut State) {
 fn sidebar_collapsed(s: &mut State) {
     sidebar_pins(s);
     s.settings.sidebar_collapsed = true;
+}
+
+/// The rail with the pins folded, so its playlists show: pictures (tinted tiles with initials,
+/// headless) and icons, "Morning commute" open.
+fn sidebar_collapsed_playlists(s: &mut State) {
+    sidebar_playlist_art(s);
+    s.settings.sidebar_collapsed = true;
+    s.settings.pins_open = false;
+}
+
+/// Two songs dragged over the rail's second playlist.
+fn drag_songs_rail(s: &mut State) {
+    sidebar_collapsed_playlists(s);
+    crate::ui::scene_select(s, &["pl-4", "pl-5"], None);
+    crate::ui::scene_drag_songs(s, [38.0, 805.0], Some("p.1"));
 }
 
 /// Meant for `--size 900x700`.
