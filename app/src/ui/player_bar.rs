@@ -272,7 +272,7 @@ pub fn player_bar(s: &State, compact: bool, still: bool) -> El {
         .on_secondary_press(move |s: &mut State, p, _tx: &mut rune::Tx| {
             super::menu::open_song(s, menu_song.clone(), super::menu::MenuContext::NowPlaying, [p.x, p.y])
         })
-        .child(art(s, song.artwork.as_ref(), &song.album, Size::Small(cover), 6.0, initials_pt(song, cover)))
+        .child(art(s, song.artwork.as_ref(), song.tile_name(), Size::Small(cover), 6.0, initials_pt(song, cover)))
         .child(now_lines(s, song, true, still));
 
     let time = |t: String, end: bool| {
@@ -367,7 +367,7 @@ pub fn floating_bar(s: &State, win_w: f32, still: bool) -> El {
         .on_secondary_press(move |s: &mut State, p, _tx: &mut rune::Tx| {
             super::menu::open_song(s, menu_song.clone(), super::menu::MenuContext::NowPlaying, [p.x, p.y])
         })
-        .child(art(s, song.artwork.as_ref(), &song.album, Size::Small(36.0), 6.0, initials_pt(song, 36.0)))
+        .child(art(s, song.artwork.as_ref(), song.tile_name(), Size::Small(36.0), 6.0, initials_pt(song, 36.0)))
         .child(lines);
     let seek = if narrow {
         thin_seek(s, "seek", frac)

@@ -161,7 +161,7 @@ mod tests {
 
     fn song(with_art: bool) -> Song {
         Song {
-            id: "1".into(), catalog_id: None, title: "t".into(), artist: "a".into(), album: "b".into(), duration: 1.0,
+            id: "1".into(), catalog_id: None, title: "t".into(), artist: "a".into(), album: "b".into(), album_is_fallback: false, duration: 1.0,
             track_number: None, disc_number: None, explicit: false, playable: true, genre: None, year: None, album_id: None, artists: Vec::new(),
             artwork: with_art.then(|| Artwork { template: "https://x/{w}x{h}.{f}".into(), bg: None }),
         }

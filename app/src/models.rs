@@ -38,6 +38,10 @@ pub struct Song {
     pub title: String,
     pub artist: String,
     pub album: String,
+    /// True when `album` is only a stand-in (a local file with no album tag shows its folder's
+    /// name). Such a name is no use as a label, e.g. for the initials on a cover tile.
+    #[serde(default)]
+    pub album_is_fallback: bool,
     /// Seconds.
     pub duration: f64,
     pub track_number: Option<u32>,
@@ -61,6 +65,12 @@ pub struct Song {
 }
 
 impl Song {
+    /// The name a cover tile takes its initials from: the album, unless that is a stand-in or
+    /// empty, then the song's title.
+    pub fn tile_name(&self) -> &str {
+        if self.album_is_fallback || self.album.trim().is_empty() { &self.title } else { &self.album }
+    }
+
     pub fn parse(v: &Value) -> Option<Self> {
         let a = &v["attributes"];
         Some(Self {
@@ -69,6 +79,7 @@ impl Song {
             title: str_of(&a["name"]),
             artist: str_of(&a["artistName"]),
             album: str_of(&a["albumName"]),
+            album_is_fallback: false,
             duration: a["durationInMillis"].as_f64().unwrap_or(0.0) / 1000.0,
             track_number: a["trackNumber"].as_u64().map(|n| n as u32),
             disc_number: a["discNumber"].as_u64().map(|n| n as u32),
@@ -90,6 +101,7 @@ impl Song {
             title: str_of(&v["title"]),
             artist: str_of(&v["artist"]),
             album: str_of(&v["album"]),
+            album_is_fallback: false,
             duration: v["duration"].as_f64().unwrap_or(0.0),
             track_number: None,
             disc_number: None,
@@ -532,6 +544,16 @@ pub(crate) fn strip_tags(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tile_name_is_the_album_unless_that_is_a_stand_in() {
+        let mut song = Song { title: "Powerade".into(), album: "Music".into(), album_is_fallback: true, ..Song::parse(&serde_json::json!({"id": "1"})).unwrap() };
+        assert_eq!(song.tile_name(), "Powerade", "a folder-name album gives the title");
+        song.album_is_fallback = false;
+        assert_eq!(song.tile_name(), "Music", "a real album called Music keeps its name");
+        song.album = "  ".into();
+        assert_eq!(song.tile_name(), "Powerade", "an empty album gives the title");
+    }
 
     #[test]
     fn parses_a_catalog_album_with_tracks() {

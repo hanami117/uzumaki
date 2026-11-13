@@ -38,6 +38,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("now-playing-no-art", now_playing_no_art),
     ("now-playing-no-art-lyrics", now_playing_no_art_lyrics),
     ("player-bar-no-art", player_bar_no_art),
+    ("now-playing-untagged", now_playing_untagged),
+    ("player-bar-untagged", player_bar_untagged),
     ("up-next", up_next),
     ("up-next-station", up_next_station),
     ("now-playing-queue-station", now_playing_queue_station),
@@ -284,6 +286,7 @@ fn song(album: usize, k: u32) -> Song {
         title: name,
         artist: artist.into(),
         album: title.into(),
+        album_is_fallback: false,
         duration: (150 + (album as u32 * 37 + k * 53) % 140) as f64,
         track_number: Some(k + 1),
         disc_number: Some(1),
@@ -569,6 +572,24 @@ fn now_playing_no_art_lyrics(s: &mut State) {
     if let Some(now) = s.playback.song.as_mut() {
         now.artwork = None;
     }
+}
+
+/// An untagged local file: the album is only its folder's name ("Music"), so the tile shows the
+/// title's initials ("PN"), not the folder's.
+fn now_playing_untagged(s: &mut State) {
+    now_playing_no_art(s);
+    if let Some(now) = s.playback.song.as_mut() {
+        now.id = "file:///home/user/Music/powerade.mp3".into();
+        now.title = "Powerade (NOISETIME x Hähnchenteile Remix)".into();
+        now.artist = "Unknown Artist".into();
+        now.album = "Music".into();
+        now.album_is_fallback = true;
+    }
+}
+
+fn player_bar_untagged(s: &mut State) {
+    now_playing_untagged(s);
+    s.ui.now_playing = false;
 }
 
 /// Now Playing closed: the player bar's cover for a song with no artwork.
@@ -1197,6 +1218,7 @@ fn local_songs() -> Vec<Song> {
                     title: title.to_string(),
                     artist: artist.into(),
                     album: album.clone(),
+                    album_is_fallback: false,
                     duration: (*secs + round * 7) as f64,
                     track_number: Some(n),
                     disc_number: Some(1),
@@ -1868,6 +1890,7 @@ fn ltrack(path: std::path::PathBuf, title: &str, artist: &str, album: &str, albu
         title: title.into(),
         artist: artist.into(),
         album: album.into(),
+        album_fallback: album_artist == "Unknown Artist",
         album_artist: album_artist.into(),
         track,
         disc,

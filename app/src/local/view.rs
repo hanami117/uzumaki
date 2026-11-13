@@ -114,6 +114,7 @@ pub fn derive(songs: &mut [Song], album_artists: &[String], roots: &[PathBuf]) -
         }
         if clean(&song.album).is_none() {
             song.album = folder.clone();
+            song.album_is_fallback = true;
         }
         let album_artist = album_artists.get(i).and_then(|a| clean(a)).unwrap_or(&song.artist).to_string();
         // An untagged album is its folder (named after it, by Unknown Artist): two folders called
@@ -332,6 +333,7 @@ pub(crate) mod tests {
             title: title.into(),
             artist: artist.into(),
             album: album.into(),
+            album_fallback: false,
             album_artist: album_artist.into(),
             track,
             disc,
@@ -348,6 +350,17 @@ pub(crate) mod tests {
 
     fn titles(songs: &[Song], list: &[u32]) -> Vec<String> {
         list.iter().map(|&i| songs[i as usize].title.clone()).collect()
+    }
+
+    #[test]
+    fn an_album_named_after_its_folder_is_marked_a_stand_in() {
+        let mut bare = track("/m/Music/a.mp3", "A", "Unknown Artist", "", "", None, None);
+        bare.album_fallback = true;
+        let (songs, _) = view(&[bare, track("/m/Music/b.mp3", "B", "Band", "Music", "", None, None)]);
+        assert!(songs[0].album_is_fallback && songs[0].album == "Music");
+        assert!(!songs[1].album_is_fallback, "a real album called Music is not a stand-in");
+        assert_eq!(songs[0].tile_name(), "A");
+        assert_eq!(songs[1].tile_name(), "Music");
     }
 
     #[test]

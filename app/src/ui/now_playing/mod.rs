@@ -121,7 +121,7 @@ fn cover(s: &State, song: &Song, size: f32) -> El {
     let radius = (size * 0.03).clamp(8.0, 16.0);
     let key = format!("cover-{}", song.id);
     let Some(a) = &song.artwork else {
-        let tile = art(s, None, &song.album, Size::Fill, 0.0, (size * 0.18).max(14.0)).key(key);
+        let tile = art(s, None, song.tile_name(), Size::Fill, 0.0, (size * 0.18).max(14.0)).key(key);
         return frame(size, radius).child(tile);
     };
     let mut stack = el().key(key).w_full().h_full().fill(PAL.card_hover);
@@ -406,6 +406,7 @@ fn scene_base(s: &mut State, lyr: Lyrics, position: f64) {
         title: "Last Service".into(),
         artist: "Juniper Vale".into(),
         album: "Night Bus Hymns".into(),
+        album_is_fallback: false,
         duration: 241.0,
         track_number: Some(1),
         disc_number: Some(1),

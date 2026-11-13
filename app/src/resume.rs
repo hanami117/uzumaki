@@ -381,6 +381,7 @@ mod tests {
             title: id.into(),
             artist: "A".into(),
             album: "B".into(),
+            album_is_fallback: false,
             duration: 200.0,
             track_number: None,
             disc_number: None,
