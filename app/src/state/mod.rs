@@ -27,6 +27,7 @@ mod edits;
 mod favourites;
 mod library;
 mod local;
+pub mod motion;
 mod playlist_edit;
 mod playlists;
 mod prefs;
@@ -369,6 +370,10 @@ pub enum Msg {
     ArtistMore { id: String, what: More, limited: bool, result: Result<crate::artist::ViewPage, String> },
     /// The word-timed lyrics request failed: ask for the line-timed ones.
     LyricsRetry { id: String },
+    /// A catalog album's motion art (`api::album_motion`); Ok(None) when it has none.
+    Motion { album: String, result: Result<Option<crate::motion::MotionArt>, String> },
+    /// A catalog album's page asked with its motion art: both land.
+    AlbumPage { id: String, motion: Option<crate::motion::MotionArt>, result: Result<(Collection, Option<String>), String> },
     /// Go to Album for a library song: its library album id.
     AlbumOf { result: Result<Option<String>, String> },
     /// The bridge's answer to `signOut`.
@@ -551,6 +556,8 @@ pub struct State {
     favs: favourites::Favourites,
     /// The picture chosen in the New Playlist dialog, for the playlist Apple is creating.
     new_playlist_picture: Option<std::path::PathBuf>,
+    /// Animated artwork in Now Playing (`motion.rs`).
+    pub motion: motion::MotionState,
     /// View-only state owned by the UI module (text field contents, scroll, …).
     pub ui: crate::ui::UiState,
 }
@@ -636,6 +643,7 @@ impl State {
             skipped_in_row: 0,
             favs: Default::default(),
             new_playlist_picture: None,
+            motion: motion::MotionState::default(),
             ui,
             browse_new: Load::Idle,
             made_for_you: Load::Idle,
@@ -898,6 +906,16 @@ impl State {
                     Ok(()) => self.signed_out(),
                     Err(e) => self.toast = Some(format!("Couldn't sign out: {e}")),
                 }
+            }
+            Msg::Motion { album, result } => {
+                self.motion_known(album, result);
+                return false; // `poll_motion` takes it from here
+            }
+            Msg::AlbumPage { id, motion, result } => {
+                if result.is_ok() {
+                    self.motion_known(id.clone(), Ok(motion));
+                }
+                return self.apply_msg(Msg::Collection { id, result });
             }
             Msg::AlbumOf { result } => match result {
                 Ok(Some(id)) => self.navigate(Route::Collection { kind: CollectionKind::Album, id }),

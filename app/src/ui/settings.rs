@@ -509,6 +509,12 @@ fn row_el(r: &Rx, id: Row) -> El {
                 ),
             )
         }
+        Row::AnimatedArtwork => setting(
+            narrow,
+            "Animated artwork",
+            Some("Apple's video loop of the album plays in the Now Playing cover, when it has one. A still cover with Reduce Motion.".into()),
+            switch("settings/motion", "Animated artwork", s.settings.animated_artwork, true, |s, on| s.set_animated_artwork(on)),
+        ),
         Row::NpCoverEffect => block(
             if r.search { "Now Playing cover effect" } else { "Cover effect" },
             ap.np_effect.description(),
@@ -836,7 +842,7 @@ fn appearance(r: &Rx) -> Vec<El> {
     }
     v.push(divider());
     v.push(text("Now Playing").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
-    v.extend(rows(r, &[Row::NpBackground, Row::NpCoverEffect]));
+    v.extend(rows(r, &[Row::NpBackground, Row::NpCoverEffect, Row::AnimatedArtwork]));
     v.push(divider());
     v.extend(item(r, Row::Sidebar));
     v

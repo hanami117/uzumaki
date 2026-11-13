@@ -335,11 +335,19 @@ impl State {
         if !self.coll_refresh.contains_key(id) {
             self.collections.insert(id.to_string(), Load::Loading);
         }
+        let reply_id = id.to_string();
+        if kind == CollectionKind::Album && !id.starts_with("l.") {
+            // Catalog albums come with their motion art (`extend=editorialVideo`).
+            let parse = |v: &Value| (first_page(v), crate::motion::MotionArt::from_reply(v));
+            return self.request(api::album(id), parse, move |r| match r {
+                Ok((result, motion)) => Msg::AlbumPage { id: reply_id, motion, result },
+                Err(e) => Msg::Collection { id: reply_id, result: Err(e) },
+            });
+        }
         let req = match kind {
             CollectionKind::Album => api::album(id),
             CollectionKind::Playlist => api::playlist(id),
         };
-        let reply_id = id.to_string();
         self.request(req, first_page, move |r| Msg::Collection { id: reply_id, result: r.and_then(|x| x) });
     }
 

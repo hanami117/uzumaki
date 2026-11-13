@@ -31,6 +31,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("now-playing-intro", crate::ui::scene_np_intro),
     ("now-playing-unsynced", crate::ui::scene_np_unsynced),
     ("now-playing-cover-only", crate::ui::scene_np_cover_only),
+    ("now-playing-motion", |s| crate::ui::scene_np_motion(s, false)),
+    ("now-playing-motion-lyrics", |s| crate::ui::scene_np_motion(s, true)),
     ("now-playing-queue", now_playing_queue),
     ("now-playing-queue-empty", now_playing_queue_empty),
     ("up-next-stars", up_next_stars),

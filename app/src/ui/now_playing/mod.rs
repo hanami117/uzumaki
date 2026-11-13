@@ -33,6 +33,8 @@ pub fn close(s: &mut State) {
     }
     s.ui.now_playing = false;
     s.set_fine_time(false);
+    // The clip and its decoder go now: a hidden window may draw no further frame to poll on.
+    s.motion.stop();
 }
 
 /// Catalog id lyrics are keyed by.
@@ -165,7 +167,22 @@ fn cover(s: &State, song: &Song, size: f32) -> El {
     if let Some(img) = s.art.get(a, NOW_PLAYING_PX) {
         stack = stack.child(fill("big", img));
     }
-    frame(size, radius).child(stack)
+    let framed = frame(size, radius).child(stack);
+    match motion_layer(s, song, size) {
+        Some(layer) => framed.child(layer),
+        None => framed,
+    }
+}
+
+/// Animated artwork over the still (`state::motion`): fades in once its first frame is ready,
+/// in the same box, so nothing moves. Kept outside the per-song stack so the next song of the
+/// same album keeps the clip running. Not on the small cover of a narrow window.
+fn motion_layer(s: &State, song: &Song, size: f32) -> Option<El> {
+    if size < 160.0 {
+        return None;
+    }
+    let layer = s.motion.layer_for(crate::state::motion::album_of(song))?;
+    Some(layer.key("np-motion").transition(Transition::opacity()).enter_delay(0.12))
 }
 
 /// The cover's rounded, shadowed box.
@@ -362,6 +379,16 @@ pub fn overlay(s: &State, cx: &mut Cx<State>) -> Option<El> {
 /// frames while lyrics animate come from `wake_after` and live values, and nothing is scheduled
 /// otherwise, so an idle or paused window draws nothing.
 pub fn poll(s: &mut State, landed: bool, tx: &mut Tx) -> bool {
+    let motion = s.poll_motion();
+    // A clip held because the window can't draw: a timer frame each second finds out when it
+    // can again (`state::motion::frame_outcome`).
+    if s.motion.covered && s.motion.playback.is_some() {
+        tx.wake_after(std::time::Duration::from_secs(1));
+    }
+    lyrics_poll(s, landed, tx) || motion
+}
+
+fn lyrics_poll(s: &mut State, landed: bool, tx: &mut Tx) -> bool {
     let visible = synced_visible(s);
     let playing = visible && matches!(s.playback.state, crate::bridge::PlayState::Playing);
     s.set_fine_time(playing);
@@ -497,6 +524,36 @@ pub fn scene_np_cover_only(s: &mut State) {
     s.settings.now_playing_lyrics = false;
 }
 
+/// Animated artwork from the local fixture clip (`app/fixtures/motion-clip.mp4`, 256 px, 2 s,
+/// made with ffmpeg's `gradients` source): playing, so the cover crossfades to the clip after
+/// its first frame. Use `--frames`/`--at` to see it move. macOS draws it with Rune's player
+/// (decoded per frame headless, so deterministic). Elsewhere, and with `UZUMAKI_MOTION=ffmpeg`,
+/// ffmpeg (which must be installed) decodes in real time beside the fast headless clock: the
+/// clip shows from about `--at 10`.
+pub fn scene_np_motion(s: &mut State, lyrics: bool) {
+    use crate::motion::{Clip, MotionArt};
+    scene_base(s, synthetic_lyrics(false), 30.0);
+    s.settings.now_playing_lyrics = lyrics;
+    s.playback.state = crate::bridge::PlayState::Playing;
+    let album = "1440857781";
+    if let Some(song) = s.playback.song.as_mut() {
+        song.album_id = Some(album.into());
+    }
+    let master = "https://example.invalid/motion/P1_default.m3u8";
+    s.motion.albums.insert(album.into(), Load::Ready(Some(MotionArt { video: master.into(), preview: None })));
+    let path = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/motion-clip.mp4"));
+    let mut clip = Clip { path, width: 256, height: 256, fps: 24.0 };
+    // For measuring with a real clip: `UZUMAKI_SCENE_CLIP=<file>,<side>,<fps>` (a square one).
+    if let Ok(v) = std::env::var("UZUMAKI_SCENE_CLIP") {
+        let p: Vec<&str> = v.split(',').collect();
+        if let [file, side, fps] = p.as_slice() {
+            let side = side.parse().unwrap_or(768);
+            clip = Clip { path: file.into(), width: side, height: side, fps: fps.parse().unwrap_or(crate::motion::clips::DEFAULT_FPS) };
+        }
+    }
+    s.motion.clips.insert(master.into(), Load::Ready(clip));
+}
+
 #[cfg(test)]
 mod tests {
     use rune::{Env, Runtime};
@@ -506,6 +563,53 @@ mod tests {
     use crate::state::State;
 
     const DT: f64 = 1.0 / 60.0;
+
+    /// Animated artwork arriving while Now Playing shows: the clip fades in over the still in
+    /// the same box (nothing moves), and closing Now Playing takes it away. macOS's native
+    /// player shows its poster at once; the ffmpeg path needs a handle for its first-frame report,
+    /// which tests don't have (`state::motion` tests cover it).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn animated_artwork_fades_in_over_the_still_without_moving_it() {
+        if std::env::var("UZUMAKI_MOTION").as_deref() == Ok("ffmpeg") {
+            return;
+        }
+        let mut s = State::offline();
+        super::scene_np_motion(&mut s, false);
+        s.settings.animated_artwork = false;
+        let mut rt = Runtime::new(s, crate::ui::view, (1360.0, 860.0), Env { system_dark: true, scale: 1.0 });
+        let step = |rt: &mut Runtime<State>| {
+            rt.update_if(|s, tx| crate::ui::poll(s, 0.0, tx));
+            rt.frame(DT);
+        };
+        for _ in 0..20 {
+            step(&mut rt);
+        }
+        assert!(rt.presented("np-motion").is_none(), "setting off: the still only");
+        let cover = rt.presented("np-cover").unwrap().0;
+
+        rt.update(|s, _| s.set_animated_artwork(true));
+        let mut seen = Vec::new();
+        for _ in 0..60 {
+            step(&mut rt);
+            if let Some((rect, opacity)) = rt.presented("np-motion") {
+                assert_eq!(rect, cover, "the clip fills the cover's box exactly");
+                seen.push(opacity);
+            }
+            assert_eq!(rt.presented("np-cover").unwrap().0, cover, "the cover never moves");
+        }
+        assert!(seen.iter().any(|o| *o > 0.05 && *o < 0.95), "a crossfade, not a cut: {seen:?}");
+        assert!((seen.last().unwrap() - 1.0).abs() < 1e-3, "settles fully shown: {seen:?}");
+
+        rt.update(|s, _| super::close(s));
+        for _ in 0..60 {
+            step(&mut rt);
+        }
+        assert!(rt.presented("np-motion").is_none());
+        let mut gone = false;
+        rt.update(|s, _| gone = s.motion.playback.is_none());
+        assert!(gone, "no player left once Now Playing closed");
+    }
 
     /// The screencast's setup (`np-slide`), Now Playing closed, settled.
     fn slide_scene() -> Runtime<State> {
