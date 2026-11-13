@@ -84,6 +84,7 @@ fn body_of<'a>(s: &'a State) -> Body<'a> {
         Some(Load::Ready(Some(l))) if !l.lines.is_empty() => {
             if l.synced { Body::Synced(l) } else { Body::Plain(l) }
         }
+        Some(Load::Failed(_)) => Body::Message("Couldn\u{2019}t load lyrics"),
         _ => Body::Message("No lyrics for this song"),
     }
 }

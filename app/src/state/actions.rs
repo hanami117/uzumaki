@@ -638,54 +638,6 @@ impl State {
         });
     }
 
-    /// The lyrics of `song` as loaded so far (None: never asked, e.g. a local file or a library
-    /// song Apple didn't match). Same key as `want_lyrics`.
-    pub fn lyrics_of(&self, song: &Song) -> Option<&Load<Option<crate::lyrics::Lyrics>>> {
-        let key = match &song.catalog_id {
-            Some(c) => c.as_str(),
-            None if song.is_local() || song.id.starts_with("i.") => return None,
-            None => song.id.as_str(),
-        };
-        self.lyrics.get(key)
-    }
-
-    /// Fetches lyrics for `song` once (catalog songs only; needs a subscription).
-    pub(super) fn want_lyrics(&mut self, song: &Song) {
-        if song.is_local() {
-            return; // lyrics are Apple's only
-        }
-        let id = match &song.catalog_id {
-            Some(c) => c.clone(),
-            None if !song.id.starts_with("i.") => song.id.clone(),
-            None => return,
-        };
-        if !self.session.authorized || self.lyrics.contains_key(&id) {
-            return;
-        }
-        if self.lyrics.len() > 200 {
-            self.lyrics.clear();
-        }
-        self.lyrics.insert(id.clone(), Load::Loading);
-        self.request_lyrics(id, true);
-    }
-
-    /// Word-timed ("syllable") lyrics first, for the per-word highlight; songs that only have
-    /// line timing answer that request with an error, so then ask for the line-timed ones.
-    pub(super) fn request_lyrics(&self, id: String, words: bool) {
-        let kind = if words { "syllable-lyrics" } else { "lyrics" };
-        let path = format!("/v1/catalog/{{{{storefrontId}}}}/songs/{id}/{kind}");
-        self.request(
-            (path, serde_json::json!({})),
-            |v| v["data"][0]["attributes"]["ttml"].as_str().and_then(crate::lyrics::parse_ttml),
-            move |r| match r {
-                Ok(l) => Msg::Lyrics { id, result: Ok(l) },
-                Err(_) if words => Msg::LyricsRetry { id },
-                // No lyrics at all: that's "none", not a failure.
-                Err(_) => Msg::Lyrics { id, result: Ok(None) },
-            },
-        );
-    }
-
     /// Downloads the big Now Playing cover of the current song and the next two, so opening
     /// Now Playing or skipping shows them at once (they also land in the disk cache).
     pub(super) fn preload_art(&self) {

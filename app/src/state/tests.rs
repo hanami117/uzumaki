@@ -1634,6 +1634,10 @@ mod uzu_lyrics {
         let plain = Lyrics { synced: false, lines: vec![Line { text: "one".into(), ..Default::default() }, Line { text: "two".into(), ..Default::default() }] };
         s.apply_msg(Msg::Lyrics { id: "123".into(), result: Ok(Some(plain)) });
         assert_eq!(status(&mut s), (ctl::LyricsStatus::Plain, 2));
+        // A late "none" (an older request's reply) doesn't hide lyrics already shown.
+        s.apply_msg(Msg::Lyrics { id: "123".into(), result: Ok(None) });
+        assert_eq!(status(&mut s), (ctl::LyricsStatus::Plain, 2));
+        s.lyrics.remove("123");
         s.apply_msg(Msg::Lyrics { id: "123".into(), result: Ok(None) });
         assert_eq!(status(&mut s), (ctl::LyricsStatus::None, 0));
         let _ = song;
@@ -2735,4 +2739,247 @@ fn later_pages_leave_the_queue_alone_once_something_else_plays() {
     let page = Page { items: vec![song("2")], next: None, total: None };
     s.apply_msg(Msg::CollectionTracks { id: "p.1".into(), result: Ok(page) });
     assert_eq!(up_next_ids(&s), ["y"]);
+}
+
+// ------------------------------------------------------------------- lyrics through a fake bridge
+
+/// Lyrics against a stand-in bridge: an `sh` loop that speaks the bridge protocol and answers
+/// each lyrics request with the next of a script of replies. Errors must never become "no
+/// lyrics": they are asked again; a song change mid-request keeps every answer with its song.
+mod lyrics_retry {
+    use super::*;
+    use crate::bridge::Bridge;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    const TTML: &str = "<tt xmlns='http://www.w3.org/ns/ttml' xmlns:itunes='http://music.apple.com/lyric-ttml-internal' itunes:timing='Line'><body><div><p begin='1.0' end='2.0'>hello</p></div></body></tt>";
+
+    /// The replies, one per lyrics request (the last one repeats):
+    /// `T` lyrics, `N` Apple's 404, `U` a 401, `X` MusicKit not ready (page reloading),
+    /// `H` no reply at all, `W` lyrics once the file `$GATE` exists.
+    const FAKE: &str = r#"
+gate="$1"; shift
+while IFS= read -r line; do
+  case "$line" in *lyrics*) ;; *) continue ;; esac
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  r="$1"; [ $# -gt 1 ] && shift
+  if [ "$r" = W ]; then while [ ! -e "$gate" ]; do sleep 0.02; done; r=T; fi
+  case "$r" in
+    T) printf '{"id":%s,"ok":true,"result":{"data":[{"attributes":{"ttml":"%s"}}]}}\n' "$id" "$TTML" ;;
+    N) printf '{"id":%s,"ok":true,"result":{"errors":[{"title":"No related resources","status":"404","code":"40403"}]}}\n' "$id" ;;
+    U) printf '{"id":%s,"ok":true,"result":{"errors":[{"status":"401","code":"40100"}]}}\n' "$id" ;;
+    X) printf '{"id":%s,"ok":false,"error":"MusicKit not ready yet (page still loading)"}\n' "$id" ;;
+    H) ;;
+  esac
+done
+"#;
+
+    struct Fake {
+        rx: mpsc::Receiver<Msg>,
+        gate: std::path::PathBuf,
+    }
+
+    fn with_fake(replies: &str) -> (State, Fake) {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("uzumaki-lyrics-fake-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let gate = dir.join("gate");
+        let mut cmd = std::process::Command::new("sh");
+        cmd.env("TTML", TTML).arg("-c").arg(FAKE).arg("sh").arg(&gate).args(replies.split_whitespace());
+        let (tx, rx) = mpsc::channel::<Msg>();
+        let tx = std::sync::Mutex::new(tx);
+        let bridge = Bridge::spawn_command(cmd, &dir.join("bridge.log"), move |m| {
+            let _ = tx.lock().unwrap().send(m);
+        })
+        .unwrap();
+        crate::clock::freeze();
+        let mut s = State::offline();
+        s.session.authorized = true;
+        s.bridge = Some(bridge);
+        (s, Fake { rx, gate })
+    }
+
+    /// Applies replies as they come until `done` holds (or 5 s pass).
+    fn pump(s: &mut State, f: &Fake, done: impl Fn(&State) -> bool) -> bool {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !done(s) {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match f.rx.recv_timeout(left.min(Duration::from_millis(50))) {
+                Ok(m) => {
+                    s.apply_msg(m);
+                }
+                Err(_) if left.is_zero() => return false,
+                Err(_) => {}
+            }
+        }
+        true
+    }
+
+    /// Lets replies land for a moment without waiting on anything in particular.
+    fn settle(s: &mut State, f: &Fake) {
+        let until = std::time::Instant::now() + Duration::from_millis(300);
+        while let Ok(m) = f.rx.recv_timeout(until.saturating_duration_since(std::time::Instant::now())) {
+            s.apply_msg(m);
+        }
+    }
+
+    /// `secs` of playback: the clock moves on and a time report arrives, as each second does.
+    fn play_for(s: &mut State, secs: u64) {
+        crate::clock::advance(Duration::from_secs(secs));
+        s.apply_msg(Msg::Bridge(Event::Time { current: 10.0, duration: 200.0 }));
+    }
+
+    /// Plays `song` and has the player say it started (a click on the song still loading is
+    /// ignored, as a double-click).
+    fn play(s: &mut State, song: &Song) {
+        s.play_list(std::slice::from_ref(song), 0, "Mix");
+        s.apply_msg(Msg::Bridge(Event::PlayState(PlayState::Playing)));
+    }
+
+    fn catalog(id: &str, catalog: &str) -> Song {
+        Song { catalog_id: Some(catalog.into()), ..song(id) }
+    }
+
+    fn shows_lyrics(s: &State, song: &Song) -> bool {
+        matches!(s.lyrics_of(song), Some(Load::Ready(Some(l))) if !l.lines.is_empty())
+    }
+
+    fn shows_none(s: &State, song: &Song) -> bool {
+        matches!(s.lyrics_of(song), Some(Load::Ready(None)))
+    }
+
+    fn asked(s: &State) -> usize {
+        sent_matching(s, "lyrics")
+    }
+
+    /// A 401 on both requests (an expired token, say) used to be stored as "no lyrics" for the
+    /// whole session. Now it shows as loading, and the song is asked again a moment later.
+    #[test]
+    fn an_http_error_is_asked_again_not_stored_as_none() {
+        let (mut s, f) = with_fake("U U T");
+        let a = catalog("i.a", "1766137055");
+        play(&mut s, &a);
+        assert!(pump(&mut s, &f, |s| asked(s) == 2));
+        settle(&mut s, &f);
+        assert!(!shows_none(&s, &a), "an error is not 'no lyrics'");
+        play_for(&mut s, 3);
+        assert!(pump(&mut s, &f, |s| shows_lyrics(s, &a)), "asked again after the backoff: {:?}", s.lyrics_of(&a));
+    }
+
+    /// Re-entering a failed song retries immediately rather than waiting for its backoff.
+    #[test]
+    fn replaying_a_failed_song_retries_without_waiting() {
+        let (mut s, f) = with_fake("X X T");
+        let a = catalog("i.a", "1766137055");
+        play(&mut s, &a);
+        assert!(pump(&mut s, &f, |s| asked(s) == 2));
+        settle(&mut s, &f);
+        let before = asked(&s);
+        play_for(&mut s, 1);
+        settle(&mut s, &f);
+        assert_eq!(asked(&s), before, "no retry before the backoff");
+        crate::clock::advance(Duration::from_millis(600)); // past the 1.5 s click debounce, before the 2 s retry
+        play(&mut s, &a);
+        assert!(pump(&mut s, &f, |s| shows_lyrics(s, &a)));
+    }
+
+    /// A missing mapping must not send an i.* id to the catalog or poison a later lookup.
+    #[test]
+    fn an_unmapped_library_song_does_not_cache_none() {
+        let (mut s, f) = with_fake("T");
+        let mut a = song("i.a");
+        play(&mut s, &a);
+        settle(&mut s, &f);
+        assert_eq!(asked(&s), 0);
+        assert!(s.lyrics.is_empty());
+        a.catalog_id = Some("1766137063".into());
+        s.want_lyrics(&a);
+        assert!(pump(&mut s, &f, |s| shows_lyrics(s, &a)));
+        assert!(s.lyrics.contains_key("1766137063"));
+        assert!(!s.lyrics.contains_key("i.a"));
+    }
+
+    /// While the page reloads (sign-in, a reload), the bridge answers "MusicKit not ready yet".
+    #[test]
+    fn a_page_still_loading_is_asked_again() {
+        let (mut s, f) = with_fake("X X T");
+        let a = catalog("i.a", "1766137055");
+        play(&mut s, &a);
+        assert!(pump(&mut s, &f, |s| asked(s) == 2));
+        settle(&mut s, &f);
+        assert!(!shows_none(&s, &a));
+        play_for(&mut s, 3);
+        assert!(pump(&mut s, &f, |s| shows_lyrics(s, &a)), "{:?}", s.lyrics_of(&a));
+    }
+
+    /// A request whose reply never comes (the page reloaded under it) used to show
+    /// "Loading lyrics…" until a restart.
+    #[test]
+    fn a_lost_reply_is_given_up_and_asked_again() {
+        let (mut s, f) = with_fake("H T");
+        let a = catalog("i.a", "1766137055");
+        play(&mut s, &a);
+        settle(&mut s, &f);
+        assert_eq!(asked(&s), 1);
+        play_for(&mut s, 31); // past the reply timeout: a failure, retried after the backoff
+        play_for(&mut s, 3);
+        assert!(pump(&mut s, &f, |s| shows_lyrics(s, &a)), "{:?}", s.lyrics_of(&a));
+    }
+
+    /// Apple's 404 is also what a request without the user's token gets: a first "none" is
+    /// checked once more while the song plays, and a later one when the song plays again
+    /// after a while.
+    #[test]
+    fn none_is_checked_again_and_expires() {
+        let (mut s, f) = with_fake("N N N N T");
+        let a = catalog("i.a", "1766137055");
+        play(&mut s, &a);
+        assert!(pump(&mut s, &f, |s| shows_none(s, &a)));
+        settle(&mut s, &f);
+        play_for(&mut s, 31);
+        assert!(pump(&mut s, &f, |s| asked(s) == 4), "the first none is checked once more");
+        settle(&mut s, &f);
+        assert!(shows_none(&s, &a), "two 404s: none");
+        play_for(&mut s, 60);
+        settle(&mut s, &f);
+        assert_eq!(asked(&s), 4, "a confirmed none isn't asked again while it plays");
+        play(&mut s, &a);
+        settle(&mut s, &f);
+        assert_eq!(asked(&s), 4, "nor when it plays again soon");
+        crate::clock::advance(Duration::from_secs(31 * 60));
+        play(&mut s, &a);
+        assert!(pump(&mut s, &f, |s| shows_lyrics(s, &a)), "a stale none is asked again: {:?}", s.lyrics_of(&a));
+    }
+
+    /// The song changes while its request is out: the reply is kept for its own song, the new
+    /// song gets its own answer, and coming back shows the first song's lyrics without asking.
+    #[test]
+    fn a_song_change_mid_request_keeps_each_answer_with_its_song() {
+        let (mut s, f) = with_fake("W N N");
+        let a = catalog("i.a", "1766137055");
+        let b = catalog("i.b", "1801842333");
+        s.play_list(&[a.clone(), b.clone()], 0, "Mix");
+        settle(&mut s, &f);
+        s.play_list(&[a.clone(), b.clone()], 1, "Mix");
+        std::fs::write(&f.gate, "").unwrap();
+        assert!(pump(&mut s, &f, |s| shows_lyrics(s, &a) && shows_none(s, &b)), "a {:?}, b {:?}", s.lyrics_of(&a), s.lyrics_of(&b));
+        let before = asked(&s);
+        s.play_list(&[a.clone(), b.clone()], 0, "Mix");
+        assert!(shows_lyrics(&s, &a));
+        assert_eq!(asked(&s), before, "known lyrics aren't asked again");
+    }
+
+    /// Signed out when the song started (or the session flag lagged): signing in asks for it.
+    #[test]
+    fn signing_in_asks_for_the_song_on_screen() {
+        let (mut s, f) = with_fake("T");
+        s.session.authorized = false;
+        let a = catalog("i.a", "1766137055");
+        play(&mut s, &a);
+        assert_eq!(asked(&s), 0);
+        s.apply_msg(Msg::Bridge(Event::Auth { authorized: true, storefront: Some("it".into()) }));
+        assert!(pump(&mut s, &f, |s| shows_lyrics(s, &a)), "{:?}", s.lyrics_of(&a));
+    }
 }

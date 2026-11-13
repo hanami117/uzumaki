@@ -29,6 +29,7 @@ pub fn panel(s: &State, song: &Song, cx: &Cx<State>, narrow: bool) -> El {
             if l.synced { synced(s, song, l, cx, view, narrow) } else { plain(l, view, narrow) }
         }
         Some(Load::Idle) | Some(Load::Loading) | None => message(narrow, "Loading lyrics\u{2026}"),
+        Some(Load::Failed(_)) => message(narrow, "Couldn\u{2019}t load lyrics"),
         _ => message(narrow, "No lyrics for this song"),
     }
 }
