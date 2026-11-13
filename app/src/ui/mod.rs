@@ -24,6 +24,10 @@ mod local_files;
 mod local_lib;
 #[cfg(test)]
 mod lyrics_snap_tests;
+#[cfg(test)]
+mod np_keys_tests;
+#[cfg(test)]
+mod volume_wheel_tests;
 mod marquee;
 mod menu;
 #[cfg(any(target_os = "macos", test))]
@@ -78,6 +82,9 @@ pub struct UiState {
     ctx: Option<ctx_menu::CtxMenu>,
     /// The compact player bar's volume popover is open.
     pub volume_open: bool,
+    /// Wheel points over a volume control not yet turned into a volume step
+    /// (`player_bar::wheel_volume`).
+    pub volume_wheel: f32,
     /// Songs-table view mode, sorts and the sorted-order cache.
     pub table: songs_table::TableState,
     /// Full-screen Now Playing is showing.
@@ -443,7 +450,7 @@ pub fn scene_select(s: &mut State, ids: &[&str], menu_at: Option<[f32; 2]>) {
 
 /// Scene helpers: mid-drag frames.
 pub fn scene_drag_pin(s: &mut State, from: usize, to: usize, dy: f32) {
-    dnd::scene_drag_pin(s, from, to, dy);
+    dnd::scene_drag_pin(s, from, to, dy, sidebar::ROW_H);
 }
 
 pub fn scene_drag_songs(s: &mut State, at: [f32; 2], over_playlist: Option<&str>) {

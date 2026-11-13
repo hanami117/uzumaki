@@ -21,7 +21,7 @@ pub fn about() {
     let keys = [NSString::from_str("ApplicationVersion"), NSString::from_str("Version"), NSString::from_str("Copyright")];
     let values = [
         NSString::from_str(env!("CARGO_PKG_VERSION")),
-        NSString::from_str(&uzumaki_ctl::BUILD.to_string()),
+        NSString::from_str(&format!("{}{}", uzumaki_ctl::BUILD, uzumaki_ctl::dev_suffix())),
         NSString::from_str("© 2026 Thomas Lonigro\nFree software under the GNU GPL, version 3 or later."),
     ];
     let keys: Vec<&NSString> = keys.iter().map(|k| &**k).collect();

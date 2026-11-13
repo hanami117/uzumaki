@@ -487,7 +487,7 @@ pub struct State {
     /// A playlist is being created (the New Playlist dialog waits for Apple's answer).
     pub creating_playlist: bool,
     /// When the user last changed the volume (see `VOLUME_ECHO`).
-    volume_set_at: Option<Instant>,
+    pub(crate) volume_set_at: Option<Instant>,
     /// Browse pages.
     pub browse_new: Load<Vec<Shelf>>,
     pub made_for_you: Load<Vec<Shelf>>,

@@ -602,7 +602,7 @@ fn row_el(r: &Rx, id: Row) -> El {
         Row::About => setting(
             narrow,
             if r.search { "About Uzumaki" } else { "Uzumaki" },
-            Some(format!("Version {} ({}). {}. Free software under the GNU General Public License, version 3 or later.", crate::VERSION, crate::BUILD, crate::COPYRIGHT)),
+            Some(format!("Version {} ({}{}). {}. Free software under the GNU General Public License, version 3 or later.", crate::VERSION, crate::BUILD, uzumaki_ctl::dev_suffix(), crate::COPYRIGHT)),
             small_button("settings/website", "getuzumaki.app").on_press_tx(|s: &mut State, tx: &mut Tx| {
                 if tx.open_url("https://getuzumaki.app").is_err() {
                     s.toast = Some("Couldn't open the link.".into());

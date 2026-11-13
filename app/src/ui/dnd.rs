@@ -153,15 +153,27 @@ fn dist(d: &Drag) -> f32 {
 
 // ---- pins ----
 
-/// Gives a pin row its drag-to-reorder: lifted above its neighbours following the pointer, the
-/// neighbours stepping aside.
-pub fn pin_row(s: &State, e: El, k: usize, pin: &Pin) -> El {
+/// Gives a pin its drag-to-reorder: `e` is its button, `slot` its row in the sidebar's virtual
+/// list, the rows `pitch` points apart (padding included). The button is lifted above its
+/// neighbours, which step aside for it.
+///
+/// A drop reorders the list, and Rune carries each moved row over as an offset of its slot that
+/// springs away on the layout spring. A neighbour's `offset` is on its button, on that same
+/// spring and keeping its speed, so the two add up to one glide from where it is drawn. The
+/// dragged row's `live_offset` is on its slot, which opts it out of the carry: its only spring
+/// is `SETTLE` (see `drop_pin`).
+pub fn pin_row(s: &State, slot: El, e: El, k: usize, pin: &Pin, pitch: f32) -> El {
     let dd = &s.ui.dnd;
     let id = pin.id.clone();
-    let mut e = e.on_drag(move |s: &mut State, d: &mut Drag, tx: &mut Tx| pin_drag(s, d, tx, &id, k));
-    if dd.lifted.as_deref() == Some(pin.id.as_str()) {
-        e = e.raise().fill(PAL.nav_active).shadow(4.0, 14.0, crate::theme::shadow(0.45)).cursor(rune::Cursor::Grabbing)
-            .live_offset(dd.pin_dy.smooth(SETTLE));
+    let lifted = dd.lifted.as_deref() == Some(pin.id.as_str());
+    // Every pin has the shadow, clear unless lifted: one that comes or goes can't fade, so the
+    // lift's end would drop it in a frame.
+    let mut e = e.on_drag(move |s: &mut State, d: &mut Drag, tx: &mut Tx| pin_drag(s, d, tx, &id, k, pitch))
+        .shadow(4.0, 14.0, crate::theme::shadow(if lifted { 0.45 } else { 0.0 }));
+    let mut slot = slot;
+    if lifted {
+        e = e.raise().fill(PAL.nav_active).cursor(rune::Cursor::Grabbing);
+        slot = slot.live_offset(dd.pin_dy.smooth(SETTLE));
     } else if let Some(p) = &dd.pin {
         let shift = if p.from < k && k <= p.to {
             -p.pitch
@@ -172,10 +184,10 @@ pub fn pin_row(s: &State, e: El, k: usize, pin: &Pin) -> El {
         };
         e = e.offset(0.0, shift);
     }
-    e
+    slot.child(e)
 }
 
-fn pin_drag(s: &mut State, d: &mut Drag, tx: &mut Tx, id: &str, k: usize) {
+fn pin_drag(s: &mut State, d: &mut Drag, tx: &mut Tx, id: &str, k: usize, pitch: f32) {
     let n = s.settings.pins.len();
     match d.phase {
         Phase::Down => {
@@ -193,7 +205,7 @@ fn pin_drag(s: &mut State, d: &mut Drag, tx: &mut Tx, id: &str, k: usize) {
                     tx.live_only();
                     return;
                 }
-                dd.pin = Some(PinDrag { id: id.to_string(), from: k, to: k, want: k, pitch: d.h.max(1.0), released: None });
+                dd.pin = Some(PinDrag { id: id.to_string(), from: k, to: k, want: k, pitch, released: None });
                 dd.lifted = Some(id.to_string());
                 dd.settle = Settle::None;
                 dd.pin_dy.snap([0.0, d.dy]);
@@ -233,12 +245,12 @@ fn drop_pin(s: &mut State, p: PinDrag) {
     if !cancelled && p.want != p.from {
         s.move_pin_to(&p.id, p.want);
     }
-    // The drop moves the row to its new slot in the (virtual) list. Rune carries that move over
-    // as an offset from its old slot that springs away (as for the neighbours), so the live
-    // offset keeps the drag's whole travel from the old slot: the row is drawn where it was
-    // released, then both settle to 0 in the new slot.
+    // The drop moves the row to its new slot in the (virtual) list, at once: its slot's live
+    // offset opts out of Rune's carried move. So the offset becomes the travel left from the new
+    // slot (the row is drawn where it was released), then springs to 0 alone (`Settle::Kick`).
+    let to = s.settings.pins.iter().position(|q| q.id == p.id).unwrap_or(p.from);
     let dd = &mut s.ui.dnd;
-    dd.pin_dy.snap([0.0, dy]);
+    dd.pin_dy.snap([0.0, dy - (to as f32 - p.from as f32) * p.pitch]);
     dd.settle = Settle::Kick;
     dd.rev += 1;
 }
@@ -528,10 +540,10 @@ pub fn ghost(s: &State) -> El {
 // ---- scenes ----
 
 /// Scene: pin `from` lifted `dy` points, dropping at `to`.
-pub fn scene_drag_pin(s: &mut State, from: usize, to: usize, dy: f32) {
+pub fn scene_drag_pin(s: &mut State, from: usize, to: usize, dy: f32, pitch: f32) {
     let id = s.settings.pins[from].id.clone();
     let dd = &mut s.ui.dnd;
-    dd.pin = Some(PinDrag { id: id.clone(), from, to, want: to, pitch: 34.0, released: None });
+    dd.pin = Some(PinDrag { id: id.clone(), from, to, want: to, pitch, released: None });
     dd.lifted = Some(id);
     dd.pin_dy.snap([0.0, dy]);
     dd.rev += 1;
@@ -552,6 +564,9 @@ pub fn is_pin_playlist(p: &Pin) -> bool {
     p.kind == PinKind::Playlist
 }
 
+#[cfg(test)]
+#[path = "dnd_drop_tests.rs"]
+mod drop_tests;
 
 #[cfg(test)]
 mod tests {

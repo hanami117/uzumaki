@@ -173,19 +173,52 @@ pub fn volume_slider(s: &State, key: &'static str, fill: rune::Color) -> El {
     })
 }
 
-/// One mouse-wheel notch (40 points in Rune) moves the volume 5%, as Ctrl+↑/↓ does; a trackpad
-/// moves it smoothly. Wheel up (or right) is louder.
-const WHEEL_POINTS_PER_VOLUME: f64 = 800.0;
+/// Wheel points per 1% of volume. A notched mouse wheel moves 40 points a notch in Rune, so a
+/// notch is 5% (as Ctrl+↑/↓); a trackpad's small deltas add up until they make a whole percent.
+const WHEEL_POINTS_PER_STEP: f32 = 8.0;
 
-/// Wheel over the volume control changes the volume instead of scrolling anything.
-fn wheel_volume(el: El) -> El {
+/// Adds a wheel delta to `acc` and returns the whole 1% steps it now makes, keeping the rest.
+/// A change of direction starts again from zero, so turning back answers at once.
+pub fn wheel_steps(acc: &mut f32, d: f32) -> i32 {
+    if *acc * d < 0.0 {
+        *acc = 0.0;
+    }
+    *acc += d;
+    let n = (*acc / WHEEL_POINTS_PER_STEP).trunc();
+    *acc -= n * WHEEL_POINTS_PER_STEP;
+    n as i32
+}
+
+/// The volume after `steps` whole percents from `volume`, on the 1% grid, within 0..1.
+pub fn stepped_volume(volume: f64, steps: i32) -> f64 {
+    (((volume * 100.0).round() + steps as f64) / 100.0).clamp(0.0, 1.0)
+}
+
+/// Wheel over the volume control changes the volume instead of scrolling anything: up (or
+/// right) is louder. Through `set_volume`, as a drag; only whole percents are sent, so a
+/// trackpad sends at most one message per percent, and none at the ends. A trackpad flick's
+/// coasting is swallowed (it would keep turning the volume after the fingers lift).
+pub fn wheel_volume(el: El) -> El {
     el.on_wheel(|s: &mut State, e: rune::WheelEvent, _tx: &mut rune::Tx| {
-        let d = if e.dy.abs() >= e.dx.abs() { e.dy } else { e.dx };
-        if d != 0.0 {
-            s.volume_by(d as f64 / WHEEL_POINTS_PER_VOLUME);
+        if !e.momentum {
+            let d = if e.dy.abs() >= e.dx.abs() { e.dy } else { e.dx };
+            wheel_volume_by(s, d);
         }
         true
     })
+}
+
+pub fn wheel_volume_by(s: &mut State, d: f32) {
+    let steps = wheel_steps(&mut s.ui.volume_wheel, d);
+    if steps == 0 {
+        return;
+    }
+    let v = stepped_volume(s.playback.volume, steps);
+    if v == s.playback.volume {
+        s.ui.volume_wheel = 0.0; // at an end: nothing to send, and nothing saved up past it
+        return;
+    }
+    s.set_volume(v);
 }
 
 /// The bar's second line: "Artist — Album", as in Music's player.
@@ -227,18 +260,13 @@ pub fn volume_popover(s: &State, right: f32, bottom: f32) -> El {
                 .on_press(|s: &mut State| s.ui.volume_open = false)
                 .on_secondary_press(|s: &mut State, _p, _tx: &mut rune::Tx| s.ui.volume_open = false),
         )
-        .child(
+        .child(wheel_volume(
             row().key("vol-pop").w(180.0).h(44.0).px(14.0).gap(10.0).center_y().radius(12.0).fill(crate::theme::pop_fill())
                 .border(1.0, crate::theme::pop_border()).shadow(8.0, 28.0, crate::theme::shadow(0.5))
                 .pin(None, None, Some(right), Some(bottom))
                 .child(icon(icons::volume(s.playback.volume), 16.0).color(PAL.muted))
-                .child(el().grow(1.0).child(volume_slider(s, "volume", PAL.text2)))
-                .on_wheel(|s: &mut State, e: rune::WheelEvent, _tx: &mut rune::Tx| {
-                    let d = if e.dy.abs() >= e.dx.abs() { e.dy } else { e.dx };
-                    s.volume_by(d as f64 / WHEEL_POINTS_PER_VOLUME);
-                    true
-                }),
-        )
+                .child(el().grow(1.0).child(volume_slider(s, "volume", PAL.text2))),
+        ))
 }
 
 /// The Up Next and Lyrics buttons: the right panel on that tab (lit while it shows), or in a
