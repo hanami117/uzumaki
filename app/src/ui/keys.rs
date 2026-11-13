@@ -152,8 +152,8 @@ pub const BINDINGS: &[Binding] = &[
     b("mod+f", Action::Find, "Filter this list (again: Search)", NAVIGATION),
     b("mod+b", Action::ToggleSidebar, "Show or hide the sidebar", VIEW),
     b("mod+shift+b", Action::ToggleRightPanel, "Show or hide the right sidebar", VIEW),
-    b("mod+l", Action::ShowLyrics, "Lyrics in the right sidebar", VIEW),
-    b("mod+u", Action::ShowQueue, "Up Next in the right sidebar", VIEW),
+    b("mod+l", Action::ShowLyrics, "Lyrics (right sidebar, or in Now Playing)", VIEW),
+    b("mod+u", Action::ShowQueue, "Up Next (right sidebar, or in Now Playing)", VIEW),
     b("mod+shift+f", Action::NowPlaying, "Full-screen Now Playing", VIEW),
     b("mod+n", Action::NewPlaylist, "New playlist (with the selected songs)", LIBRARY),
     b("down", Action::SelectNext, "Select the next song", LISTS),
@@ -437,6 +437,9 @@ pub fn perform(s: &mut State, action: Action, tx: &mut Tx) -> bool {
         }
         Action::ToggleSidebar => super::narrow::toggle_sidebar(s),
         Action::ToggleRightPanel => super::narrow::toggle_right_panel(s),
+        // In Now Playing they drive its own column (as its buttons do); elsewhere the right sidebar.
+        Action::ShowLyrics if super::now_playing::key_column(s, RightTab::Lyrics) => {}
+        Action::ShowQueue if super::now_playing::key_column(s, RightTab::Queue) => {}
         Action::ShowLyrics => super::narrow::show_tab(s, RightTab::Lyrics),
         Action::ShowQueue => super::narrow::show_tab(s, RightTab::Queue),
         Action::NowPlaying => {
