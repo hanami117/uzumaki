@@ -17,7 +17,7 @@ const ICON: f32 = 19.0;
 const RAIL_ICON: f32 = 22.0;
 const BUTTON_ICON: f32 = 19.0;
 /// A full sidebar row's height.
-const ROW_H: f32 = 36.0;
+pub(super) const ROW_H: f32 = 36.0;
 
 /// The sidebar shows as a rail when collapsed by the user, or when the window is narrower.
 pub fn is_rail(s: &State, win_w: f32) -> bool {
@@ -206,7 +206,8 @@ fn pin_item(s: &State, pin: &Pin, k: usize) -> El {
         .child(el().w(ICON).center().child(thumb(s, pin, THUMB)))
         .child(text(pin.title.clone()).font(NAV).color(fg).truncate().min_w(0.0).grow(1.0));
     let e = if dnd::is_pin_playlist(pin) { dnd::playlist_target(s, e, &pin.id) } else { e };
-    dnd::pin_row(s, pin_handlers(e, pin), k, pin)
+    // The rows are `ROW_H` apart (virtual rows take no gap).
+    dnd::pin_row(s, row().w_full().px(10.0), pin_handlers(e, pin), k, pin, ROW_H)
 }
 
 fn pins_head(s: &State) -> El {
@@ -425,7 +426,7 @@ fn build_row(s: &State, r: &Rows, i: usize) -> El {
         Row::Header(h) => header(h),
         Row::PinsHead => wrap(pins_head(s)),
         Row::Pin(k) => match s.settings.pins.get(k) {
-            Some(p) => wrap(pin_item(s, p, k)),
+            Some(p) => pin_item(s, p, k),
             None => col(),
         },
         Row::Nav(n) => wrap(nav_item(n, &s.route)),
@@ -496,9 +497,12 @@ pub fn sidebar(s: &State, rail: bool, chrome_top: f32, reduced: bool) -> El {
         .child(dnd::sidebar_scroll(s, col().key("sb-scroll").grow(1.0).min_h(0.0).w_full().scroll(ScrollSpec { stick_bottom: false }).child(rows)))
 }
 
+/// A rail entry's height; each rail row adds 1 pt of padding above and below.
+const RAIL_ITEM_H: f32 = 42.0;
+
 fn rail_item(key: String, label: &str, active: bool, content: El) -> El {
     let (bg, _) = pill(active);
-    el().key(key).role("button").label(label.to_string()).focusable(true).size(56.0, 42.0).radius(10.0).center().fill(bg)
+    el().key(key).role("button").label(label.to_string()).focusable(true).size(56.0, RAIL_ITEM_H).radius(10.0).center().fill(bg)
         .hover(crate::theme::ov(0.05)).press(crate::theme::ov(0.08)).cursor(Cursor::Pointer)
         .help(label.to_string()).child(content)
 }
@@ -611,8 +615,8 @@ fn build_rail_row(s: &State, r: &RailRows, i: usize) -> El {
             Some(p) => {
                 let item = rail_item(format!("pin-{}", p.id), &p.title, pin_active(p, &s.route), thumb(s, p, 28.0));
                 let item = if dnd::is_pin_playlist(p) { dnd::playlist_target(s, item, &p.id) } else { item };
-                // Drag to reorder, as in the full sidebar.
-                wrap(dnd::pin_row(s, pin_handlers(item, p), k, p))
+                // Drag to reorder, as in the full sidebar. The rows are the item and its padding apart.
+                dnd::pin_row(s, row().w_full().py(1.0).justify_center(), pin_handlers(item, p), k, p, RAIL_ITEM_H + 2.0)
             }
             None => col(),
         },

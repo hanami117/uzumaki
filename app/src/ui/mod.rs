@@ -441,7 +441,7 @@ pub fn scene_select(s: &mut State, ids: &[&str], menu_at: Option<[f32; 2]>) {
 
 /// Scene helpers: mid-drag frames.
 pub fn scene_drag_pin(s: &mut State, from: usize, to: usize, dy: f32) {
-    dnd::scene_drag_pin(s, from, to, dy);
+    dnd::scene_drag_pin(s, from, to, dy, sidebar::ROW_H);
 }
 
 pub fn scene_drag_songs(s: &mut State, at: [f32; 2], over_playlist: Option<&str>) {
