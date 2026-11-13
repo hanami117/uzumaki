@@ -623,12 +623,19 @@ fn fetch(url: &str) -> Result<Latest, String> {
         .build()
         .into();
     let mut resp = agent.get(url).call().map_err(|e| e.to_string())?;
+    let content_type = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(str::to_owned);
     let body = resp.body_mut().with_config().limit(64 * 1024).read_to_vec().map_err(|e| e.to_string())?;
-    let latest: Latest = serde_json::from_slice(&body).map_err(|e| format!("bad latest.json: {e}"))?;
+    let latest: Latest = serde_json::from_slice(&body).map_err(|e| bad_body(&e, resp.status().as_u16(), content_type.as_deref()))?;
     if Version::parse(&latest.version).is_none() {
         return Err(format!("bad version in latest.json: {:?}", latest.version));
     }
     Ok(latest)
+}
+
+/// The log line for an answer that is not JSON: the status and content type say whether it was a
+/// web page, a redirect target or an empty body (the parse error alone never does).
+fn bad_body(e: &serde_json::Error, status: u16, content_type: Option<&str>) -> String {
+    format!("bad latest.json: {e} (HTTP {status}, content-type {})", content_type.unwrap_or("none"))
 }
 
 /// Asks `primary`; if that fails and there is a `fallback`, asks it once instead.
@@ -1170,6 +1177,16 @@ mod tests {
             String::from_utf8_lossy(&req).into_owned()
         });
         (url, server)
+    }
+
+    #[test]
+    fn a_body_that_is_not_json_is_logged_with_its_status_and_content_type() {
+        let (url, server) = serve_once("200 OK", "<!doctype html><title>Uzumaki</title>");
+        let e = fetch(&url).unwrap_err();
+        server.join().unwrap();
+        assert!(e.starts_with("bad latest.json: expected value at line 1 column 1 (HTTP 200, content-type application/json"), "{e}");
+        let e = serde_json::from_slice::<Latest>(b"").unwrap_err();
+        assert!(bad_body(&e, 204, None).ends_with("(HTTP 204, content-type none)"));
     }
 
     #[test]
