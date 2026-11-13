@@ -1,0 +1,511 @@
+# Release: push a signed annotated tag v<version>[-<build>] on main; this builds every file once,
+# makes a draft release, and (after the maintainer approves the `release` environment) publishes it,
+# updates site/latest.json + the packaging copies on main, the AUR packages and the Homebrew tap.
+#
+# Switches (repository variables):
+#   MACOS_CI=true   build the DMG here (environment `build`, castLabs EVS secrets). Otherwise the
+#                   draft has the 8 Linux files and the DMG is added by hand on the Mac
+#                   (packaging/release.sh --assets), before approving.
+#   MACOS_UNSIGNED=true  scratch copies only: the DMG without the castLabs VMP signature.
+#   DRY_RUN=true    stop after the draft and the package files: no publish, site, AUR or tap.
+#   PUSH_DRY_RUN=true  publish runs, but the AUR/tap pushes are `git push --dry-run`.
+# Outside hanami117/uzumaki (a scratch copy) pushes are ALWAYS --dry-run and the site job commits to
+# a branch ci-site/<tag>, never to main.
+#
+# Never rebuild a file after its sha256 is pinned: re-running `linux` or `macos` after `draft`
+# makes new bytes. Delete the draft and the tag and start again instead (the draft job refuses to
+# touch an existing release).
+#
+# Order: check, linux and macos start together (macos waits only for linux, whose tarball and
+# AppImage it reuses). draft and everything after it need all three green.
+# Speed: only `check` uses a cargo cache (restore only; .github/workflows/cargo-cache.yml saves it on
+# main, because a tag run cannot read caches saved by another tag). `linux` and `macos` never use a
+# cache: release files come from a clean build.
+#
+# Pins: actions by commit SHA; appimagetool + AppImage runtime by sha256 (the files used since 0.1.0); the Arch
+# image by digest.
+name: release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PUBLIC_REPO: hanami117/uzumaki
+
+jobs:
+  # 1. The tag matches the sources, is annotated and on main; tests pass.
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # Same values as cargo-cache.yml: they shape target/, so the cache only fits with them.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_INCREMENTAL: '0'
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      build: ${{ steps.v.outputs.build }}
+      release: ${{ steps.v.outputs.release }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+      # checkout may leave a lightweight copy of the tag; fetch the real (annotated) one.
+      - run: git fetch -f origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+      - id: v
+        run: |
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          build=$(tr -d '[:space:]' < BUILD)
+          [[ $build =~ ^[1-9][0-9]*$ ]] || { echo "::error::BUILD is not a number: $build"; exit 1; }
+          if [ "$build" = 1 ]; then release=$version; else release=$version-$build; fi
+          [ "v$release" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME != v$release (Cargo.toml + BUILD)"; exit 1; }
+          [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ] || { echo "::error::$GITHUB_REF_NAME is not an annotated tag"; exit 1; }
+          [ "$(git rev-parse "$GITHUB_REF_NAME^{commit}")" = "$GITHUB_SHA" ] || { echo "::error::tag moved during the run"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::tag is not on main"; exit 1; }
+          grep -q "\"version\": \"$version\"" bridge/package.json || { echo "::error::bridge/package.json is not $version"; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no [$version] section"; exit 1; }
+          prerelease=false; [[ $version == *-* ]] && prerelease=true
+          {
+            echo "version=$version"; echo "build=$build"; echo "release=$release"; echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release $release (version $version, build $build, prerelease $prerelease)" >> "$GITHUB_STEP_SUMMARY"
+      - run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends libasound2-dev libxkbcommon-dev pkg-config
+      - id: rust
+        run: |
+          rustup toolchain install stable --profile minimal && rustup default stable && rustc --version
+          echo "key=cargo-check-$RUNNER_OS-$(rustc -vV | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      # Restore only (saved on main by cargo-cache.yml). Exact key = same Cargo.lock; else the newest
+      # cache for this rustc (a release bumps Cargo.lock; most dependencies are still the same).
+      - id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ steps.rust.outputs.key }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ steps.rust.outputs.key }}-
+      - name: Cache used
+        run: echo "cargo cache ${CACHE_KEY:-none}, exact hit ${CACHE_HIT:-false}" | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          CACHE_KEY: ${{ steps.cache.outputs.cache-matched-key }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+      - run: cargo test --workspace --locked
+      - run: node --version && node --test bridge/*.test.js
+
+  # 2. Source tarball (git archive of the tag) and the AppImage built from that tarball.
+  # Runs beside check (no needs); no cache.
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+      - run: git fetch -f origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+      - name: Release name (Cargo.toml + BUILD; the check job validates the tag)
+        run: |
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          build=$(tr -d '[:space:]' < BUILD)
+          if [ "$build" = 1 ]; then r=$version; else r=$version-$build; fi
+          [ "v$r" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME != v$r"; exit 1; }
+          echo "R=$r" >> "$GITHUB_ENV"
+      - name: Tarball, notes.md, latest.json
+        run: packaging/release.sh --no-dmg
+      - name: appimagetool and runtime, checked against their pinned sha256
+        env:
+          APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          APPIMAGETOOL_SHA: e8c1169c4af66c3184d7ee110713d4be04befe671fa358e2c1591ee840553b03
+          RUNTIME_URL: https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+          RUNTIME_SHA: 617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46
+        run: |
+          t=$RUNNER_TEMP/tools; mkdir -p "$t"
+          curl -fsSL --retry 3 -o "$t/appimagetool" "$APPIMAGETOOL_URL"
+          curl -fsSL --retry 3 -o "$t/runtime" "$RUNTIME_URL"
+          # "continuous" can be replaced upstream: then this fails on purpose (pick and pin a new one).
+          echo "$APPIMAGETOOL_SHA  $t/appimagetool" | sha256sum -c
+          echo "$RUNTIME_SHA  $t/runtime" | sha256sum -c
+          chmod +x "$t/appimagetool"
+      - name: AppImage (docker, ubuntu:22.04, from the tarball)
+        run: |
+          APPIMAGETOOL=$RUNNER_TEMP/tools/appimagetool APPIMAGE_RUNTIME=$RUNNER_TEMP/tools/runtime \
+            packaging/appimage/container.sh "target/release-$R/uzumaki-$R.tar.gz"
+      - name: Collect
+        run: |
+          d=$RUNNER_TEMP/linux; mkdir "$d"
+          cp "target/release-$R/uzumaki-$R.tar.gz" "target/release-$R/uzumaki-$R.tar.gz.sha256" \
+             "target/release-$R/notes.md" "target/release-$R/latest.json" "$d/"
+          cp "target/appimage/Uzumaki-$R-x86_64.AppImage" "target/appimage/Uzumaki-$R-x86_64.AppImage.sha256" \
+             target/appimage/Uzumaki-x86_64.AppImage target/appimage/Uzumaki-x86_64.AppImage.sha256 \
+             target/appimage/Uzumaki-x86_64.AppImage.zsync "$d/"
+          cd "$d"; sha256sum -c ./*.sha256
+          cmp "Uzumaki-$R-x86_64.AppImage" Uzumaki-x86_64.AppImage
+          ls -l >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux
+          path: ${{ runner.temp }}/linux/
+          if-no-files-found: error
+          retention-days: 7
+
+  # 3. DMG on Apple silicon, reusing the Linux tarball and AppImage (release.sh --assets).
+  # Waits for linux only, not check; no cache.
+  macos:
+    needs: linux
+    if: vars.MACOS_CI == 'true'
+    runs-on: macos-15
+    timeout-minutes: 90
+    environment: build
+    env:
+      EVS_NO_ASK: '1'
+      # Scratch copies only (no EVS secrets there): MACOS_UNSIGNED=true builds the DMG without the
+      # castLabs VMP signature. Never honoured on the public repo.
+      UNSIGNED: ${{ github.repository != 'hanami117/uzumaki' && vars.MACOS_UNSIGNED == 'true' }}
+    steps:
+      - run: |
+          echo "EVS_PYTHON=$RUNNER_TEMP/evs/bin/python" >> "$GITHUB_ENV"
+          echo "EVS_CONFIG_FILE=$RUNNER_TEMP/evs-config/config.json" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+      - run: git fetch -f origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+      - name: Release name (Cargo.toml + BUILD; the check job validates the tag)
+        run: |
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          build=$(tr -d '[:space:]' < BUILD)
+          if [ "$build" = 1 ]; then r=$version; else r=$version-$build; fi
+          [ "v$r" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME != v$r"; exit 1; }
+          echo "R=$r" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: linux, path: '${{ runner.temp }}/linux' }
+      - run: brew install librsvg
+      - run: rustup toolchain install stable --profile minimal && rustup default stable && rustc --version
+      - name: castLabs Electron
+        run: |
+          cd bridge && npm ci --no-audit --no-fund
+          for try in 1 2 3; do node node_modules/electron/install.js && break; [ $try = 3 ] && exit 1; sleep 10; done
+      - name: No VMP signature (scratch copy, MACOS_UNSIGNED)
+        if: env.UNSIGNED == 'true'
+        run: echo "::warning::DMG without the castLabs VMP signature (test only, cannot stream)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: castLabs VMP signature
+        if: env.UNSIGNED != 'true'
+        env:
+          EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
+          EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
+        run: |
+          [ -n "$EVS_ACCOUNT_NAME" ] && [ -n "$EVS_PASSWD" ] || { echo "::error::EVS secrets missing (environment build)"; exit 1; }
+          mkdir -p "$(dirname "$EVS_CONFIG_FILE")"
+          python3 -m venv "$RUNNER_TEMP/evs"
+          "$EVS_PYTHON" -m pip install -q castlabs-evs==1.3.3
+          "$EVS_PYTHON" -m castlabs_evs.account reauth
+          "$EVS_PYTHON" -m castlabs_evs.vmp sign-pkg bridge/node_modules/electron/dist
+          "$EVS_PYTHON" -m castlabs_evs.vmp verify-pkg bridge/node_modules/electron/dist
+      - name: DMG + SHA256SUMS over all 12 files
+        run: |
+          a=$RUNNER_TEMP/assets; mkdir "$a"
+          cp "$RUNNER_TEMP/linux/uzumaki-$R.tar.gz" "$RUNNER_TEMP/linux/Uzumaki-$R-x86_64.AppImage" \
+             "$RUNNER_TEMP/linux/Uzumaki-x86_64.AppImage" "$RUNNER_TEMP/linux/Uzumaki-x86_64.AppImage.zsync" "$a/"
+          packaging/release.sh --assets "$a"     # build.sh verifies the VMP signature itself
+          cd "target/release-$R" && shasum -a 256 -c SHA256SUMS && ls -l >> "$GITHUB_STEP_SUMMARY"
+      - name: Forget the EVS login
+        if: always()
+        run: rm -rf "$(dirname "$EVS_CONFIG_FILE")" "$RUNNER_TEMP/evs"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos
+          path: target/release-${{ env.R }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  # 4. Draft release: 12 files with the DMG, 8 without (DMG added by hand before approving).
+  draft:
+    needs: [check, linux, macos]
+    if: >-
+      always() && needs.check.result == 'success' && needs.linux.result == 'success' &&
+      ((vars.MACOS_CI == 'true' && needs.macos.result == 'success') ||
+       (vars.MACOS_CI != 'true' && needs.macos.result == 'skipped'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions: { contents: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      R: ${{ needs.check.outputs.release }}
+      V: ${{ needs.check.outputs.version }}
+      PRERELEASE: ${{ needs.check.outputs.prerelease }}
+    steps:
+      # By name, one folder each (without a name, a single artifact lands unwrapped in path/).
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: linux, path: '${{ runner.temp }}/a/linux' }
+      - if: vars.MACOS_CI == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: macos, path: '${{ runner.temp }}/a/macos' }
+      - name: Assemble and check the files
+        run: |
+          a=$RUNNER_TEMP/a; up=$RUNNER_TEMP/up; mkdir "$up"
+          app=(Uzumaki-$R-x86_64.AppImage Uzumaki-x86_64.AppImage)
+          files=(uzumaki-$R.tar.gz "${app[@]}")
+          if [ -d "$a/macos" ]; then
+            files+=(Uzumaki-$R.dmg Uzumaki-macOS.dmg)
+            # The macOS job must have reused the Linux bytes, not made its own.
+            for f in uzumaki-$R.tar.gz "${app[@]}" Uzumaki-x86_64.AppImage.zsync; do cmp "$a/linux/$f" "$a/macos/$f"; done
+            for f in "${files[@]}"; do cp "$a/macos/$f" "$a/macos/$f.sha256" "$up/"; done
+            cp "$a/macos/SHA256SUMS" "$up/"
+            want=12
+          else
+            for f in "${files[@]}"; do cp "$a/linux/$f" "$a/linux/$f.sha256" "$up/"; done
+            # Same form as release.sh's; the Mac's release.sh --assets replaces it with the 12-file one.
+            for f in "${files[@]}"; do cat "$up/$f.sha256"; done > "$up/SHA256SUMS"
+            want=8
+          fi
+          cp "$a/linux/Uzumaki-x86_64.AppImage.zsync" "$up/"
+          cd "$up"
+          sha256sum -c ./*.sha256
+          sha256sum -c SHA256SUMS
+          [ "$(sha256sum -c SHA256SUMS | wc -l)" = "${#files[@]}" ] || { echo "::error::SHA256SUMS does not list exactly the ${#files[@]} files"; exit 1; }
+          n=$(ls | wc -l)
+          [ "$n" = "$want" ] || { echo "::error::$n assets, expected $want"; ls; exit 1; }
+          echo "$n assets" >> "$GITHUB_STEP_SUMMARY"
+      - name: Create the draft (never over an existing release)
+        run: |
+          if gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::a release $GITHUB_REF_NAME already exists. Never re-upload pinned files: delete the draft and the tag, then start again."
+            exit 1
+          fi
+          title="Uzumaki $V"; [ "$R" = "$V" ] || title="Uzumaki $V (build ${R##*-})"
+          pre=(); [ "$PRERELEASE" = true ] && pre=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft --verify-tag "${pre[@]}" \
+            --title "$title" --notes-file "$RUNNER_TEMP/a/linux/notes.md" "$RUNNER_TEMP"/up/*
+      - name: GitHub's digests = the local files
+        run: |
+          cd "$RUNNER_TEMP/up"
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | (.digest | sub("^sha256:"; "")) + "  " + .name' | sort -k2 > "$RUNNER_TEMP/remote"
+          for f in *; do printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$f"; done | sort -k2 > "$RUNNER_TEMP/local"
+          diff "$RUNNER_TEMP/local" "$RUNNER_TEMP/remote"
+          { echo '```'; cat "$RUNNER_TEMP/remote"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  # 4b. PKGBUILDs + .SRCINFO from the uploaded files' sha256 (no secrets; check the diff before approving).
+  pkg:
+    needs: [check, draft]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container: archlinux:base-devel@sha256:fa2d4ce3310ddd90a4208e5168be8ad367da5129af1245f38fd2d803bcbe3239
+    env:
+      R: ${{ needs.check.outputs.release }}
+      V: ${{ needs.check.outputs.version }}
+      B: ${{ needs.check.outputs.build }}
+    steps:
+      - run: pacman -Syu --noconfirm --needed git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # Container job: runner.temp would be the host's path, so artifacts go under .ci/ in the workspace.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: linux, path: .ci/linux }
+      - name: Fill in the PKGBUILDs
+        run: |
+          git config --global --add safe.directory "$PWD"
+          useradd -m b
+          pkgver=$V
+          if [[ $V == *-* ]]; then
+            pkgver=${V//-/_}
+            echo "::warning::prerelease $V: pkgver $pkgver for the test only; the aur job refuses prereleases"
+          fi
+          tar_sha=$(cut -d' ' -f1 "$GITHUB_WORKSPACE/.ci/linux/uzumaki-$R.tar.gz.sha256")
+          app_sha=$(cut -d' ' -f1 "$GITHUB_WORKSPACE/.ci/linux/Uzumaki-$R-x86_64.AppImage.sha256")
+          out=$GITHUB_WORKSPACE/.ci/aur; mkdir "$out"
+          for p in uzumaki uzumaki-bin; do
+            src=packaging/aur; sha=$tar_sha
+            [ $p = uzumaki-bin ] && { src=packaging/aur-bin; sha=$app_sha; }
+            # pkgrel: 1 for a new version; one more than the AUR's for a rebuild of the same version.
+            git clone -q --depth 1 "https://aur.archlinux.org/$p.git" "$RUNNER_TEMP/cur-$p"
+            cur=$RUNNER_TEMP/cur-$p/PKGBUILD
+            aver=$(sed -n 's/^pkgver=//p' "$cur"); abuild=$(sed -n 's/^_build=//p' "$cur"); arel=$(sed -n 's/^pkgrel=//p' "$cur")
+            asha=$(sed -n "s/^sha256sums=('\(.*\)')/\1/p" "$cur")
+            if [ "$aver" = "$pkgver" ] && [ "$abuild" = "$B" ]; then
+              [ "$asha" = "$sha" ] || { echo "::error::$p $pkgver build $B is already on the AUR with another sha256: never rebuild a published file"; exit 1; }
+              rel=$arel
+            elif [ "$aver" = "$pkgver" ]; then rel=$((arel + 1))
+            else rel=1; fi
+            sed -i -e "s/^pkgver=.*/pkgver=$pkgver/" -e "s/^_build=.*/_build=$B/" -e "s/^pkgrel=.*/pkgrel=$rel/" \
+                   -e "s/^sha256sums=(.*)/sha256sums=('$sha')/" "$src/PKGBUILD"
+            grep -q "^sha256sums=('$sha')$" "$src/PKGBUILD" || { echo "::error::sha256 not written in $src/PKGBUILD"; exit 1; }
+            chown -R b "$src"
+            su b -c "cd '$src' && makepkg --printsrcinfo > .SRCINFO"
+            mkdir "$out/$p"; cp "$src/PKGBUILD" "$src/.SRCINFO" "$out/$p/"
+            { echo "### $p $pkgver-$rel (AUR now: $aver build $abuild rel $arel)"; echo '```diff'; diff -u "$cur" "$src/PKGBUILD" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: aur
+          path: .ci/aur/
+          include-hidden-files: true   # .SRCINFO
+          if-no-files-found: error
+          retention-days: 7
+
+  # 5. The approval: environment `release`. Publishes the draft as the latest release.
+  publish:
+    needs: [check, draft, pkg]
+    if: vars.DRY_RUN != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions: { contents: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      R: ${{ needs.check.outputs.release }}
+    steps:
+      - name: The draft has all 12 files and they match SHA256SUMS
+        run: |
+          cd "$RUNNER_TEMP"
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json isDraft,assets > rel.json
+          [ "$(jq .isDraft rel.json)" = true ] || { echo "::error::not a draft any more"; exit 1; }
+          n=$(jq '.assets|length' rel.json)
+          [ "$n" = 12 ] || { echo "::error::draft has $n assets, not 12 (DMG still to add with release.sh --assets?)"; exit 1; }
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -D sums
+          jq -r '.assets[] | select(.name|test("\\.(dmg|tar\\.gz|AppImage)$")) | (.digest|sub("^sha256:";"")) + "  " + .name' rel.json | sort -k2 > remote
+          sort -k2 sums/SHA256SUMS | diff - remote
+      - run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest
+      - name: Stable links resolve
+        if: github.repository == env.PUBLIC_REPO
+        run: |
+          for f in Uzumaki-macOS.dmg Uzumaki-x86_64.AppImage Uzumaki-x86_64.AppImage.zsync; do
+            curl -sfI -o /dev/null -w "%{http_code} $f\n" --retry 3 \
+              "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$f"
+          done
+
+  # 6. site/latest.json + the packaging copies on main, as a signed (API) commit = the site deploy.
+  site:
+    needs: [check, publish, pkg]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions: { contents: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      R: ${{ needs.check.outputs.release }}
+      V: ${{ needs.check.outputs.version }}
+      B: ${{ needs.check.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: main, persist-credentials: false }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: linux, path: '${{ runner.temp }}/linux' }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: aur, path: '${{ runner.temp }}/aur' }
+      - name: Commit through the API (GitHub signs it)
+        run: |
+          cp "$RUNNER_TEMP/linux/latest.json" site/latest.json
+          cp "$RUNNER_TEMP/aur/uzumaki/PKGBUILD" packaging/aur/PKGBUILD
+          cp "$RUNNER_TEMP/aur/uzumaki-bin/PKGBUILD" packaging/aur-bin/PKGBUILD
+          if [ "$B" = 1 ]; then cv=$V; else cv=$V,$B; fi
+          # The repo's cask copy keeps the placeholder sha256; only the version follows.
+          sed -i "s/^  version \".*\"/  version \"$cv\"/" packaging/homebrew/uzumaki.rb
+          git diff --stat
+          changed=$(git diff --name-only)
+          [ -n "$changed" ] || { echo "nothing to commit"; exit 0; }
+          head=$(git rev-parse HEAD); branch=main
+          if [ "$GITHUB_REPOSITORY" != "$PUBLIC_REPO" ]; then
+            branch=ci-site/$GITHUB_REF_NAME          # scratch copy: never main
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$branch" -f sha="$head" >/dev/null 2>&1 || true
+            head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq .object.sha)
+          fi
+          adds=$(for f in $changed; do jq -n --arg p "$f" --arg c "$(base64 -w0 "$f")" '{path:$p,contents:$c}'; done | jq -s .)
+          jq -n --arg repo "$GITHUB_REPOSITORY" --arg branch "$branch" --arg head "$head" --argjson adds "$adds" \
+                --arg msg "Release $GITHUB_REF_NAME: site/latest.json, PKGBUILDs, cask version" '{
+            query: "mutation($i: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $i) { commit { oid url } } }",
+            variables: { i: { branch: { repositoryNameWithOwner: $repo, branchName: $branch },
+                              expectedHeadOid: $head, message: { headline: $msg },
+                              fileChanges: { additions: $adds } } } }' > "$RUNNER_TEMP/q.json"
+          gh api graphql --input "$RUNNER_TEMP/q.json" --jq '.data.createCommitOnBranch.commit.url' | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # 7. AUR: uzumaki, then uzumaki-bin (their sources are the published release files).
+  aur:
+    needs: [check, publish, pkg]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    container: archlinux:base-devel@sha256:fa2d4ce3310ddd90a4208e5168be8ad367da5129af1245f38fd2d803bcbe3239
+    env:
+      V: ${{ needs.check.outputs.version }}
+      PRERELEASE: ${{ needs.check.outputs.prerelease }}
+      PUSH_FLAGS: ${{ (github.repository != 'hanami117/uzumaki' || vars.PUSH_DRY_RUN == 'true') && '--dry-run' || '' }}
+    steps:
+      - run: '[ "$PRERELEASE" != true ] || { echo "::error::no prereleases on the AUR"; exit 1; }'
+      - run: pacman -Syu --noconfirm --needed git openssh
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: aur, path: .ci/aur }
+      - name: Check the sources against the published files
+        if: github.repository == env.PUBLIC_REPO
+        run: |
+          useradd -m b
+          for p in uzumaki uzumaki-bin; do
+            d=/home/b/$p; install -d -o b "$d"; install -o b -m644 "$GITHUB_WORKSPACE/.ci/aur/$p/PKGBUILD" "$d/"
+            su b -c "cd '$d' && makepkg --verifysource"
+          done
+      - name: Push uzumaki, then uzumaki-bin
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          AUR_KNOWN_HOSTS: ${{ secrets.AUR_KNOWN_HOSTS }}
+        run: |
+          [ -n "$AUR_SSH_KEY" ] && [ -n "$AUR_KNOWN_HOSTS" ] || { echo "::error::AUR secrets missing (environment release)"; exit 1; }
+          install -d -m700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur; chmod 600 ~/.ssh/aur
+          printf '%s\n' "$AUR_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
+          for p in uzumaki uzumaki-bin; do
+            git clone -q "ssh://aur@aur.archlinux.org/$p.git" "$RUNNER_TEMP/$p"
+            cp "$GITHUB_WORKSPACE/.ci/aur/$p/PKGBUILD" "$GITHUB_WORKSPACE/.ci/aur/$p/.SRCINFO" "$RUNNER_TEMP/$p/"
+            cd "$RUNNER_TEMP/$p"
+            git add PKGBUILD .SRCINFO
+            if git diff --cached --quiet; then echo "$p: nothing to do"; cd - >/dev/null; continue; fi
+            rel=$(sed -n 's/^\tpkgrel = //p' .SRCINFO)
+            git -c user.name=hanami117 -c user.email=hello@getuzumaki.app commit -q -m "$p $V-$rel"
+            git show --stat HEAD
+            git push $PUSH_FLAGS origin master
+            cd - >/dev/null
+          done
+      - if: always()
+        run: rm -rf ~/.ssh/aur
+
+  # 8. Homebrew tap: the cask's version and the published DMG's sha256.
+  tap:
+    needs: [check, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      R: ${{ needs.check.outputs.release }}
+      V: ${{ needs.check.outputs.version }}
+      B: ${{ needs.check.outputs.build }}
+      PRERELEASE: ${{ needs.check.outputs.prerelease }}
+      PUSH_FLAGS: ${{ (github.repository != 'hanami117/uzumaki' || vars.PUSH_DRY_RUN == 'true') && '--dry-run' || '' }}
+    steps:
+      - name: Update and push Casks/uzumaki.rb
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          [ "$PRERELEASE" != true ] || { echo "::error::no prereleases in the tap"; exit 1; }
+          [ -n "$TAP_TOKEN" ] || { echo "::error::TAP_TOKEN missing (environment release)"; exit 1; }
+          sha=$(gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json assets \
+                  --jq ".assets[] | select(.name == \"Uzumaki-$R.dmg\") | .digest | sub(\"^sha256:\"; \"\")")
+          [[ $sha =~ ^[0-9a-f]{64}$ ]] || { echo "::error::no Uzumaki-$R.dmg on the release"; exit 1; }
+          if [ "$B" = 1 ]; then cv=$V; else cv=$V,$B; fi
+          auth=$(printf 'x-access-token:%s' "$TAP_TOKEN" | base64 -w0); echo "::add-mask::$auth"
+          g() { git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" "$@"; }
+          g clone -q https://github.com/hanami117/homebrew-uzumaki.git "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          sed -i -e "s/^  version \".*\"/  version \"$cv\"/" -e "s/^  sha256 \".*\"/  sha256 \"$sha\"/" Casks/uzumaki.rb
+          ruby -c Casks/uzumaki.rb
+          git diff
+          if git diff --quiet; then echo "nothing to do"; exit 0; fi
+          git -c user.name=hanami117 -c user.email=hello@getuzumaki.app commit -qam "uzumaki $cv"
+          g push $PUSH_FLAGS origin HEAD
