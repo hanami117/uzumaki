@@ -297,7 +297,9 @@ impl State {
     pub fn refresh_cache_sizes(&self) {
         let Some(h) = self.handle.clone() else { return };
         std::thread::spawn(move || {
-            let sizes = CacheSizes { art: dir_size(&cache_dir(CacheKind::Art)), library: dir_size(&cache_dir(CacheKind::Library)) };
+            // Artwork counts the animated artwork's clips too (they sit beside the covers).
+            let art = dir_size(&cache_dir(CacheKind::Art)) + dir_size(&crate::motion::clips::dir());
+            let sizes = CacheSizes { art, library: dir_size(&cache_dir(CacheKind::Library)) };
             h.update(move |s: &mut State, tx| {
                 tx.instant();
                 s.cache_sizes = Some(sizes);
@@ -320,6 +322,9 @@ impl State {
         let Some(h) = self.handle.clone() else { return };
         std::thread::spawn(move || {
             remove_contents(&cache_dir(kind));
+            if kind == CacheKind::Art {
+                remove_contents(&crate::motion::clips::dir());
+            }
             h.update(|s: &mut State, _| s.refresh_cache_sizes());
         });
     }

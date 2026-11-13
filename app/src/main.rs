@@ -31,6 +31,7 @@ mod logfile;
 mod menu_bar_mac;
 mod lyrics;
 mod models;
+mod motion;
 // On macOS only the single-instance check and `Command` are used; the D-Bus service is not.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 mod mpris;
@@ -211,6 +212,9 @@ fn main() {
     }
     let app = if hidden { app.windowless() } else { app };
     let app = app.keep_running().on_close(on_close).on_focus(on_focus);
+    // Animated artwork pauses while the window can't draw (minimised, covered).
+    let frames_handle = app.handle();
+    let app = app.on_frame_encoded(move |f| state::motion::frame_outcome(&frames_handle, f.outcome()));
     #[cfg(target_os = "macos")]
     let app = app.on_reopen(on_reopen).on_window(on_window);
 

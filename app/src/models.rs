@@ -434,8 +434,14 @@ pub mod api {
         } else {
             // Catalog albums list their artists' ids anyway, but their names only with
             // `include=artists` (checked live 2026-11-09); the tracks still come.
-            (format!("/v1/catalog/{{{{storefrontId}}}}/albums/{id}"), json!({"include": "artists"}))
+            (format!("/v1/catalog/{{{{storefrontId}}}}/albums/{id}"), json!({"include": "artists", "extend": "editorialVideo"}))
         }
+    }
+
+    /// Only a catalog album's motion art (`editorialVideo`, about 17 KB with the track ids):
+    /// for the playing song's album when its page wasn't loaded.
+    pub fn album_motion(id: &str) -> (String, Value) {
+        (format!("/v1/catalog/{{{{storefrontId}}}}/albums/{id}"), json!({"extend": "editorialVideo", "fields[albums]": "editorialVideo"}))
     }
 
     pub fn playlist(id: &str) -> (String, Value) {

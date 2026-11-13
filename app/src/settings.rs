@@ -253,6 +253,9 @@ pub struct Settings {
     /// The swirl that twists open at launch (Settings → Appearance; `ui::intro`). The first
     /// library sync shows its screen either way.
     pub startup_animation: bool,
+    /// Apple's video loop of the album in the full-screen Now Playing cover, when it has one
+    /// (Settings → Appearance; `motion`). Never with Reduce Motion.
+    pub animated_artwork: bool,
     /// A desktop notification (title, artist and album, cover) when a new song starts while
     /// the window isn't in front (Settings → General; `notify.rs`). Off by default.
     pub notify_song_change: bool,
@@ -316,6 +319,7 @@ impl Default for Settings {
             app_icon: AppIcon::Dark,
             appearance: Default::default(),
             startup_animation: true,
+            animated_artwork: true,
             notify_song_change: false,
             check_updates: true,
             resume_playback: true,
