@@ -493,7 +493,9 @@ pub fn scene_np_cover_only(s: &mut State) {
 /// Animated artwork from the local fixture clip (`app/fixtures/motion-clip.mp4`, 256 px, 2 s,
 /// made with ffmpeg's `gradients` source): playing, so the cover crossfades to the clip after
 /// its first frame. Use `--frames`/`--at` to see it move. macOS draws it with Rune's player
-/// (decoded per frame headless); elsewhere through ffmpeg, which must be installed.
+/// (decoded per frame headless, so deterministic). Elsewhere, and with `UZUMAKI_MOTION=ffmpeg`,
+/// ffmpeg (which must be installed) decodes in real time beside the fast headless clock: the
+/// clip shows from about `--at 10`.
 pub fn scene_np_motion(s: &mut State, lyrics: bool) {
     use crate::motion::{Clip, MotionArt};
     scene_base(s, synthetic_lyrics(false), 30.0);
@@ -506,7 +508,16 @@ pub fn scene_np_motion(s: &mut State, lyrics: bool) {
     let master = "https://example.invalid/motion/P1_default.m3u8";
     s.motion.albums.insert(album.into(), Load::Ready(Some(MotionArt { video: master.into(), preview: None })));
     let path = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/motion-clip.mp4"));
-    s.motion.clips.insert(master.into(), Load::Ready(Clip { path, width: 256, height: 256, fps: 24.0 }));
+    let mut clip = Clip { path, width: 256, height: 256, fps: 24.0 };
+    // For measuring with a real clip: `UZUMAKI_SCENE_CLIP=<file>,<side>,<fps>` (a square one).
+    if let Ok(v) = std::env::var("UZUMAKI_SCENE_CLIP") {
+        let p: Vec<&str> = v.split(',').collect();
+        if let [file, side, fps] = p.as_slice() {
+            let side = side.parse().unwrap_or(768);
+            clip = Clip { path: file.into(), width: side, height: side, fps: fps.parse().unwrap_or(crate::motion::clips::DEFAULT_FPS) };
+        }
+    }
+    s.motion.clips.insert(master.into(), Load::Ready(clip));
 }
 
 #[cfg(test)]

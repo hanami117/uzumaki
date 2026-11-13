@@ -103,6 +103,7 @@ impl State {
         match &mut self.motion.playback {
             Some(p) => {
                 p.set_paused(paused);
+                changed |= p.catch_up();
                 #[cfg(target_os = "macos")]
                 if p.check_native(&clip, report(self.handle.clone())) {
                     changed = true;

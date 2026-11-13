@@ -171,6 +171,17 @@ impl Playback {
         !std::mem::replace(&mut self.shown, true)
     }
 
+    /// The first frame is in but not yet marked (its report may not have landed, or can't:
+    /// headless runs have no handle). True when it changed.
+    pub fn catch_up(&mut self) -> bool {
+        let ready = match &self.backend {
+            #[cfg(target_os = "macos")]
+            Backend::Native(_) => true,
+            Backend::Frames(f) => f.has_frame(),
+        };
+        ready && self.first_frame()
+    }
+
     /// Native only: the platform player failed; switch to ffmpeg. True when it switched.
     #[cfg(target_os = "macos")]
     pub fn check_native(&mut self, clip: &Clip, report: Report) -> bool {

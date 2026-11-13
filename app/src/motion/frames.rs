@@ -10,6 +10,7 @@
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -26,6 +27,8 @@ struct Ctl {
     flags: Mutex<Flags>,
     wake: Condvar,
     child: Mutex<Option<Child>>,
+    /// A frame is in `px` (also seen by `poll` where no report can reach the state: headless).
+    first: AtomicBool,
 }
 
 impl Ctl {
@@ -58,7 +61,11 @@ impl Frames {
         let spawned = std::thread::Builder::new()
             .name("motion-frames".into())
             .spawn(move || {
-                if let Err(e) = run(&clip, &worker_px, &worker_ctl, &|| report(generation, Event::FirstFrame)) {
+                let first = || {
+                    worker_ctl.first.store(true, Ordering::Release);
+                    report(generation, Event::FirstFrame);
+                };
+                if let Err(e) = run(&clip, &worker_px, &worker_ctl, &first) {
                     eprintln!("uzumaki: animated artwork: {e}");
                     report(generation, Event::Failed(e));
                 }
@@ -72,6 +79,10 @@ impl Frames {
 
     pub fn pixels(&self) -> &rune::Pixels {
         &self.px
+    }
+
+    pub fn has_frame(&self) -> bool {
+        self.ctl.first.load(Ordering::Acquire)
     }
 
     pub fn set_paused(&self, paused: bool) {
