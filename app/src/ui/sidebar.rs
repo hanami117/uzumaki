@@ -393,7 +393,7 @@ impl Rows {
             Row::Pin(k) => format!("pin-{}", s.settings.pins.get(k).map_or("", |p| p.id.as_str())),
             Row::Nav(n) => n.info().0.into(),
             Row::Favourites => format!("pl-{}", self.fav.and_then(|f| s.library_playlists.items.get(f)).map_or("", |c| c.id.as_str())),
-            Row::Playlist(k) => format!("pl-{}", playlist_at(s, self, k).map_or("", |c| c.id.as_str())),
+            Row::Playlist(k) => format!("pl-{}", playlist_at(s, k).map_or("", |c| c.id.as_str())),
             Row::Note => "note".into(),
             Row::Pad => "pad".into(),
         }
@@ -401,7 +401,7 @@ impl Rows {
 }
 
 /// The `k`-th library playlist other than Favourite Songs.
-fn playlist_at<'a>(s: &'a State, _r: &Rows, k: usize) -> Option<&'a Collection> {
+fn playlist_at(s: &State, k: usize) -> Option<&Collection> {
     s.library_playlists.items.iter().filter(|c| !c.favorites).nth(k)
 }
 
@@ -433,7 +433,7 @@ fn build_row(s: &State, r: &Rows, i: usize) -> El {
             Some(c) => playlist(c),
             None => col(),
         },
-        Row::Playlist(k) => match playlist_at(s, r, k) {
+        Row::Playlist(k) => match playlist_at(s, k) {
             Some(c) => playlist(c),
             None => col(),
         },
@@ -508,47 +508,151 @@ fn rail_nav(n: Nav, route: &Route) -> El {
     hideable(rail_item(key.to_string(), label, n.active(route), icon(ic, RAIL_ICON).color(PAL.accent)).on_press(move |s: &mut State| go(s, &target)), key, label)
 }
 
-fn rail_sep() -> El {
-    el().w(36.0).h(1.0).fill(PAL.divider).my(8.0)
+/// A rail row, in order: the top entries, the Library entries, All Playlists and Favourite
+/// Songs, the pins, then every other playlist.
+#[derive(Clone, Copy)]
+enum RailRow {
+    Nav(Nav),
+    Sep,
+    Fav,
+    Pin(usize),
+    /// The `k`-th playlist other than Favourite Songs (`playlist_at`).
+    Playlist(usize),
+    Pad,
+}
+
+/// The rail's rows: a short fixed head (at most about 25), then the playlists by count, so a
+/// long list costs only the rows on screen.
+struct RailRows {
+    head: Vec<RailRow>,
+    playlists: usize,
+}
+
+impl RailRows {
+    fn of(s: &State) -> Self {
+        let mut head: Vec<RailRow> = TOP.into_iter().filter(|n| shown(s, n.info().0)).map(RailRow::Nav).collect();
+        head.push(RailRow::Sep);
+        head.extend(library(s).iter().filter(|n| shown(s, n.info().0)).map(|&n| RailRow::Nav(n)));
+        if !s.local_only() {
+            head.push(RailRow::Sep);
+        }
+        if shown(s, "nav-playlists") {
+            head.push(RailRow::Nav(Nav::AllPlaylists));
+        }
+        let items = &s.library_playlists.items;
+        if items.iter().any(|c| c.favorites) && shown(s, "favourites") {
+            head.push(RailRow::Fav);
+        }
+        if s.settings.pins_open && !s.settings.pins.is_empty() && shown(s, "pins") {
+            head.push(RailRow::Sep);
+            head.extend((0..s.settings.pins.len().min(8)).map(RailRow::Pin));
+        }
+        let playlists = if shown(s, "playlists") { items.iter().filter(|c| !c.favorites).count() } else { 0 };
+        if playlists > 0 {
+            head.push(RailRow::Sep);
+        }
+        RailRows { head, playlists }
+    }
+
+    fn count(&self) -> usize {
+        self.head.len() + self.playlists + 1
+    }
+
+    fn at(&self, i: usize) -> RailRow {
+        match self.head.get(i) {
+            Some(&r) => r,
+            None if i - self.head.len() < self.playlists => RailRow::Playlist(i - self.head.len()),
+            None => RailRow::Pad,
+        }
+    }
+
+    fn key(&self, s: &State, i: usize) -> String {
+        match self.at(i) {
+            RailRow::Nav(n) => n.info().0.into(),
+            RailRow::Sep => format!("rail-sep-{i}"),
+            RailRow::Fav => "pl-fav".into(),
+            RailRow::Pin(k) => format!("pin-{}", s.settings.pins.get(k).map_or("", |p| p.id.as_str())),
+            RailRow::Playlist(k) => format!("rail-pl-{}", playlist_at(s, k).map_or("", |c| c.id.as_str())),
+            RailRow::Pad => "rail-pad".into(),
+        }
+    }
+}
+
+/// A playlist in the rail: its picture (as a pin's) or the playlist icon, the name as a tooltip,
+/// and the full sidebar's click, menu and drop target.
+fn rail_playlist(s: &State, c: &Collection, active: bool, held: Option<&(rune::Image, bool)>) -> El {
+    let (c1, c2) = (c.clone(), c.clone());
+    let content = match playlist_cover(s, c) {
+        Some(_) => cover(held, &c.title, 28.0),
+        None => icon(&icons::PLAYLIST, RAIL_ICON).color(PAL.accent),
+    };
+    dnd::playlist_target(s, rail_item(format!("rail-pl-{}", c.id), &c.title, active, content), &c.id)
+        .on_press(move |s: &mut State| s.open_collection(&c1))
+        .on_secondary_press(move |s: &mut State, p, _tx: &mut Tx| ctx_menu::open_collection(s, &c2, [p.x, p.y]))
+}
+
+fn build_rail_row(s: &State, r: &RailRows, i: usize) -> El {
+    // Row spacing is padding inside each row (virtual rows take no gap).
+    let wrap = |e: El| row().w_full().py(1.0).justify_center().child(e);
+    match r.at(i) {
+        RailRow::Nav(n) => wrap(rail_nav(n, &s.route)),
+        RailRow::Sep => row().w_full().py(8.0).justify_center().child(el().w(36.0).h(1.0).fill(PAL.divider)),
+        RailRow::Fav => match s.library_playlists.items.iter().find(|c| c.favorites) {
+            Some(f) => {
+                let f1 = f.clone();
+                wrap(
+                    rail_item("pl-fav".into(), &f.title, playlist_active(f, &s.route), icon(&icons::FAVORITES, RAIL_ICON).color(PAL.accent))
+                        .on_press(move |s: &mut State| s.open_collection(&f1)),
+                )
+            }
+            None => col(),
+        },
+        RailRow::Pin(k) => match s.settings.pins.get(k) {
+            Some(p) => {
+                let item = rail_item(format!("pin-{}", p.id), &p.title, pin_active(p, &s.route), thumb(s, p, 28.0));
+                let item = if dnd::is_pin_playlist(p) { dnd::playlist_target(s, item, &p.id) } else { item };
+                // Drag to reorder, as in the full sidebar.
+                wrap(dnd::pin_row(s, pin_handlers(item, p), k, p))
+            }
+            None => col(),
+        },
+        RailRow::Playlist(k) => match playlist_at(s, k) {
+            Some(c) => {
+                // As in the full sidebar: reuse the built row until what it draws changes.
+                let active = playlist_active(c, &s.route);
+                let drag = dnd::row_state(s, &c.id, c.editable);
+                let cover = playlist_cover(s, c);
+                let held = s.art.held(&c.id, cover, crate::art::SMALL_PX);
+                let pic = held.as_ref().map(|(img, fresh)| (img.id(), *fresh));
+                let version = (&c.title, active, drag, crate::theme::is_light(), crate::theme::over_picture(), cover.is_some(), pic);
+                wrap(memo(format!("rail-pl-{}", c.id), version, || rail_playlist(s, c, active, held.as_ref())))
+            }
+            None => col(),
+        },
+        RailRow::Pad => col().h(12.0),
+    }
 }
 
 fn rail_view(s: &State, chrome_top: f32, reduced: bool) -> El {
-    let mut c = col().w_full().items_center().gap(2.0).pb(12.0);
-    for n in TOP.into_iter().filter(|n| shown(s, n.info().0)) {
-        c = c.child(rail_nav(n, &s.route));
-    }
-    c = c.child(rail_sep());
-    for &n in library(s).iter().filter(|n| shown(s, n.info().0)) {
-        c = c.child(rail_nav(n, &s.route));
-    }
-    if !s.local_only() {
-        c = c.child(rail_sep());
-    }
-    if shown(s, "nav-playlists") {
-        c = c.child(rail_nav(Nav::AllPlaylists, &s.route));
-    }
-    if let Some(f) = s.library_playlists.items.iter().find(|c| c.favorites).filter(|_| shown(s, "favourites")) {
-        let f1 = f.clone();
-        c = c.child(
-            rail_item("pl-fav".into(), &f.title, playlist_active(f, &s.route), icon(&icons::FAVORITES, RAIL_ICON).color(PAL.accent))
-                .on_press(move |s: &mut State| s.open_collection(&f1)),
-        );
-    }
-    if s.settings.pins_open && !s.settings.pins.is_empty() && shown(s, "pins") {
-        c = c.child(rail_sep());
-        for (k, p) in s.settings.pins.iter().take(8).enumerate() {
-            let item = rail_item(format!("pin-{}", p.id), &p.title, pin_active(p, &s.route), thumb(s, p, 28.0));
-            let item = if dnd::is_pin_playlist(p) { dnd::playlist_target(s, item, &p.id) } else { item };
-            // Drag to reorder, as in the full sidebar.
-            c = c.child(dnd::pin_row(s, pin_handlers(item, p), k, p));
-        }
-    }
+    let r = std::rc::Rc::new(RailRows::of(s));
+    let (kr, version) = (r.clone(), (
+        r.count(),
+        r.head.len(),
+        s.settings.pins.len(),
+        s.library_playlists.items.first().map(|c| c.id.clone()),
+        s.ui.dnd.version(),
+        s.settings.hidden_nav.len(),
+        s.local_only(),
+    ));
+    let rows = col().key("sb-rail-rows").growth(GrowthSpec::default())
+        .virtual_rows(r.count(), 44.0, move |s: &State, i| kr.key(s, i).into(), move |s: &State, i| build_rail_row(s, &r, i))
+        .virtual_rows_version(version);
     // The contents shake (in a narrow window, where the rail can't expand) and the strip stays.
     let inner = col().key("sb-rail").w_full().grow(1.0).min_h(0.0).items_center()
         .child(logo_tile(36.0))
         .child(toggle_button(s, "sb-toggle").mt(10.0))
         .child(settings_button(s, "sb-settings").mt(4.0).mb(12.0))
-        .child(col().key("sb-scroll").grow(1.0).min_h(0.0).w_full().scroll(ScrollSpec { stick_bottom: false }).child(c));
+        .child(dnd::sidebar_scroll(s, col().key("sb-scroll").grow(1.0).min_h(0.0).w_full().scroll(ScrollSpec { stick_bottom: false }).child(rows)));
     titlebar_band(col().key("sidebar").w(RAIL_W).h_full().fill(PAL.sidebar).items_center(), chrome_top)
         .child(super::narrow::bind(s, super::narrow::Target::Rail, inner, reduced))
 }
@@ -644,6 +748,69 @@ mod hide_tests {
         let chips: Vec<&str> = nav_choices(false).iter().map(|c| c.0).collect();
         assert_eq!(chips.len(), 14, "the same choices as before");
         assert!(!chips.contains(&"nav-folders") && !chips.contains(&"nav-local-albums"));
+    }
+
+    fn rail_keys(s: &State) -> Vec<String> {
+        let r = RailRows::of(s);
+        (0..r.count()).map(|i| r.key(s, i)).filter(|k| k != "rail-pad" && !k.starts_with("rail-sep")).collect()
+    }
+
+    #[test]
+    fn the_rail_lists_every_playlist_after_the_pins() {
+        let mut s = State::offline();
+        s.library_playlists.items = vec![pl("p.a", false), pl("p.fav", true), pl("p.b", false)];
+        s.settings.pins.push(crate::settings::Pin { kind: PinKind::Album, id: "a.1".into(), title: "A".into(), artwork: None });
+        s.settings.pins_open = true;
+        let k = rail_keys(&s);
+        let tail: Vec<&str> = k.iter().map(String::as_str).skip_while(|k| *k != "nav-playlists").collect();
+        assert_eq!(tail, ["nav-playlists", "pl-fav", "pin-a.1", "rail-pl-p.a", "rail-pl-p.b"]);
+        s.set_nav_hidden("playlists", true);
+        assert!(!rail_keys(&s).iter().any(|k| k == "rail-pl-p.a"), "hidden with the full sidebar's \"Your playlists\"");
+        s.set_nav_hidden("playlists", false);
+        s.settings.pins_open = false;
+        assert!(rail_keys(&s).ends_with(&["pl-fav".to_string(), "rail-pl-p.a".to_string(), "rail-pl-p.b".to_string()]));
+    }
+
+    #[test]
+    fn a_rail_playlist_opens_on_click_and_shows_active() {
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == "sidebar-collapsed-playlists").unwrap().1)(&mut s);
+        let mut rt = rune::Runtime::new(s, crate::ui::view, (1180.0, 900.0), rune::Env { system_dark: true, scale: 1.0 });
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        let title = rt.state.library_playlists.items.iter().find(|c| c.id == "p.1").map(|c| c.title.clone());
+        let r = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("rail-pl-p.1") && e.label == title).expect("pl-p.1 in the rail").rect;
+        rt.pointer_down(r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        rt.pointer_up(r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert!(matches!(&rt.state.route, Route::Collection { id, .. } if id == "p.1"), "{:?}", rt.state.route);
+        let c = rt.state.library_playlists.items.iter().find(|c| c.id == "p.1").unwrap();
+        assert!(playlist_active(c, &rt.state.route));
+    }
+
+    /// Fold the sidebar into the rail and open it again: each playlist row must show its name.
+    /// The rail once memoized its rows under the full sidebar's keys, so the full rows came back as icons.
+    #[test]
+    fn playlist_rows_keep_their_names_after_the_rail() {
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == "sidebar-collapsed-playlists").unwrap().1)(&mut s);
+        let mut rt = rune::Runtime::new(s, crate::ui::view, (1180.0, 900.0), rune::Env { system_dark: true, scale: 1.0 });
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        rt.update(|s, _| s.settings.sidebar_collapsed = false);
+        for _ in 0..60 {
+            rt.frame(1.0 / 60.0);
+        }
+        let c = rt.state.library_playlists.items.iter().find(|c| c.id == "p.1").unwrap().clone();
+        let all = rt.elements();
+        let row = all.iter().find(|e| e.key.as_deref() == Some("pl-p.1") && !e.exiting).expect("pl-p.1 in the full sidebar");
+        let pre = format!("{}/", row.path);
+        let named = all.iter().any(|e| e.path.starts_with(&pre) && !e.exiting && e.text.as_deref() == Some(c.title.as_str()));
+        assert!(named, "the row shows \"{}\"", c.title);
     }
 
     fn art(template: &str) -> Artwork {

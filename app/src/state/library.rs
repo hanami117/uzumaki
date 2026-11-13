@@ -251,7 +251,8 @@ impl State {
         match cached {
             Some(s) if !matches!(self.collections.get(&id), Some(Load::Ready(_))) => {
                 self.coll_cache.insert(id.clone(), CollCache::Cached(s.saved_at));
-                self.collections.insert(id, Load::Ready(s.data));
+                self.collections.insert(id.clone(), Load::Ready(s.data));
+                self.pending_play_landed(&id, false);
             }
             _ => {
                 self.coll_cache.insert(id, CollCache::Missing);
@@ -330,7 +331,7 @@ impl State {
         }
     }
 
-    fn fetch_collection(&mut self, kind: CollectionKind, id: &str) {
+    pub(super) fn fetch_collection(&mut self, kind: CollectionKind, id: &str) {
         if !self.coll_refresh.contains_key(id) {
             self.collections.insert(id.to_string(), Load::Loading);
         }

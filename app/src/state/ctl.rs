@@ -249,8 +249,8 @@ impl State {
     }
 
     /// Plays `c` from song `index`; without one, from a random song when shuffle is on, else
-    /// from the first playable one. Without its songs (Apple sent none), MusicKit resolves the
-    /// album or playlist itself.
+    /// from the first playable one. Without its songs (Apple sent none), `play_collection` asks
+    /// Apple for them once more.
     ///
     /// `order` (song indices into `c.tracks`) plays them in that order instead, and `index` is a
     /// position within it; an index past the songs is an error (the list changed since the

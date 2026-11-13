@@ -391,6 +391,7 @@ mod tests {
             title: format!("Song {id}"),
             artist: String::new(),
             album: String::new(),
+            album_is_fallback: false,
             duration: 200.0,
             track_number: None,
             disc_number: None,

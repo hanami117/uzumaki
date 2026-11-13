@@ -70,6 +70,7 @@ mod tests {
             title: String::new(),
             artist: String::new(),
             album: String::new(),
+            album_is_fallback: false,
             duration: 0.0,
             track_number: None,
             disc_number: None,

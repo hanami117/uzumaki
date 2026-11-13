@@ -11,7 +11,7 @@ use rune::{Cx, Edge, El, Spring, SpringPair, TextStyle, Transition, Tx, col, el,
 
 use super::icons;
 use super::player_bar::{icon_button, play_pause, progress, repeat_button, seek_slider, shuffle_button, volume_slider};
-use super::widgets::fmt_time;
+use super::widgets::{Size, art, fmt_time};
 use crate::art::{NOW_PLAYING_PX, SMALL_PX};
 use crate::lyrics::Lyrics;
 use crate::models::Song;
@@ -116,23 +116,31 @@ fn mix_base(rgb: [u8; 3], k: f32) -> rune::Color {
 /// The big cover. It always requests `NOW_PLAYING_PX` (never a size derived from layout, which
 /// would change the URL while the window or the overlay moves) and draws it at whatever size layout
 /// gives; the small, already-loaded cover shows scaled up underneath until it is ready.
+/// A song with no artwork gets the tinted tile with initials the rest of the app draws.
 fn cover(s: &State, song: &Song, size: f32) -> El {
     let radius = (size * 0.03).clamp(8.0, 16.0);
-    let mut stack = el().key(format!("cover-{}", song.id)).w_full().h_full().fill(PAL.card_hover);
-    if let Some(a) = &song.artwork {
-        let fill = |key: &'static str, img: rune::Image| {
-            el().key(key).pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).pixels_fit(img.pixels(), rune::SurfaceFit::Fill)
-        };
-        if let Some(img) = s.art.get(a, SMALL_PX) {
-            stack = stack.child(fill("small", img));
-        }
-        if let Some(img) = s.art.get(a, NOW_PLAYING_PX) {
-            stack = stack.child(fill("big", img));
-        }
+    let key = format!("cover-{}", song.id);
+    let Some(a) = &song.artwork else {
+        let tile = art(s, None, song.tile_name(), Size::Fill, 0.0, (size * 0.18).max(14.0)).key(key);
+        return frame(size, radius).child(tile);
+    };
+    let mut stack = el().key(key).w_full().h_full().fill(PAL.card_hover);
+    let fill = |key: &'static str, img: rune::Image| {
+        el().key(key).pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).pixels_fit(img.pixels(), rune::SurfaceFit::Fill)
+    };
+    if let Some(img) = s.art.get(a, SMALL_PX) {
+        stack = stack.child(fill("small", img));
     }
+    if let Some(img) = s.art.get(a, NOW_PLAYING_PX) {
+        stack = stack.child(fill("big", img));
+    }
+    frame(size, radius).child(stack)
+}
+
+/// The cover's rounded, shadowed box.
+fn frame(size: f32, radius: f32) -> El {
     el().key("np-cover").size(size, size).radius(radius).clip_rounded(radius)
         .shadow(14.0, 40.0, crate::theme::shadow(0.45)).fill(PAL.card_hover)
-        .child(stack)
 }
 
 /// Title and artist, with the favourite star beside them when the song can have one.
@@ -398,6 +406,7 @@ fn scene_base(s: &mut State, lyr: Lyrics, position: f64) {
         title: "Last Service".into(),
         artist: "Juniper Vale".into(),
         album: "Night Bus Hymns".into(),
+        album_is_fallback: false,
         duration: 241.0,
         track_number: Some(1),
         disc_number: Some(1),

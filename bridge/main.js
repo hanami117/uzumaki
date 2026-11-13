@@ -103,7 +103,6 @@ stallTimer.unref();
 
 const clickWhat = (m) =>
   Array.isArray(m.songIds) && m.songIds.length ? String(m.songIds[0]).slice(0, 40)
-    : m.album ? `album ${String(m.album).slice(0, 40)}` : m.playlist ? `playlist ${String(m.playlist).slice(0, 40)}`
     : m.station ? `station ${String(m.station).slice(0, 40)}` : '?';
 
 function armTrace(t) {

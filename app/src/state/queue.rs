@@ -442,6 +442,21 @@ impl PlayQueue {
         self.context = context;
     }
 
+    /// More songs of the list playback started from (its later pages landed): they join the
+    /// end of the list, or random places after the current song under shuffle.
+    pub fn extend(&mut self, songs: &[Song]) {
+        self.original.extend_from_slice(songs);
+        if self.shuffled {
+            for s in songs {
+                let at = self.pos + 1 + random_below(self.context.len().saturating_sub(self.pos));
+                self.context.insert(at.min(self.context.len()), s.clone());
+            }
+        } else {
+            self.context.extend_from_slice(songs);
+        }
+        self.drop_lap();
+    }
+
     pub fn play_next(&mut self, songs: &[Song]) {
         for s in songs.iter().rev() {
             self.user.push_front(s.clone());
@@ -652,6 +667,7 @@ mod tests {
             title: id.into(),
             artist: String::new(),
             album: String::new(),
+            album_is_fallback: false,
             duration: 100.0,
             track_number: None,
             disc_number: None,

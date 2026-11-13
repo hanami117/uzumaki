@@ -36,6 +36,9 @@ pub struct LocalTrack {
     pub title: String,
     pub artist: String,
     pub album: String,
+    /// `album` is the folder's name, the file having no album tag.
+    #[serde(default)]
+    pub album_fallback: bool,
     /// Album artist when tagged (else the artist), for grouping albums.
     pub album_artist: String,
     pub track: Option<u32>,
@@ -58,6 +61,7 @@ impl LocalTrack {
             title: self.title.clone(),
             artist: self.artist.clone(),
             album: self.album.clone(),
+            album_is_fallback: self.album_fallback,
             duration: self.duration,
             track_number: self.track,
             disc_number: self.disc,
@@ -83,7 +87,7 @@ pub fn art_dir() -> PathBuf {
 }
 
 /// Version of the index file; another version reads as empty (a rescan rebuilds it).
-const INDEX_VERSION: u32 = 1;
+const INDEX_VERSION: u32 = 2;
 
 /// Longest side of a cover thumbnail, pixels.
 const COVER_MAX: u32 = 600;
@@ -270,6 +274,7 @@ fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut H
         title: tag.and_then(|t| clean(t.title())).unwrap_or(stem),
         artist,
         album: album_tag.clone().or(folder_name).unwrap_or_default(),
+        album_fallback: album_tag.is_none(),
         album_artist,
         track: tag.and_then(|t| t.track()),
         disc: tag.and_then(|t| t.disk()),
@@ -425,6 +430,7 @@ mod tests {
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].title, "01 song");
         assert_eq!(t[0].artist, "Unknown Artist");
+        assert!(t[0].album_fallback, "no album tag: the folder name is a stand-in");
         assert_eq!(t[0].album, "Some Album");
         assert_eq!(t[0].album_artist, "Unknown Artist");
         assert!((t[0].duration - 1.0).abs() < 0.05, "{}", t[0].duration);
@@ -604,6 +610,7 @@ mod tests {
             title: "T".into(),
             artist: "A".into(),
             album: "B".into(),
+            album_fallback: false,
             album_artist: "A".into(),
             track: Some(1),
             disc: None,

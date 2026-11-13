@@ -33,6 +33,13 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("now-playing-cover-only", crate::ui::scene_np_cover_only),
     ("now-playing-queue", now_playing_queue),
     ("now-playing-queue-empty", now_playing_queue_empty),
+    ("up-next-stars", up_next_stars),
+    ("now-playing-queue-stars", now_playing_queue_stars),
+    ("now-playing-no-art", now_playing_no_art),
+    ("now-playing-no-art-lyrics", now_playing_no_art_lyrics),
+    ("player-bar-no-art", player_bar_no_art),
+    ("now-playing-untagged", now_playing_untagged),
+    ("player-bar-untagged", player_bar_untagged),
     ("up-next", up_next),
     ("up-next-station", up_next_station),
     ("now-playing-queue-station", now_playing_queue_station),
@@ -70,11 +77,15 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("sidebar-pins", sidebar_pins),
     ("sidebar-playlist-art", sidebar_playlist_art),
     ("sidebar-collapsed", sidebar_collapsed),
+    ("sidebar-collapsed-playlists", sidebar_collapsed_playlists),
+    ("drag-songs-rail", drag_songs_rail),
     ("drag-pins", drag_pins),
     ("drag-songs", drag_songs),
     ("narrow", narrow),
     ("compact", compact),
     ("menu-pin", menu_pin),
+    ("menu-pin-playlist", menu_pin_playlist),
+    ("menu-pin-rail", menu_pin_rail),
     ("menu-card", menu_card),
     ("menu-submenu", menu_submenu),
     ("signed-out", signed_out),
@@ -277,6 +288,7 @@ fn song(album: usize, k: u32) -> Song {
         title: name,
         artist: artist.into(),
         album: title.into(),
+        album_is_fallback: false,
         duration: (150 + (album as u32 * 37 + k * 53) % 140) as f64,
         track_number: Some(k + 1),
         disc_number: Some(1),
@@ -546,6 +558,46 @@ fn now_playing(s: &mut State) {
 fn now_playing_nolyrics(s: &mut State) {
     now_playing_base(s);
     s.lyrics.insert("cat-now".into(), Load::Ready(None));
+}
+
+/// A song with no artwork (a local file without a cover, say): the initials tile, big.
+fn now_playing_no_art(s: &mut State) {
+    now_playing_nolyrics(s);
+    if let Some(now) = s.playback.song.as_mut() {
+        now.artwork = None;
+    }
+}
+
+/// The same beside the lyrics (a smaller cover).
+fn now_playing_no_art_lyrics(s: &mut State) {
+    now_playing(s);
+    if let Some(now) = s.playback.song.as_mut() {
+        now.artwork = None;
+    }
+}
+
+/// An untagged local file: the album is only its folder's name ("Music"), so the tile shows the
+/// title's initials ("PN"), not the folder's.
+fn now_playing_untagged(s: &mut State) {
+    now_playing_no_art(s);
+    if let Some(now) = s.playback.song.as_mut() {
+        now.id = "file:///home/user/Music/powerade.mp3".into();
+        now.title = "Powerade (NOISETIME x Hähnchenteile Remix)".into();
+        now.artist = "Unknown Artist".into();
+        now.album = "Music".into();
+        now.album_is_fallback = true;
+    }
+}
+
+fn player_bar_untagged(s: &mut State) {
+    now_playing_untagged(s);
+    s.ui.now_playing = false;
+}
+
+/// Now Playing closed: the player bar's cover for a song with no artwork.
+fn player_bar_no_art(s: &mut State) {
+    now_playing_no_art(s);
+    s.ui.now_playing = false;
 }
 
 fn up_next(s: &mut State) {
@@ -1096,6 +1148,21 @@ fn sidebar_collapsed(s: &mut State) {
     s.settings.sidebar_collapsed = true;
 }
 
+/// The rail with the pins folded, so its playlists show: pictures (tinted tiles with initials,
+/// headless) and icons, "Morning commute" open.
+fn sidebar_collapsed_playlists(s: &mut State) {
+    sidebar_playlist_art(s);
+    s.settings.sidebar_collapsed = true;
+    s.settings.pins_open = false;
+}
+
+/// Two songs dragged over the rail's second playlist.
+fn drag_songs_rail(s: &mut State) {
+    sidebar_collapsed_playlists(s);
+    crate::ui::scene_select(s, &["pl-4", "pl-5"], None);
+    crate::ui::scene_drag_songs(s, [38.0, 805.0], Some("p.1"));
+}
+
 /// Meant for `--size 900x700`.
 fn narrow(s: &mut State) {
     base(s);
@@ -1114,6 +1181,20 @@ fn compact(s: &mut State) {
 fn menu_pin(s: &mut State) {
     sidebar_pins(s);
     crate::ui::scene_menu_pin(s, "ar12", [60.0, 300.0]);
+}
+
+/// A pinned library playlist's menu: the playlist row's items, then Unpin and Move Up/Down.
+fn menu_pin_playlist(s: &mut State) {
+    sidebar_pins(s);
+    let c = s.library_playlists.items.iter().find(|c| c.editable).cloned().expect("an editable playlist");
+    s.settings.pins.insert(1, Pin { kind: PinKind::Playlist, id: c.id.clone(), title: c.title.clone(), artwork: None });
+    crate::ui::scene_menu_pin(s, &c.id, [60.0, 260.0]);
+}
+
+/// The same menu from the collapsed rail, on a pinned album.
+fn menu_pin_rail(s: &mut State) {
+    sidebar_collapsed(s);
+    crate::ui::scene_menu_pin(s, "a2", [40.0, 200.0]);
 }
 
 fn menu_card(s: &mut State) {
@@ -1153,6 +1234,7 @@ fn local_songs() -> Vec<Song> {
                     title: title.to_string(),
                     artist: artist.into(),
                     album: album.clone(),
+                    album_is_fallback: false,
                     duration: (*secs + round * 7) as f64,
                     track_number: Some(n),
                     disc_number: Some(1),
@@ -1761,6 +1843,18 @@ fn fav_menu(s: &mut State) {
     }
 }
 
+/// Up Next with stars: the playing song, a Play Next song, an upcoming one and one in History.
+fn up_next_stars(s: &mut State) {
+    up_next(s);
+    s.star_for_scene(&["ctx-1", "ctx-2", "user-1", "ctx-5"]);
+}
+
+/// The same in Now Playing's Up Next.
+fn now_playing_queue_stars(s: &mut State) {
+    now_playing_queue(s);
+    s.star_for_scene(&["ctx-1", "ctx-2", "user-1", "ctx-5"]);
+}
+
 /// The card menu of a favourite album.
 fn fav_card_menu(s: &mut State) {
     s.star_for_scene(&["a1"]);
@@ -1812,6 +1906,7 @@ fn ltrack(path: std::path::PathBuf, title: &str, artist: &str, album: &str, albu
         title: title.into(),
         artist: artist.into(),
         album: album.into(),
+        album_fallback: album_artist == "Unknown Artist",
         album_artist: album_artist.into(),
         track,
         disc,

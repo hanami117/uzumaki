@@ -105,6 +105,7 @@ fn song(id: &str) -> Song {
         title: format!("Song {id}"),
         artist: "A".into(),
         album: "B".into(),
+        album_is_fallback: false,
         duration: 200.0,
         track_number: None,
         disc_number: None,
@@ -2633,4 +2634,105 @@ fn the_window_shows_nothing_of_the_account_after_signing_out() {
         let shown: Vec<String> = texts(&rt).into_iter().filter(mine).collect();
         assert!(shown.is_empty(), "{route:?}: still shown after signing out: {shown:?}");
     }
+}
+
+// ---------------------------------------------------------------- Play from a menu (no songs yet)
+
+/// A sidebar row or card: the list's summary, without its songs.
+fn summary(id: &str) -> Collection {
+    let mut c = playlist(id, "v1");
+    c.tracks.clear();
+    c
+}
+
+fn playing(s: &State) -> Option<&str> {
+    s.playback.song.as_ref().map(|x| x.id.as_str())
+}
+
+fn up_next_ids(s: &State) -> Vec<String> {
+    s.queue.up_next().map(|x| x.id.clone()).collect()
+}
+
+#[test]
+fn menu_play_of_a_library_playlist_loads_it_like_its_page_and_plays_its_songs() {
+    let mut s = State::offline();
+    s.play_collection(&summary("p.QvD"), 0);
+    // Asked of the library (never the catalog), as the page does; nothing for MusicKit to resolve.
+    assert_eq!(sent_matching(&s, "/v1/me/library/playlists/p.QvD"), 1);
+    assert_eq!(sent_matching(&s, "/catalog/"), 0);
+    assert_eq!(playing(&s), None, "nothing to show until its songs are known");
+    let mut c = playlist("p.QvD", "v1");
+    c.tracks = vec![song("i.1"), song("i.2")];
+    s.apply_msg(Msg::Collection { id: "p.QvD".into(), result: Ok((c, Some("/next".into()))) });
+    assert_eq!(playing(&s), Some("i.1"));
+    assert_eq!(s.playback.state, PlayState::Loading);
+    assert_eq!(s.queue.source, "Album p.QvD");
+    assert_eq!(up_next_ids(&s), ["i.2"]);
+    // The next page joins the queue behind them.
+    let page = Page { items: vec![song("i.3"), song("i.4")], next: None, total: None };
+    s.apply_msg(Msg::CollectionTracks { id: "p.QvD".into(), result: Ok(page) });
+    assert_eq!(up_next_ids(&s), ["i.2", "i.3", "i.4"]);
+    assert_eq!(s.collections["p.QvD"].ready().unwrap().tracks.len(), 4, "the page has them too");
+}
+
+#[test]
+fn menu_play_of_a_loaded_list_plays_at_once_and_a_catalog_playlist_asks_the_catalog() {
+    let mut s = State::offline();
+    let mut c = playlist("pl.apple", "v1");
+    c.tracks = vec![song("1"), song("2")];
+    s.collections.insert("pl.apple".into(), Load::Ready(c));
+    s.play_collection(&summary("pl.apple"), 0);
+    assert_eq!(playing(&s), Some("1"));
+    assert!(s.sent.borrow().is_empty(), "no request: its page loaded it");
+
+    let mut s = State::offline();
+    s.play_collection(&summary("pl.other"), 0);
+    assert_eq!(sent_matching(&s, "/catalog/{{storefrontId}}/playlists/pl.other"), 1);
+}
+
+#[test]
+fn menu_shuffle_waits_for_the_songs_then_shuffles_them() {
+    let mut s = State::offline();
+    s.shuffle_collection(&summary("p.1"));
+    assert!(s.playback.shuffle);
+    let mut c = playlist("p.1", "v1");
+    c.tracks = (0..20).map(|i| song(&i.to_string())).collect();
+    s.apply_msg(Msg::Collection { id: "p.1".into(), result: Ok((c, Some("/next".into()))) });
+    assert!(s.queue.shuffled);
+    assert_eq!(s.queue.context.len(), 20);
+    let page = Page { items: vec![song("20"), song("21")], next: None, total: None };
+    s.apply_msg(Msg::CollectionTracks { id: "p.1".into(), result: Ok(page) });
+    let mut all: Vec<_> = s.queue.context.iter().map(|x| x.id.clone()).collect();
+    assert_eq!(all[0], playing(&s).unwrap(), "the current song stays first");
+    all.sort();
+    all.dedup();
+    assert_eq!(all.len(), 22, "the later page is shuffled in, every song once");
+}
+
+#[test]
+fn a_newer_click_wins_over_a_list_still_loading_and_a_failure_says_so() {
+    let mut s = State::offline();
+    s.play_collection(&summary("p.1"), 0);
+    s.play_songs(&[song("x")], 0);
+    s.apply_msg(Msg::Collection { id: "p.1".into(), result: Ok((playlist("p.1", "v1"), None)) });
+    assert_eq!(playing(&s), Some("x"), "the late list doesn't take over");
+
+    let mut s = State::offline();
+    s.play_collection(&summary("p.2"), 0);
+    s.apply_msg(Msg::Collection { id: "p.2".into(), result: Err("NOT_FOUND".into()) });
+    assert_eq!(playing(&s), None);
+    assert_eq!(s.toast.as_deref(), Some("Couldn't play “Album p.2”: NOT_FOUND"));
+}
+
+#[test]
+fn later_pages_leave_the_queue_alone_once_something_else_plays() {
+    let mut s = State::offline();
+    s.play_collection(&summary("p.1"), 0);
+    s.apply_msg(Msg::Collection { id: "p.1".into(), result: Ok((playlist("p.1", "v1"), Some("/next".into()))) });
+    assert_eq!(playing(&s), Some("1"));
+    s.last_play = None;
+    s.play_songs(&[song("x"), song("y")], 0);
+    let page = Page { items: vec![song("2")], next: None, total: None };
+    s.apply_msg(Msg::CollectionTracks { id: "p.1".into(), result: Ok(page) });
+    assert_eq!(up_next_ids(&s), ["y"]);
 }

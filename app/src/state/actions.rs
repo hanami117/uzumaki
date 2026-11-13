@@ -55,24 +55,10 @@ impl State {
 
     // ---------------------------------------------------------------- playback
 
-    /// Plays an album or playlist from track `index` to its end.
+    /// Plays an album or playlist from track `index` to its end. Without its songs (a card or a
+    /// sidebar row), it loads them as its page does and plays them the same way (`load_then_play`).
     pub fn play_collection(&mut self, c: &Collection, index: usize) {
-        if c.tracks.is_empty() && crate::local::view::is_album_id(&c.id) {
-            // A card of local only mode's Albums: its songs come from the music folders.
-            if let Some(full) = self.local_album(&c.id) {
-                self.play_list(&full.tracks, index, &full.title);
-            }
-        } else if !c.tracks.is_empty() {
-            self.play_list(&c.tracks, index, &c.title);
-        } else if self.bridge.is_some() {
-            // Track list not loaded yet: let MusicKit resolve the album/playlist itself.
-            self.stop_local();
-            let Some(b) = &self.bridge else { return };
-            match c.kind {
-                CollectionKind::Album => b.play_album(&c.id, index),
-                CollectionKind::Playlist => b.play_playlist(&c.id, index),
-            }
-        }
+        self.start_collection(c, Start::At(index));
     }
 
     /// A Shuffle button: turns shuffle on and plays `songs` from a random playable song (not
@@ -83,20 +69,104 @@ impl State {
         self.play_list(songs, super::queue::random_playable(songs).unwrap_or(0), source);
     }
 
-    /// The Shuffle button of an album or playlist. Without its songs, MusicKit resolves it from
-    /// a random position (playability unknown until then).
+    /// The Shuffle button of an album or playlist (its songs loaded first when needed).
     pub fn shuffle_collection(&mut self, c: &Collection) {
+        self.start_collection(c, Start::Shuffle);
+    }
+
+    fn start_collection(&mut self, c: &Collection, start: Start) {
         if c.tracks.is_empty() && crate::local::view::is_album_id(&c.id) {
+            // A card of local only mode's Albums: its songs come from the music folders.
             if let Some(full) = self.local_album(&c.id) {
-                self.shuffle_play(&full.tracks, &full.title);
+                self.play_loaded(&full, start);
             }
-        } else if c.tracks.is_empty() {
-            self.set_shuffle(true);
-            let n = c.track_count.unwrap_or(0) as usize;
-            self.play_collection(c, if n > 1 { super::queue::random_below(n) } else { 0 });
-        } else {
-            self.shuffle_play(&c.tracks, &c.title);
+            return;
         }
+        // A card or sidebar row has no songs; the page may have them loaded already.
+        let known = if c.tracks.is_empty() {
+            self.collections.get(&c.id).and_then(|l| l.ready()).filter(|x| !x.tracks.is_empty()).cloned()
+        } else {
+            Some(c.clone())
+        };
+        match known {
+            Some(full) => {
+                self.pending_play = None;
+                self.play_loaded(&full, start);
+            }
+            None => self.load_then_play(c, start),
+        }
+    }
+
+    fn play_loaded(&mut self, c: &Collection, start: Start) {
+        match start {
+            Start::At(i) => self.play_list(&c.tracks, i, &c.title),
+            Start::Shuffle => self.shuffle_play(&c.tracks, &c.title),
+        }
+    }
+
+    /// Loads `c` the way its page does (`fetch_collection`) and plays it when the first page of
+    /// songs lands (`pending_play_landed`); later pages join the queue (`grow_queue`). MusicKit is
+    /// never handed the bare album or playlist id: it fetched the whole list before playing (slow
+    /// for long playlists) and could take a library playlist's id for a catalog one (NOT_FOUND).
+    fn load_then_play(&mut self, c: &Collection, start: Start) {
+        if self.bridge.is_none() && !cfg!(test) {
+            return;
+        }
+        if start == Start::Shuffle {
+            self.set_shuffle(true); // the button shows it at once
+        }
+        self.pending_play = Some(PendingPlay { id: c.id.clone(), title: c.title.clone(), start });
+        // Already on its way (its page is loading it): wait for that.
+        if !matches!(self.collections.get(&c.id), Some(Load::Loading)) {
+            self.fetch_collection(c.kind, &c.id);
+        }
+    }
+
+    /// The album or playlist `id` landed (or failed): plays it if a Play was waiting for it.
+    /// `more`: further pages of songs are on their way.
+    pub(super) fn pending_play_landed(&mut self, id: &str, more: bool) {
+        if self.pending_play.as_ref().is_none_or(|p| p.id != id) {
+            return;
+        }
+        let c = match self.collections.get(id) {
+            Some(Load::Ready(c)) => c.clone(),
+            Some(Load::Failed(e)) => {
+                let e = e.clone();
+                if let Some(p) = self.pending_play.take() {
+                    self.toast = Some(format!("Couldn't play “{}”: {e}", p.title));
+                }
+                return;
+            }
+            _ => return,
+        };
+        let Some(p) = self.pending_play.take() else { return };
+        if c.tracks.is_empty() {
+            self.toast = Some(format!("“{}” has no songs to play.", p.title));
+            return;
+        }
+        self.play_loaded(&c, p.start);
+        self.growing = more.then(|| Growing { id: id.to_string(), title: c.title.clone(), len: c.tracks.len() });
+    }
+
+    /// More songs of the list playing now landed (its next page): they join the queue, unless
+    /// something else has been played since.
+    pub(super) fn grow_queue(&mut self, id: &str, songs: &[Song], more: bool) {
+        let Some(g) = &self.growing else { return };
+        if g.id != id {
+            return;
+        }
+        let same = self.queue.station.is_none() && self.queue.source == g.title && self.queue.original.len() == g.len;
+        if !same || !more {
+            self.growing = None;
+        }
+        if !same {
+            return;
+        }
+        if let Some(g) = &mut self.growing {
+            g.len += songs.len();
+        }
+        self.queue.extend(songs);
+        self.sync_upcoming();
     }
 
     /// Plays `songs[index]` followed by the rest of the list.
@@ -145,6 +215,7 @@ impl State {
             return;
         }
         self.resume = None;
+        self.pending_play = None; // a newer click than the album or playlist still loading
         self.playback.song = Some(song.clone());
         self.playback.state = PlayState::Loading;
         self.starting = Some(crate::clock::now());
@@ -637,6 +708,7 @@ impl State {
     }
 
     fn start_station(&mut self, id: &str, name: &str, keep: Option<StationRun>) {
+        self.pending_play = None; // a newer click than the album or playlist still loading
         self.stop_local();
         self.queue = PlayQueue::for_station(id, name, keep);
         self.playback.state = PlayState::Loading;

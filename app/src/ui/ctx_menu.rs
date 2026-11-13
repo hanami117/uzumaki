@@ -6,7 +6,8 @@ use std::rc::Rc;
 use rune::{Drag, El, Phase, Tx, el, icon};
 
 use super::{icons, menu};
-use crate::models::{Artist, Collection, Song, Station};
+use crate::models::{Artist, Collection, CollectionKind, Song, Station};
+use crate::settings::{Pin, PinKind};
 use crate::state::{LocalWhat, State};
 use crate::theme::*;
 
@@ -107,6 +108,11 @@ fn local_album_items(c: &Collection) -> Vec<CtxItem> {
 
 /// Play, Shuffle, queue actions (when the tracks are known) and Pin.
 pub fn collection_items(s: &State, c: &Collection) -> Vec<CtxItem> {
+    items_of_collection(s, c, true)
+}
+
+/// `pin`: with Pin/Unpin (a pin's own menu has its pin items instead).
+fn items_of_collection(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
     if crate::local::view::is_album_id(&c.id) {
         return local_album_items(c);
     }
@@ -132,8 +138,10 @@ pub fn collection_items(s: &State, c: &Collection) -> Vec<CtxItem> {
         let label = if State::can_rename(c) { "Edit Playlist\u{2026}" } else { "Change Picture\u{2026}" };
         v.push(it(label, move |s| super::new_playlist::open_edit(s, &c7)));
     }
-    let c3 = c.clone();
-    v.push(pin_item(s, &c.id, move |s| s.pin_collection(&c3)));
+    if pin {
+        let c3 = c.clone();
+        v.push(pin_item(s, &c.id, move |s| s.pin_collection(&c3)));
+    }
     if s.session.authorized && !c.favorites {
         let c6 = c.clone();
         v.push(it(if s.is_favourite_collection(c) { "Undo Favourite" } else { "Favourite" }, move |s| s.toggle_favourite_collection(&c6)));
@@ -196,7 +204,6 @@ pub fn open_station(s: &mut State, st: &Station, at: [f32; 2]) {
     open(s, at, items);
 }
 
-/// Right-click on a pin: Unpin, Move Up, Move Down.
 /// Right-click on a sidebar entry.
 pub fn open_nav(s: &mut State, id: &'static str, label: &'static str, at: [f32; 2]) {
     let items = vec![
@@ -210,11 +217,51 @@ pub fn open_nav(s: &mut State, id: &'static str, label: &'static str, at: [f32; 
     open(s, at, items);
 }
 
-pub fn open_pin(s: &mut State, id: &str, at: [f32; 2]) {
+/// The album or playlist a pin stands for: the library's or loaded copy when there is one (it
+/// knows whether the list is editable, Favourite Songs, ...), else what the pin remembers.
+fn pin_collection(s: &State, pin: &Pin) -> Collection {
+    let listed = match pin.kind {
+        PinKind::Playlist => s.library_playlists.items.iter().find(|c| c.id == pin.id),
+        _ => s.library_albums.items.iter().find(|c| c.id == pin.id),
+    };
+    let loaded = || s.collections.get(&pin.id).and_then(|l| l.ready());
+    listed.or_else(loaded).cloned().unwrap_or_else(|| Collection {
+        kind: if pin.kind == PinKind::Playlist { CollectionKind::Playlist } else { CollectionKind::Album },
+        id: pin.id.clone(),
+        title: pin.title.clone(),
+        subtitle: String::new(),
+        artwork: pin.artwork.clone(),
+        year: None,
+        genre: None,
+        description: None,
+        track_count: None,
+        modified: None,
+        editable: false,
+        favorites: false,
+        public: None,
+        tracks: Vec::new(),
+        artists: Vec::new(),
+    })
+}
+
+/// Right-click on a pin (full sidebar or rail): the menu of what it pins (an album or playlist
+/// row's, a station's Play), then Unpin, Move Up, Move Down.
+pub fn pin_items(s: &State, id: &str) -> Vec<CtxItem> {
     let pins = &s.settings.pins;
-    let Some(i) = pins.iter().position(|p| p.id == id) else { return };
+    let Some(i) = pins.iter().position(|p| p.id == id) else { return Vec::new() };
+    let pin = &pins[i];
     let last = pins.len() - 1;
-    let mut items = Vec::new();
+    let mut items = match pin.kind {
+        PinKind::Album | PinKind::Playlist => items_of_collection(s, &pin_collection(s, pin), false),
+        PinKind::Station => {
+            let st = Station { id: pin.id.clone(), name: pin.title.clone(), artwork: pin.artwork.clone(), live: false };
+            vec![it("Play", move |s| s.play_station(&st))]
+        }
+        PinKind::Artist => Vec::new(),
+    };
+    if !items.is_empty() {
+        items.push(sep());
+    }
     let id1 = id.to_string();
     items.push(it("Unpin", move |s| s.unpin(&id1)));
     if i > 0 {
@@ -225,7 +272,14 @@ pub fn open_pin(s: &mut State, id: &str, at: [f32; 2]) {
         let id3 = id.to_string();
         items.push(it("Move Down", move |s| s.move_pin(&id3, 1)));
     }
-    open(s, at, items);
+    items
+}
+
+pub fn open_pin(s: &mut State, id: &str, at: [f32; 2]) {
+    let items = pin_items(s, id);
+    if !items.is_empty() {
+        open(s, at, items);
+    }
 }
 
 /// A round "…" button that opens the menu `items` builds, at the button.
@@ -309,5 +363,30 @@ mod local_tests {
         // Apple items keep their menus.
         let apple = Artist { id: "r.1".into(), name: "Ann".into() };
         assert_eq!(labels(&artist_items(&s, &apple)), ["Pin to Sidebar"]);
+    }
+
+    #[test]
+    fn a_pin_has_the_menu_of_what_it_pins_plus_its_own_items() {
+        use crate::settings::{Pin, PinKind};
+        let mut s = State::offline();
+        s.session.authorized = true;
+        let mut mine = Collection::parse(&serde_json::json!({"id": "p.1", "type": "library-playlists",
+            "attributes": {"name": "Mine", "canEdit": true, "canDelete": true}})).unwrap();
+        mine.tracks.clear();
+        s.library_playlists = crate::state::Paged::ready(vec![mine.clone()]);
+        let pin = |kind, id: &str| Pin { kind, id: id.into(), title: format!("Pin {id}"), artwork: None };
+        s.settings.pins = vec![pin(PinKind::Playlist, "p.1"), pin(PinKind::Playlist, "pl.apple"), pin(PinKind::Station, "ra.1"), pin(PinKind::Artist, "r.1")];
+        // The playlist row's menu, without its Pin item; then the pin's own.
+        let row: Vec<String> = collection_items(&s, &mine).iter().map(|i| i.label.clone()).filter(|l| l != "Unpin from Sidebar").collect();
+        let mut want = row.clone();
+        want.extend(["".to_string(), "Unpin".into(), "Move Down".into()]);
+        assert_eq!(labels(&pin_items(&s, "p.1")), want);
+        assert_eq!(labels(&pin_items(&s, "pl.apple")), ["Play", "Shuffle", "", "Favourite", "Add to Library", "", "Unpin", "Move Up", "Move Down"]);
+        assert_eq!(labels(&pin_items(&s, "ra.1")), ["Play", "", "Unpin", "Move Up", "Move Down"]);
+        assert_eq!(labels(&pin_items(&s, "r.1")), ["Unpin", "Move Up"]);
+        // Its Play plays the list (loaded first, as from the row).
+        let play = pin_items(&s, "p.1").into_iter().next().unwrap();
+        (play.act.unwrap())(&mut s);
+        assert_eq!(s.sent.borrow().iter().filter(|p| p.contains("/v1/me/library/playlists/p.1")).count(), 1);
     }
 }
