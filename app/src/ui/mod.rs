@@ -24,6 +24,8 @@ mod local_files;
 mod local_lib;
 #[cfg(test)]
 mod lyrics_snap_tests;
+#[cfg(test)]
+mod np_keys_tests;
 mod marquee;
 mod menu;
 #[cfg(any(target_os = "macos", test))]

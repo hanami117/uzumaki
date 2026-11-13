@@ -135,12 +135,17 @@ pub fn model(s: &State) -> Vec<Entry> {
         key(s, View, "view.right", "Right Sidebar", Action::ToggleRightPanel, right),
         sep(View),
     ];
+    // The two tabs are ticked as the right sidebar shows them, or in Now Playing as its column
+    // does (the keys drive that column there).
+    let shown = |tab| {
+        if super::now_playing::is_open(s) { super::now_playing::column(s) == Some(tab) } else { right && set.right_tab == tab }
+    };
     // Lyrics are Apple Music's: local only mode has none (the tour leaves them out too).
     if !s.local_only() {
-        v.push(key(s, View, "view.lyrics", "Lyrics", Action::ShowLyrics, right && set.right_tab == RightTab::Lyrics));
+        v.push(key(s, View, "view.lyrics", "Lyrics", Action::ShowLyrics, shown(RightTab::Lyrics)));
     }
     v.extend([
-        key(s, View, "view.queue", "Up Next", Action::ShowQueue, right && set.right_tab == RightTab::Queue),
+        key(s, View, "view.queue", "Up Next", Action::ShowQueue, shown(RightTab::Queue)),
         sep(View),
         key(s, View, "view.now_playing", "Now Playing", Action::NowPlaying, s.ui.now_playing),
         sep(View),

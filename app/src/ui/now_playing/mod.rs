@@ -85,6 +85,37 @@ fn toggle_queue(s: &mut State) {
     }
 }
 
+/// Now Playing is on screen (open, with a song to show).
+pub fn is_open(s: &State) -> bool {
+    s.ui.now_playing && s.playback.song.is_some()
+}
+
+/// What the column beside the cover holds now, if anything (the lyrics button's "on" state
+/// counts, even for a song with no lyrics: the button is lit and the hint shows).
+pub fn column(s: &State) -> Option<crate::settings::RightTab> {
+    use crate::settings::RightTab;
+    if s.settings.now_playing_queue {
+        Some(RightTab::Queue)
+    } else if lyrics_on(s) {
+        Some(RightTab::Lyrics)
+    } else {
+        None
+    }
+}
+
+/// The lyrics and Up Next shortcuts while Now Playing is open: they press its own buttons, so
+/// the key and the button can't disagree. False when Now Playing isn't open.
+pub fn key_column(s: &mut State, tab: crate::settings::RightTab) -> bool {
+    if !is_open(s) {
+        return false;
+    }
+    match tab {
+        crate::settings::RightTab::Lyrics => toggle_lyrics(s),
+        crate::settings::RightTab::Queue => toggle_queue(s),
+    }
+    true
+}
+
 fn hex_rgb(h: &str) -> Option<[u8; 3]> {
     let h = h.trim_start_matches('#');
     if h.len() != 6 {
