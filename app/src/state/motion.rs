@@ -71,6 +71,7 @@ impl State {
     /// Before each frame: what the cover should do, and the step towards it (ask Apple, ask the
     /// download worker, start, pause or stop the player). True when the view must change.
     pub fn poll_motion(&mut self) -> bool {
+        self.prefetch_motion();
         let want = motion::want(&self.motion_facts());
         let album = self.playback.song.as_ref().and_then(album_of).map(String::from);
         let (Some(album), false) = (album, want == Want::Off) else {
@@ -80,22 +81,7 @@ impl State {
         if self.motion.playback.as_ref().is_some_and(|p| p.album != album) {
             changed |= self.motion.stop(); // another album now: back to its still
         }
-        let art = match self.motion.albums.get(&album) {
-            Some(Load::Ready(Some(art))) => art.clone(),
-            Some(_) => return changed,
-            None => {
-                self.ask_motion(&album);
-                return changed;
-            }
-        };
-        let clip = match self.motion.clips.get(&art.video) {
-            Some(Load::Ready(clip)) => clip.clone(),
-            Some(_) => return changed,
-            None => {
-                self.download_clip(&art.video);
-                return changed;
-            }
-        };
+        let Some(clip) = self.motion_clip(&album) else { return changed };
         if self.motion.failed.contains_key(&album) {
             return changed;
         }
@@ -119,6 +105,43 @@ impl State {
             None => {}
         }
         changed
+    }
+
+    /// Gets clips onto the disk before Now Playing opens: while a song plays, the clip of its
+    /// album and of the next song's in Up Next (each album asked once a session). Only asks
+    /// and downloads; a player starts only in Now Playing (`poll_motion`). Off with the
+    /// setting or Reduce Motion, and for local files (`album_of`).
+    fn prefetch_motion(&mut self) {
+        let playing = matches!(self.playback.state, PlayState::Playing);
+        if !playing || !self.settings.animated_artwork || self.motion.reduced_motion {
+            return;
+        }
+        let current = self.playback.song.as_ref().and_then(album_of).map(String::from);
+        let next = self.queue.peek_next(self.playback.repeat).and_then(album_of).map(String::from);
+        for album in [current, next].into_iter().flatten() {
+            self.motion_clip(&album);
+        }
+    }
+
+    /// `album`'s clip once it is on disk; until then the next step towards it: ask Apple about
+    /// the album, then download its clip (each once a session).
+    fn motion_clip(&mut self, album: &str) -> Option<Clip> {
+        let video = match self.motion.albums.get(album) {
+            Some(Load::Ready(Some(art))) => art.video.clone(),
+            Some(_) => return None,
+            None => {
+                self.ask_motion(album);
+                return None;
+            }
+        };
+        match self.motion.clips.get(&video) {
+            Some(Load::Ready(clip)) => Some(clip.clone()),
+            Some(_) => None,
+            None => {
+                self.download_clip(&video);
+                None
+            }
+        }
     }
 
     /// Asks Apple for an album's motion art (only its `editorialVideo`).
@@ -148,6 +171,8 @@ impl State {
             Ok(m) => Load::Ready(m),
             Err(e) => Load::Failed(e),
         });
+        // The download starts now, not at the next frame (none may come while Now Playing is closed).
+        self.prefetch_motion();
     }
 
     /// A player's report (`motion::Event`) for playback `generation`. True when the view changes.
@@ -283,7 +308,10 @@ mod tests {
         let cases: [Case; 5] = [
             ("setting off", |s| s.settings.animated_artwork = false),
             ("reduce motion", |s| s.motion.reduced_motion = true),
-            ("now playing closed", |s| s.ui.now_playing = false),
+            ("now playing closed, song paused", |s| {
+                s.ui.now_playing = false;
+                s.playback.state = PlayState::Paused;
+            }),
             ("local file", |s| s.playback.song = Some(song("file:///m/a.flac", Some("local-album")))),
             ("library song with no catalog album", |s| s.playback.song = Some(song("i.abc", None))),
         ];
@@ -434,6 +462,94 @@ mod tests {
         assert!(s.motion.layer_for(Some("594061854")).is_some());
         assert!(s.motion.layer_for(Some("1440857781")).is_none());
         assert!(s.motion.layer_for(None).is_none());
+    }
+
+    fn art() -> MotionArt {
+        MotionArt { video: MASTER.into(), preview: None }
+    }
+
+    /// A catalog song of album 594061854 playing, Now Playing closed.
+    fn playing_closed() -> State {
+        let mut s = playing();
+        s.ui.now_playing = false;
+        s
+    }
+
+    fn albums_asked(s: &State) -> Vec<String> {
+        let sent = s.sent.borrow();
+        let asks = sent.iter().filter(|p| p.contains("fields[albums]"));
+        asks.map(|p| p.split_whitespace().next().unwrap().rsplit('/').next().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn a_playing_song_gets_its_clip_downloaded_before_now_playing_opens() {
+        let mut s = playing_closed();
+        s.poll_motion();
+        s.poll_motion();
+        assert_eq!(albums_asked(&s), ["594061854"], "asked once");
+        // The reply alone starts the download: no frame may come while Now Playing is closed.
+        s.apply_msg(Msg::Motion { album: "594061854".into(), result: Ok(Some(art())) });
+        assert_eq!(s.motion.clips[MASTER], Load::Loading, "download asked");
+        assert!(s.motion.playback.is_none(), "no player while Now Playing is closed");
+        s.poll_motion();
+        assert!(s.motion.playback.is_none());
+        assert_eq!(albums_asked(&s).len(), 1);
+    }
+
+    #[test]
+    fn a_prefetched_clip_plays_when_now_playing_opens_without_asking_again() {
+        let mut s = playing_closed();
+        s.poll_motion();
+        s.apply_msg(Msg::Motion { album: "594061854".into(), result: Ok(Some(art())) });
+        let clip = Clip { path: "/nonexistent/clip.mp4".into(), width: 768, height: 768, fps: 23.976 };
+        s.motion.clips.insert(MASTER.into(), Load::Ready(clip)); // the worker's reply
+        s.poll_motion();
+        assert!(s.motion.playback.is_none());
+        s.ui.now_playing = true;
+        s.poll_motion();
+        assert!(s.motion.playback.is_some(), "starts at once");
+        assert_eq!(albums_asked(&s).len(), 1);
+    }
+
+    #[test]
+    fn nothing_is_prefetched_against_the_rules() {
+        type Case = (&'static str, fn(&mut State));
+        let cases: [Case; 6] = [
+            ("setting off", |s| s.settings.animated_artwork = false),
+            ("reduce motion", |s| s.motion.reduced_motion = true),
+            ("local file", |s| s.playback.song = Some(song("file:///m/a.flac", Some("123")))),
+            ("paused", |s| s.playback.state = PlayState::Paused),
+            ("loading (skipping through songs)", |s| s.playback.state = PlayState::Loading),
+            ("stopped", |s| s.playback.state = PlayState::Stopped),
+        ];
+        for (what, f) in cases {
+            let mut s = playing_closed();
+            f(&mut s);
+            s.poll_motion();
+            assert!(albums_asked(&s).is_empty(), "{what}");
+            // A reply that came anyway (an album page) starts no download either.
+            s.apply_msg(Msg::Motion { album: "594061854".into(), result: Ok(Some(art())) });
+            assert!(s.motion.clips.is_empty(), "{what}");
+        }
+    }
+
+    #[test]
+    fn the_next_song_in_up_next_is_prefetched_too() {
+        let mut s = playing_closed();
+        let list = [song("1", Some("594061854")), song("2", Some("594061854")), song("3", Some("1440783617"))];
+        s.queue = crate::state::queue::PlayQueue::start(&list, 0, false, "test", Default::default());
+        s.poll_motion();
+        assert_eq!(albums_asked(&s), ["594061854"], "next song on the same album: asked once");
+        s.queue.pos = 1; // song 2 plays; song 3 is next, on another album
+        s.playback.song = Some(list[1].clone());
+        s.poll_motion();
+        assert_eq!(albums_asked(&s), ["594061854", "1440783617"]);
+        s.poll_motion();
+        assert_eq!(albums_asked(&s).len(), 2, "each album once a session");
+        // A local file next asks nothing.
+        s.queue.user.push_back(song("file:///m/b.flac", Some("99")));
+        s.poll_motion();
+        assert_eq!(albums_asked(&s).len(), 2);
     }
 
     #[test]
