@@ -84,6 +84,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("narrow", narrow),
     ("compact", compact),
     ("menu-pin", menu_pin),
+    ("menu-pin-playlist", menu_pin_playlist),
+    ("menu-pin-rail", menu_pin_rail),
     ("menu-card", menu_card),
     ("menu-submenu", menu_submenu),
     ("signed-out", signed_out),
@@ -1179,6 +1181,20 @@ fn compact(s: &mut State) {
 fn menu_pin(s: &mut State) {
     sidebar_pins(s);
     crate::ui::scene_menu_pin(s, "ar12", [60.0, 300.0]);
+}
+
+/// A pinned library playlist's menu: the playlist row's items, then Unpin and Move Up/Down.
+fn menu_pin_playlist(s: &mut State) {
+    sidebar_pins(s);
+    let c = s.library_playlists.items.iter().find(|c| c.editable).cloned().expect("an editable playlist");
+    s.settings.pins.insert(1, Pin { kind: PinKind::Playlist, id: c.id.clone(), title: c.title.clone(), artwork: None });
+    crate::ui::scene_menu_pin(s, &c.id, [60.0, 260.0]);
+}
+
+/// The same menu from the collapsed rail, on a pinned album.
+fn menu_pin_rail(s: &mut State) {
+    sidebar_collapsed(s);
+    crate::ui::scene_menu_pin(s, "a2", [40.0, 200.0]);
 }
 
 fn menu_card(s: &mut State) {
