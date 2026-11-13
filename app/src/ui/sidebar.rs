@@ -572,7 +572,7 @@ impl RailRows {
             RailRow::Sep => format!("rail-sep-{i}"),
             RailRow::Fav => "pl-fav".into(),
             RailRow::Pin(k) => format!("pin-{}", s.settings.pins.get(k).map_or("", |p| p.id.as_str())),
-            RailRow::Playlist(k) => format!("pl-{}", playlist_at(s, k).map_or("", |c| c.id.as_str())),
+            RailRow::Playlist(k) => format!("rail-pl-{}", playlist_at(s, k).map_or("", |c| c.id.as_str())),
             RailRow::Pad => "rail-pad".into(),
         }
     }
@@ -586,7 +586,7 @@ fn rail_playlist(s: &State, c: &Collection, active: bool, held: Option<&(rune::I
         Some(_) => cover(held, &c.title, 28.0),
         None => icon(&icons::PLAYLIST, RAIL_ICON).color(PAL.accent),
     };
-    dnd::playlist_target(s, rail_item(format!("pl-{}", c.id), &c.title, active, content), &c.id)
+    dnd::playlist_target(s, rail_item(format!("rail-pl-{}", c.id), &c.title, active, content), &c.id)
         .on_press(move |s: &mut State| s.open_collection(&c1))
         .on_secondary_press(move |s: &mut State, p, _tx: &mut Tx| ctx_menu::open_collection(s, &c2, [p.x, p.y]))
 }
@@ -625,7 +625,7 @@ fn build_rail_row(s: &State, r: &RailRows, i: usize) -> El {
                 let held = s.art.held(&c.id, cover, crate::art::SMALL_PX);
                 let pic = held.as_ref().map(|(img, fresh)| (img.id(), *fresh));
                 let version = (&c.title, active, drag, crate::theme::is_light(), crate::theme::over_picture(), cover.is_some(), pic);
-                wrap(memo(format!("pl-{}", c.id), version, || rail_playlist(s, c, active, held.as_ref())))
+                wrap(memo(format!("rail-pl-{}", c.id), version, || rail_playlist(s, c, active, held.as_ref())))
             }
             None => col(),
         },
@@ -763,12 +763,12 @@ mod hide_tests {
         s.settings.pins_open = true;
         let k = rail_keys(&s);
         let tail: Vec<&str> = k.iter().map(String::as_str).skip_while(|k| *k != "nav-playlists").collect();
-        assert_eq!(tail, ["nav-playlists", "pl-fav", "pin-a.1", "pl-p.a", "pl-p.b"]);
+        assert_eq!(tail, ["nav-playlists", "pl-fav", "pin-a.1", "rail-pl-p.a", "rail-pl-p.b"]);
         s.set_nav_hidden("playlists", true);
-        assert!(!rail_keys(&s).iter().any(|k| k == "pl-p.a"), "hidden with the full sidebar's \"Your playlists\"");
+        assert!(!rail_keys(&s).iter().any(|k| k == "rail-pl-p.a"), "hidden with the full sidebar's \"Your playlists\"");
         s.set_nav_hidden("playlists", false);
         s.settings.pins_open = false;
-        assert!(rail_keys(&s).ends_with(&["pl-fav".to_string(), "pl-p.a".to_string(), "pl-p.b".to_string()]));
+        assert!(rail_keys(&s).ends_with(&["pl-fav".to_string(), "rail-pl-p.a".to_string(), "rail-pl-p.b".to_string()]));
     }
 
     #[test]
@@ -780,7 +780,7 @@ mod hide_tests {
             rt.frame(1.0 / 60.0);
         }
         let title = rt.state.library_playlists.items.iter().find(|c| c.id == "p.1").map(|c| c.title.clone());
-        let r = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("pl-p.1") && e.label == title).expect("pl-p.1 in the rail").rect;
+        let r = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("rail-pl-p.1") && e.label == title).expect("pl-p.1 in the rail").rect;
         rt.pointer_down(r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
         rt.pointer_up(r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
         for _ in 0..30 {
@@ -789,6 +789,28 @@ mod hide_tests {
         assert!(matches!(&rt.state.route, Route::Collection { id, .. } if id == "p.1"), "{:?}", rt.state.route);
         let c = rt.state.library_playlists.items.iter().find(|c| c.id == "p.1").unwrap();
         assert!(playlist_active(c, &rt.state.route));
+    }
+
+    /// Fold the sidebar into the rail and open it again: each playlist row must show its name.
+    /// The rail once memoized its rows under the full sidebar's keys, so the full rows came back as icons.
+    #[test]
+    fn playlist_rows_keep_their_names_after_the_rail() {
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == "sidebar-collapsed-playlists").unwrap().1)(&mut s);
+        let mut rt = rune::Runtime::new(s, crate::ui::view, (1180.0, 900.0), rune::Env { system_dark: true, scale: 1.0 });
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        rt.update(|s, _| s.settings.sidebar_collapsed = false);
+        for _ in 0..60 {
+            rt.frame(1.0 / 60.0);
+        }
+        let c = rt.state.library_playlists.items.iter().find(|c| c.id == "p.1").unwrap().clone();
+        let all = rt.elements();
+        let row = all.iter().find(|e| e.key.as_deref() == Some("pl-p.1") && !e.exiting).expect("pl-p.1 in the full sidebar");
+        let pre = format!("{}/", row.path);
+        let named = all.iter().any(|e| e.path.starts_with(&pre) && !e.exiting && e.text.as_deref() == Some(c.title.as_str()));
+        assert!(named, "the row shows \"{}\"", c.title);
     }
 
     fn art(template: &str) -> Artwork {
