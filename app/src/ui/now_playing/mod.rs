@@ -361,7 +361,8 @@ pub fn overlay(s: &State, cx: &mut Cx<State>) -> Option<El> {
         if !side && lyrics_on(s) && !pending {
             left = left.child(
                 row().w_full().justify_center().child(
-                    text("No lyrics for this song").font(SMALL13).color(PAL.dim).key("np-nolyrics"),
+                    text(if matches!(load, Some(Load::Failed(_))) { "Couldn\u{2019}t load lyrics" } else { "No lyrics for this song" })
+                        .font(SMALL13).color(PAL.dim).key("np-nolyrics"),
                 ),
             );
         }

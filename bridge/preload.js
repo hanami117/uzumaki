@@ -129,9 +129,16 @@ function pageBridge() {
 
   const artwork = (url, size = 600) => (url ? url.replace('{w}', size).replace('{h}', size).replace('{f}', 'jpg') : null);
 
+  let lastLyricsMapping = null;
   const itemInfo = (it) => {
     if (!it) return null;
     const a = it.attributes || {};
+    const catalogId = a.playParams?.catalogId ?? it.playParams?.catalogId ?? (String(it.id).startsWith('i.') ? null : it.id);
+    const mapping = `${it.id} -> ${catalogId ?? 'none'} (hasLyrics ${a.hasLyrics ?? 'unknown'})`;
+    if (mapping !== lastLyricsMapping) {
+      lastLyricsMapping = mapping;
+      emit({ event: 'log', message: `lyrics mapping ${mapping}` });
+    }
     return {
       id: it.id,
       title: it.title ?? a.name ?? null,
@@ -140,7 +147,7 @@ function pageBridge() {
       duration: a.durationInMillis != null ? a.durationInMillis / 1000 : null,
       artwork: a.artwork?.url ?? it.artworkURL ?? null, // template: the app picks the size
       artworkBg: a.artwork?.bgColor ?? null, // hex, catalog items only (Now Playing tint)
-      catalogId: a.playParams?.catalogId ?? it.playParams?.catalogId ?? (String(it.id).startsWith('i.') ? null : it.id),
+      catalogId,
       hasLyrics: a.hasLyrics ?? null,
       albumId: (/\/album\/[^/]+\/(\d+)/.exec(a.url || '') || [])[1] ?? null, // Go to Album
     };
@@ -161,6 +168,13 @@ function pageBridge() {
     path = path.replace('{{storefrontId}}', mk.storefrontId);
     if (body === undefined && !method) {
       const res = await mk.api.music(path, params);
+      // MusicKit hands Apple's error bodies back as data. Apple says 404 for lyrics both when a song
+      // has none and when the request went without the user's token, so log which (never the token).
+      const err = res?.data?.errors?.[0];
+      if (err) {
+        const where = path.split('?')[0].replace(/\/\d+(?=\/|$)/g, '/…');
+        emit({ event: 'log', message: `api ${where} -> ${err.status} ${err.code ?? ''} (authorized ${!!mk.isAuthorized}, user token ${mk.musicUserToken ? 'yes' : 'no'})` });
+      }
       return res?.data ?? null;
     }
     const res = await fetch('https://amp-api.music.apple.com' + path, {

@@ -27,6 +27,7 @@ mod edits;
 mod favourites;
 mod library;
 mod local;
+mod lyrics;
 pub mod motion;
 mod playlist_edit;
 mod playlists;
@@ -481,6 +482,8 @@ pub struct State {
     pub history: queue::History,
     /// Lyrics by catalog song id.
     pub lyrics: HashMap<String, Load<Option<Lyrics>>>,
+    /// Lyrics requests in flight and retries (`state/lyrics.rs`).
+    lyrics_fetch: HashMap<String, lyrics::Fetch>,
     /// Synced lyrics on screen: the bridge sends time 4×/s and every tick redraws.
     pub fine_time: bool,
     /// Who asks for `fine_time`: full-screen Now Playing, the right sidebar.
@@ -664,6 +667,7 @@ impl State {
             queue: PlayQueue::default(),
             history: queue::History::default(),
             lyrics: HashMap::new(),
+            lyrics_fetch: HashMap::new(),
             fine_time: false,
             fine_time_np: false,
             fine_time_panel: false,
@@ -928,13 +932,7 @@ impl State {
                 Ok(None) => self.toast = Some("Couldn't find the album of this song.".into()),
                 Err(e) => self.toast = Some(format!("Couldn't open the album: {e}")),
             },
-            Msg::Lyrics { id, result } => {
-                let load = match result {
-                    Ok(l) => Load::Ready(l),
-                    Err(e) => Load::Failed(e),
-                };
-                self.lyrics.insert(id, load);
-            }
+            Msg::Lyrics { id, result } => self.lyrics_reply(id, result),
             Msg::AddedToPlaylist { id, name, count, result } => match result {
                 Ok(()) => {
                     self.toast = Some(match count {
@@ -1117,6 +1115,7 @@ impl State {
                 }
             }
             Event::Time { current, duration } => {
+                self.lyrics_due();
                 let redraw = self.apply_time(current, duration);
                 return self.station_handover() || redraw;
             }
@@ -1243,6 +1242,10 @@ impl State {
             self.load_route_data();
             // Every list is downloading again: the sync screen covers it (`ui::intro`).
             self.begin_sync();
+            // The song on screen may have been skipped while signed out.
+            if let Some(song) = self.playback.song.clone() {
+                self.want_lyrics(&song);
+            }
         } else if !authorized && was {
             // Signed out (or the cache guessed wrong): drop the account's data, in memory and on disk.
             self.drop_account();
