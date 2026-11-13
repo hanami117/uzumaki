@@ -370,6 +370,8 @@ pub enum Msg {
     ArtistMore { id: String, what: More, limited: bool, result: Result<crate::artist::ViewPage, String> },
     /// The word-timed lyrics request failed: ask for the line-timed ones.
     LyricsRetry { id: String },
+    /// The playing song's verified catalog album for animated artwork.
+    MotionSongAlbum { id: String, result: Result<Option<String>, String> },
     /// A catalog album's motion art (`api::album_motion`); Ok(None) when it has none.
     Motion { album: String, result: Result<Option<crate::motion::MotionArt>, String> },
     /// A catalog album's page asked with its motion art: both land.
@@ -906,6 +908,10 @@ impl State {
                     Ok(()) => self.signed_out(),
                     Err(e) => self.toast = Some(format!("Couldn't sign out: {e}")),
                 }
+            }
+            Msg::MotionSongAlbum { id, result } => {
+                self.motion_song_album_known(id, result);
+                return false;
             }
             Msg::Motion { album, result } => {
                 self.motion_known(album, result);

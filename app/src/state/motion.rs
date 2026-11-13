@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use super::{Load, Msg, State};
 use crate::bridge::PlayState;
-use crate::models::api;
+use crate::models::{api, Song};
 use crate::motion::{self, Clip, Event, Facts, MotionArt, Playback, Want};
 
 #[derive(Default)]
@@ -21,6 +21,8 @@ pub struct MotionState {
     /// Master playlist URL → the clip on disk.
     pub clips: HashMap<String, Load<Clip>>,
     pub playback: Option<Playback>,
+    /// Playing song id → verified catalog album; pending/negative results are cached too.
+    song_albums: HashMap<String, Load<Option<String>>>,
     /// Albums whose clip failed to play this session (no ffmpeg, a decode error).
     failed: HashMap<String, String>,
     generation: u64,
@@ -56,6 +58,59 @@ pub fn album_of(song: &crate::models::Song) -> Option<&str> {
 }
 
 impl State {
+    /// Uses only exact Apple ids, never album names or guessed editions.
+    pub fn motion_album<'a>(&'a self, song: &'a Song) -> Option<&'a str> {
+        album_of(song).or_else(|| {
+            if song.is_local() { return None; }
+            match self.motion.song_albums.get(&song.id) {
+                Some(Load::Ready(Some(album))) => Some(album.as_str()),
+                _ => None,
+            }
+        })
+    }
+
+    /// Enrich only the playing song, once. List parsing and Up Next remain cheap.
+    fn resolve_motion_album(&mut self) {
+        let Some(song) = self.playback.song.as_ref() else { return };
+        if song.is_local() || album_of(song).is_some() || self.motion.song_albums.contains_key(&song.id) {
+            return;
+        }
+        // MusicKit's nowPlaying item may omit metadata already present in a loaded list.
+        let mapped = self.library_songs.items.iter()
+            .find(|other| song.same_track(other) && other.catalog_ref().is_some())
+            .unwrap_or(song);
+        let known = self.library_songs.items.iter()
+            .chain(self.collections.values().filter_map(Load::ready).flat_map(|c| c.tracks.iter()))
+            .find(|other| mapped.same_track(other) && album_of(other).is_some());
+        if let Some(album) = known.and_then(album_of).map(String::from) {
+            self.motion.song_albums.insert(song.id.clone(), Load::Ready(Some(album)));
+            return;
+        }
+        let catalog = song.catalog_ref().map(String::from).or_else(|| {
+            self.library_songs.items.iter().find(|other| song.same_track(other))
+                .and_then(Song::catalog_ref).map(String::from)
+        });
+        let path = match catalog {
+            Some(id) => format!("/v1/catalog/{{{{storefrontId}}}}/songs/{id}"),
+            None if song.id.starts_with("i.") => format!("/v1/me/library/songs/{}/catalog", song.id),
+            None => return,
+        };
+        let id = song.id.clone();
+        self.motion.song_albums.insert(id.clone(), Load::Loading);
+        self.request((path, serde_json::json!({})), |v| {
+            v["data"].as_array().and_then(|items| items.iter().filter_map(Song::parse)
+                .find_map(|s| album_of(&s).map(String::from)))
+        }, move |result| Msg::MotionSongAlbum { id, result });
+    }
+
+    pub(super) fn motion_song_album_known(&mut self, id: String, result: Result<Option<String>, String>) {
+        self.motion.song_albums.insert(id, match result {
+            Ok(album) => Load::Ready(album),
+            Err(e) => Load::Failed(e),
+        });
+        self.prefetch_motion();
+    }
+
     fn motion_facts(&self) -> Facts {
         Facts {
             enabled: self.settings.animated_artwork,
@@ -73,7 +128,7 @@ impl State {
     pub fn poll_motion(&mut self) -> bool {
         self.prefetch_motion();
         let want = motion::want(&self.motion_facts());
-        let album = self.playback.song.as_ref().and_then(album_of).map(String::from);
+        let album = self.playback.song.as_ref().and_then(|song| self.motion_album(song)).map(String::from);
         let (Some(album), false) = (album, want == Want::Off) else {
             return self.motion.stop();
         };
@@ -116,7 +171,8 @@ impl State {
         if !playing || !self.settings.animated_artwork || self.motion.reduced_motion {
             return;
         }
-        let current = self.playback.song.as_ref().and_then(album_of).map(String::from);
+        self.resolve_motion_album();
+        let current = self.playback.song.as_ref().and_then(|song| self.motion_album(song)).map(String::from);
         let next = self.queue.peek_next(self.playback.repeat).and_then(album_of).map(String::from);
         for album in [current, next].into_iter().flatten() {
             self.motion_clip(&album);
@@ -550,6 +606,72 @@ mod tests {
         s.queue.user.push_back(song("file:///m/b.flac", Some("99")));
         s.poll_motion();
         assert_eq!(albums_asked(&s).len(), 2);
+    }
+
+    #[test]
+    fn library_playback_reuses_exact_standard_catalog_mapping() {
+        let mut s = playing_closed();
+        let mut library = song("i.library", None);
+        library.catalog_id = Some("123".into());
+        s.library_songs.items.push(library);
+        // MusicKit omitted both catalogId and albumId in the playing event.
+        s.playback.song = Some(song("i.library", None));
+        let mut album = crate::models::Collection::parse(&serde_json::json!({
+            "id":"456", "type":"albums", "attributes":{"name":"Standard"}
+        })).unwrap();
+        album.tracks.push(song("123", Some("456")));
+        // A different edition with the same title must never win by name.
+        album.tracks.push(song("999", Some("888")));
+        s.collections.insert("456".into(), Load::Ready(album));
+        s.poll_motion();
+        assert_eq!(s.motion_album(s.playback.song.as_ref().unwrap()), Some("456"));
+        assert_eq!(albums_asked(&s), ["456"]);
+        assert_eq!(s.sent.borrow().len(), 1, "no song lookup when mapping is loaded");
+        assert!(s.motion.playback.is_none(), "prefetch never decodes");
+    }
+
+    #[test]
+    fn missing_album_uses_known_catalog_id_once_for_playing_song_only() {
+        let mut s = playing_closed();
+        let mut library = song("i.library", None);
+        library.catalog_id = Some("123".into());
+        s.playback.song = Some(library);
+        s.queue.user.push_back(song("i.next", None));
+        s.poll_motion();
+        s.poll_motion();
+        assert_eq!(s.sent.borrow().len(), 1);
+        assert!(s.sent.borrow()[0].starts_with("/v1/catalog/{{storefrontId}}/songs/123 "));
+        s.apply_msg(Msg::MotionSongAlbum { id: "i.library".into(), result: Ok(Some("456".into())) });
+        assert_eq!(albums_asked(&s), ["456"]);
+        assert!(s.motion.playback.is_none());
+        s.poll_motion();
+        assert_eq!(s.sent.borrow().len(), 2, "cached song and album lookups");
+    }
+
+    #[test]
+    fn unmatched_library_lookup_and_negative_or_failed_results_are_cached() {
+        for result in [Ok(None), Err("offline".into())] {
+            let mut s = playing_closed();
+            s.playback.song = Some(song("i.library", None));
+            s.poll_motion();
+            assert!(s.sent.borrow()[0].starts_with("/v1/me/library/songs/i.library/catalog "));
+            s.apply_msg(Msg::MotionSongAlbum { id: "i.library".into(), result });
+            s.poll_motion();
+            s.poll_motion();
+            assert_eq!(s.sent.borrow().len(), 1);
+            assert!(s.motion.playback.is_none());
+        }
+    }
+
+    #[test]
+    fn late_mapping_for_previous_song_does_not_change_current_cover() {
+        let mut s = playing_closed();
+        s.playback.song = Some(song("i.old", None));
+        s.poll_motion();
+        s.playback.song = Some(song("2", Some("222")));
+        s.apply_msg(Msg::MotionSongAlbum { id: "i.old".into(), result: Ok(Some("111".into())) });
+        assert_eq!(s.motion_album(s.playback.song.as_ref().unwrap()), Some("222"));
+        assert_eq!(albums_asked(&s), ["222"]);
     }
 
     #[test]

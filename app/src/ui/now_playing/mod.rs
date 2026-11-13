@@ -181,7 +181,7 @@ fn motion_layer(s: &State, song: &Song, size: f32) -> Option<El> {
     if size < 160.0 {
         return None;
     }
-    let layer = s.motion.layer_for(crate::state::motion::album_of(song))?;
+    let layer = s.motion.layer_for(s.motion_album(song))?;
     Some(layer.key("np-motion").transition(Transition::opacity()).enter_delay(0.12))
 }
 
