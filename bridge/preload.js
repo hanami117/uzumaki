@@ -269,7 +269,7 @@ function pageBridge() {
   }
 
   async function startQueue(args, gen, arrived) {
-    const { songIds, station, album, playlist, startWith, startPlaying = true, startTime, id } = args;
+    const { songIds, station, startPlaying = true, startTime, id } = args;
     // A resumed song starts this far in (seconds). MusicKit's own `startTime` option may do it;
     // if not, `seekToResume` seeks once playback runs.
     const at = Number(startTime) > 0 ? Number(startTime) : null;
@@ -290,10 +290,7 @@ function pageBridge() {
         opts.songs = ids.slice(0, 1);
         rest = ids.slice(1);
       } else if (station) opts.station = String(station);
-      else if (album) opts.album = String(album);
-      else if (playlist) opts.playlist = String(playlist);
-      else throw new Error('setQueue needs songIds, station, album or playlist');
-      if (Number.isInteger(startWith) && !opts.songs) opts.startWith = startWith;
+      else throw new Error('setQueue needs songIds or station');
       if (at !== null) opts.startTime = at;
 
       await timeout(mk.setQueue(opts), 15000, 'setQueue');
@@ -378,8 +375,6 @@ function pageBridge() {
     volume: async ({ value }) => {
       mk.volume = Math.max(0, Math.min(1, Number(value)));
     },
-    // Exactly one of: songIds (array), album (id), playlist (id). Catalog or library ids.
-    // startWith: index in that list to start from (album/playlist only).
     // What plays after what MusicKit already has (the app owns the order: shuffle, play next,
     // add to queue). `loop`: the whole cycle for repeat all, or null. Returns how many songs are
     // already fixed in MusicKit's queue ahead of the current one (0 or 1).

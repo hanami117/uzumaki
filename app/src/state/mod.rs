@@ -173,6 +173,30 @@ enum CollCache {
     Verified,
 }
 
+/// Where an album or playlist starts playing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Start {
+    At(usize),
+    /// From a random playable song, the rest shuffled (the Shuffle button).
+    Shuffle,
+}
+
+/// A Play waiting for its album or playlist to load (`State::load_then_play`).
+#[derive(Clone, Debug, PartialEq)]
+struct PendingPlay {
+    id: String,
+    title: String,
+    start: Start,
+}
+
+/// The list playing now, while its later pages of songs load: `len` songs of it are queued.
+#[derive(Clone, Debug, PartialEq)]
+struct Growing {
+    id: String,
+    title: String,
+    len: usize,
+}
+
 /// Cached catalog pages younger than this are used without asking Apple again.
 const COLLECTION_TTL_SECS: u64 = 24 * 3600;
 
@@ -510,6 +534,10 @@ pub struct State {
     resume_out: resume::Published,
     /// Last play request and when, to swallow double-clicks.
     last_play: Option<(String, Instant)>,
+    /// A Play or Shuffle of an album or playlist whose songs are loading (`load_then_play`).
+    pending_play: Option<PendingPlay>,
+    /// The list playing now is still getting its later pages of songs (`grow_queue`).
+    growing: Option<Growing>,
     /// Script hooks (`hooks.rs`): told after each change of song or play state.
     hooks: crate::hooks::Hooks,
     /// "Notify on song change" (`notify.rs`), fed by the hooks' song detector.
@@ -600,6 +628,8 @@ impl State {
             resume: None,
             resume_out: Default::default(),
             last_play: None,
+            pending_play: None,
+            growing: None,
             hooks: if persist { crate::hooks::Hooks::for_app() } else { crate::hooks::Hooks::off() },
             notifier,
             starting: None,
@@ -778,17 +808,22 @@ impl State {
                     }
                     return true;
                 }
+                let mut more = false;
                 let load = match result {
                     Ok((c, next)) => {
                         match next {
-                            Some(next) => self.request_tracks(&id, &next),
+                            Some(next) => {
+                                more = true;
+                                self.request_tracks(&id, &next);
+                            }
                             None => self.save_collection(&c),
                         }
                         Load::Ready(c)
                     }
                     Err(e) => Load::Failed(e),
                 };
-                self.collections.insert(id, load);
+                self.collections.insert(id.clone(), load);
+                self.pending_play_landed(&id, more);
             }
             Msg::Browse { page, result } => {
                 let load = match result {
@@ -913,14 +948,19 @@ impl State {
                 let Some(Load::Ready(c)) = self.collections.get_mut(&id) else { return false };
                 match result {
                     Ok(page) => {
-                        c.tracks.extend(page.items);
-                        match page.next {
-                            Some(next) if c.tracks.len() < TRACKS_CAP => self.request_tracks(&id, &next),
+                        c.tracks.extend(page.items.iter().cloned());
+                        let more = match page.next {
+                            Some(next) if c.tracks.len() < TRACKS_CAP => {
+                                self.request_tracks(&id, &next);
+                                true
+                            }
                             _ => {
                                 let c = c.clone();
                                 self.save_collection(&c);
+                                false
                             }
-                        }
+                        };
+                        self.grow_queue(&id, &page.items, more);
                     }
                     Err(e) => self.toast = Some(format!("Couldn't load the rest of the tracks: {e}")),
                 }

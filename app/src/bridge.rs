@@ -411,14 +411,8 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
         }
         self.call(cmd, on_reply);
     }
-    pub fn play_album(&self, album_id: &str, start_with: usize) {
-        self.send(json!({"cmd": "setQueue", "album": album_id, "startWith": start_with}));
-    }
     pub fn play_station(&self, station_id: &str) {
         self.send(json!({"cmd": "setQueue", "station": station_id}));
-    }
-    pub fn play_playlist(&self, playlist_id: &str, start_with: usize) {
-        self.send(json!({"cmd": "setQueue", "playlist": playlist_id, "startWith": start_with}));
     }
     /// 256 (best) or 64 (data saver). MusicKit resets it on every page load, so the app
     /// sends it again after each `ready`.
