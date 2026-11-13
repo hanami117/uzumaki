@@ -13,9 +13,6 @@ on:
     # New stable rustc (new key), and GitHub drops caches not used for 7 days.
     - cron: '17 4 * * 1,4'
   workflow_dispatch:
-    inputs:
-      # TEMPORARY (branch animated-art only, reverted before merging): a Linux build and test check.
-      test: { type: boolean, default: false, description: 'Build and run cargo test, save no cache' }
 
 permissions:
   contents: read
@@ -34,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
-      - run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends libasound2-dev libxkbcommon-dev pkg-config ${{ inputs.test && 'ffmpeg' || '' }}
+      - run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends libasound2-dev libxkbcommon-dev pkg-config
       - id: rust
         run: |
           rustup toolchain install stable --profile minimal && rustup default stable && rustc --version
@@ -50,11 +47,9 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ steps.rust.outputs.key }}-${{ hashFiles('Cargo.lock') }}
-      - if: inputs.test
-        run: cargo build --workspace --locked && cargo test --workspace --locked
-      - if: steps.cache.outputs.cache-hit != 'true' && !inputs.test
+      - if: steps.cache.outputs.cache-hit != 'true'
         run: cargo test --workspace --locked --no-run
-      - if: steps.cache.outputs.cache-hit != 'true' && !inputs.test
+      - if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
