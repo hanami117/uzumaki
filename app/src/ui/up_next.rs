@@ -178,6 +178,8 @@ fn station_label(name: &str) -> El {
 fn song_row(s: &State, song: &Song, key: String, up_next_index: Option<usize>, lap: bool, hover: rune::Color) -> El {
     let cur = key == "un-now";
     let (title_color, artist_color) = if cur { (PAL.accent, PAL.muted) } else if lap { (PAL.dim, PAL.dim) } else { (PAL.text, PAL.muted) };
+    // The song tables' star: filled when favourite, outline on hover when it can be.
+    let star = super::tracks::star_slot(s, song, &key);
     let mut r = row().key(key).role("button").label(song.title.clone()).w_full().min_h(52.0).px(12.0).gap(10.0).center_y()
         .radius(8.0).hover_group().cursor(Cursor::Pointer)
         .child(art(s, song.artwork.as_ref(), &song.album, Size::Small(40.0), 6.0, 0.0))
@@ -192,7 +194,8 @@ fn song_row(s: &State, song: &Song, key: String, up_next_index: Option<usize>, l
                     r
                 })
                 .child(text(song.artist.clone()).font(SMALL13).color(artist_color).truncate()),
-        );
+        )
+        .child(star);
     let menu_song = song.clone();
     let context = match up_next_index {
         Some(i) if !lap => super::menu::MenuContext::UpNext(i),
@@ -220,6 +223,10 @@ fn song_row(s: &State, song: &Song, key: String, up_next_index: Option<usize>, l
                 })
                 .child(icon(&icons::CLOSE, 14.0).color(PAL.muted)),
         );
+    }
+    if lap || up_next_index.is_none() {
+        // The remove button's slot, empty, so every row's star lines up.
+        r = r.child(el().w(28.0));
     }
     r
 }
@@ -351,7 +358,7 @@ pub fn list(s: &State, look: Look, cx: &rune::Cx<State>) -> El {
         for x in &s.queue.user { x.id.hash(&mut hs); }
         hs.finish()
     };
-    let version = (history_version, count, rows.u, user_ids, s.queue.pos, s.queue.lap_gen, rows.station.is_some(), rows.context_dups, s.queue.source.clone(), s.playback.song.as_ref().map(|x| x.id.clone()));
+    let version = (history_version, count, rows.u, user_ids, s.queue.pos, s.queue.lap_gen, rows.station.is_some(), rows.context_dups, s.queue.source.clone(), s.playback.song.as_ref().map(|x| x.id.clone()), s.favourites_rev());
     let key_rows = rows.clone();
     let list = col().key("un-rows").growth(GrowthSpec::default()).instant_changes().virtual_rows(
         count,
@@ -507,6 +514,32 @@ mod history_view_tests {
         assert!(y < -1000.0, "pill out of reach once History shows: {y}");
         // Older History rows are dimmer, down to the floor.
         assert!(history_opacity(1) > history_opacity(4) && history_opacity(40) == HISTORY_MIN_OPACITY);
+    }
+    #[test]
+    fn a_star_on_an_up_next_row_toggles_the_favourite_and_nothing_else() {
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n,_)| *n == "up-next-stars").unwrap().1)(&mut s);
+        let mut rt = Runtime::new(s, view, (340.0, 900.0), Env { system_dark: true, scale: 1.0 });
+        for _ in 0..5 { rt.frame(1.0/60.0); }
+        let up_next = rt.state.queue.up_next_len();
+        let playing = rt.state.playback.song.as_ref().map(|x| x.id.clone());
+        let star = |rt: &Runtime<State>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.rect);
+        // Starred in the scene: filled, and pressing it un-stars only that song.
+        let user1 = rt.state.queue.user[1].clone();
+        assert!(rt.state.is_favourite(&user1));
+        let r = star(&rt, "un1-user-1-star").expect("the starred row shows its star");
+        rt.pointer_down(r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        rt.pointer_up(r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        for _ in 0..3 { rt.frame(1.0/60.0); }
+        assert!(!rt.state.is_favourite(&user1), "un-starred");
+        assert_eq!(rt.state.queue.up_next_len(), up_next, "the row stays queued");
+        assert_eq!(rt.state.playback.song.as_ref().map(|x| x.id.clone()), playing, "and doesn't play");
+        // The list rebuilt: the same star now stars it again.
+        let r = star(&rt, "un1-user-1-star").expect("outline star, on hover");
+        rt.pointer_down(r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        rt.pointer_up(r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        for _ in 0..3 { rt.frame(1.0/60.0); }
+        assert!(rt.state.is_favourite(&user1), "starred again");
     }
     #[test]
     fn no_history_no_pill() {

@@ -33,6 +33,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("now-playing-cover-only", crate::ui::scene_np_cover_only),
     ("now-playing-queue", now_playing_queue),
     ("now-playing-queue-empty", now_playing_queue_empty),
+    ("up-next-stars", up_next_stars),
+    ("now-playing-queue-stars", now_playing_queue_stars),
     ("now-playing-no-art", now_playing_no_art),
     ("now-playing-no-art-lyrics", now_playing_no_art_lyrics),
     ("player-bar-no-art", player_bar_no_art),
@@ -1801,6 +1803,18 @@ fn fav_menu(s: &mut State) {
     if let Some(song) = song {
         crate::ui::scene_song_menu(s, song, [420.0, 300.0]);
     }
+}
+
+/// Up Next with stars: the playing song, a Play Next song, an upcoming one and one in History.
+fn up_next_stars(s: &mut State) {
+    up_next(s);
+    s.star_for_scene(&["ctx-1", "ctx-2", "user-1", "ctx-5"]);
+}
+
+/// The same in Now Playing's Up Next.
+fn now_playing_queue_stars(s: &mut State) {
+    now_playing_queue(s);
+    s.star_for_scene(&["ctx-1", "ctx-2", "user-1", "ctx-5"]);
 }
 
 /// The card menu of a favourite album.
