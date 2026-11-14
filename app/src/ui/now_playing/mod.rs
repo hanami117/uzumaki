@@ -249,49 +249,92 @@ fn transport(s: &State) -> El {
         .child(repeat_button(s, "np-repeat"))
 }
 
-/// Volume, then the lyrics and Up Next buttons for the column beside the cover (each lit while
-/// it has the column; they take turns).
-fn bottom_row(s: &State) -> El {
-    let lyrics = lyrics_on(s);
-    let queue = s.settings.now_playing_queue;
-    row().w_full().justify_center().center_y().gap(8.0)
-        .child(wheel_volume(
-            row().key("np-volume-row").gap(8.0).center_y()
-                .child(icon(icons::volume(s.playback.volume), 18.0).color(PAL.muted))
-                .child(el().w(160.0).child(volume_slider(s, "np-volume", PAL.text2))),
-        ))
-        .children(super::airplay::button(s, "np-airplay", PAL.text2).map(|b| b.ml(8.0)))
-        .child(
-            icon_button("np-lyrics-toggle", if lyrics { "Hide lyrics" } else { "Show lyrics" }, &LYRICS_ICON, 18.0,
-                if lyrics { PAL.accent } else { PAL.text2 })
-                .on_press(toggle_lyrics),
-        )
-        .child(
-            icon_button("np-queue-toggle", if queue { "Hide Up Next" } else { "Show Up Next" }, &icons::QUEUE, 18.0,
-                if queue { PAL.accent } else { PAL.text2 })
-                .on_press(toggle_queue),
-        )
-        .child(word_mode_button(s))
+/// The seek row's time columns: the volume row's speakers sit in the same slots, so its slider
+/// lines up with the scrubber.
+const TIME_W: f32 = 44.0;
+const TIME_GAP: f32 = 10.0;
+
+/// The stacked button row's widest: past a phone's width the cells would drift apart.
+const BUTTONS_MAX_W: f32 = 400.0;
+
+/// The volume slider (with the wheel on its whole row).
+fn volume(s: &State) -> El {
+    el().grow(1.0).min_w(0.0).child(volume_slider(s, "np-volume", PAL.text2))
 }
 
-/// Word-by-word / line-by-line highlight. Only shown with lyrics on and only when the song's
-/// lyrics carry word timing: while loading, with no lyrics, or with line timing only (Apple has
-/// word timing for some songs; on the others both modes look the same) there is nothing to
-/// switch, so it is absent. The setting itself is untouched and applies to the next song.
-fn word_mode_button(s: &State) -> El {
+/// Volume on its own row, as wide as the scrubber: a quiet speaker on the left (crossed out when
+/// muted), a loud one on the right (both only marks; the slider and the wheel set the volume).
+fn volume_row(s: &State) -> El {
+    let slot = |ic: &'static rune::Icon, end: bool| {
+        let r = row().w(TIME_W).center_y();
+        let r = if end { r } else { r.justify_end() };
+        r.child(icon(ic, 18.0).color(PAL.muted))
+    };
+    wheel_volume(
+        row().key("np-volume-row").w_full().gap(TIME_GAP).center_y()
+            .child(slot(if s.playback.volume < 0.005 { &icons::VOLUME_MUTE } else { &icons::VOLUME_LOW }, false))
+            .child(volume(s))
+            .child(slot(&icons::VOLUME_HIGH, true)),
+    )
+}
+
+/// The small buttons, in order: lyrics (with Words right after it while it applies), AirPlay
+/// (only where it exists), Up Next. Each lit while it has the column beside the cover (lyrics and
+/// Up Next take turns).
+fn secondary_buttons(s: &State) -> Vec<El> {
+    let lyrics = lyrics_on(s);
+    let queue = s.settings.now_playing_queue;
+    let mut v = vec![
+        icon_button("np-lyrics-toggle", if lyrics { "Hide lyrics" } else { "Show lyrics" }, &LYRICS_ICON, 18.0,
+            if lyrics { PAL.accent } else { PAL.text2 })
+            .on_press(toggle_lyrics),
+    ];
+    v.extend(word_mode_button(s));
+    v.extend(super::airplay::button(s, "np-airplay", PAL.text2));
+    v.push(
+        icon_button("np-queue-toggle", if queue { "Hide Up Next" } else { "Show Up Next" }, &icons::QUEUE, 18.0,
+            if queue { PAL.accent } else { PAL.text2 })
+            .on_press(toggle_queue),
+    );
+    v
+}
+
+/// Under the transport. `stacked` (a narrow window): volume on its own row, then the small
+/// buttons spread evenly in equal cells across the same width. Otherwise one row: the volume,
+/// lined up with the scrubber's left end, then the buttons at an even spacing.
+fn bottom_rows(s: &State, stacked: bool) -> El {
+    if stacked {
+        let cells = secondary_buttons(s).into_iter().map(|b| row().grow(1.0).justify_center().child(b));
+        return col().w_full().gap(14.0)
+            .child(volume_row(s))
+            .child(row().w_full().justify_center().child(row().key("np-buttons").w_full().max_w(BUTTONS_MAX_W).center_y().children(cells)));
+    }
+    row().w_full().center_y()
+        .child(wheel_volume(
+            row().key("np-volume-row").grow(1.0).min_w(0.0).gap(TIME_GAP).center_y()
+                .child(row().w(TIME_W).justify_end().child(icon(icons::volume(s.playback.volume), 18.0).color(PAL.muted)))
+                .child(volume(s)),
+        ))
+        .child(row().key("np-buttons").ml(20.0).gap(6.0).center_y().children(secondary_buttons(s)))
+}
+
+/// Word-by-word / line-by-line highlight, a round button like its neighbours (lit for word by
+/// word). Only shown with lyrics on and only when the song's lyrics carry word timing: while
+/// loading, with no lyrics, or with line timing only (Apple has word timing for some songs; on
+/// the others both modes look the same) there is nothing to switch, so it is absent. The setting
+/// itself is untouched and applies to the next song.
+fn word_mode_button(s: &State) -> Option<El> {
     if !lyrics_on(s) || !has_word_timing(s) {
-        return el().w(0.0);
+        return None;
     }
     let words = s.settings.lyrics_words;
-    let label = if words { "Words" } else { "Lines" };
     let help = if words { "Highlighting word by word (click for whole lines)" } else { "Highlighting whole lines (click for word by word)" };
-    el().key("np-word-mode").role("button").label("Lyrics highlight: word by word or line by line")
-        .help(help)
-        .focusable(true).h(26.0).px(10.0).radius(13.0).center().cursor(rune::Cursor::Pointer)
-        .fill(rune::Color::WHITE.alpha(0.08)).hover(crate::theme::ov(0.14))
-        .on_press(|s: &mut State| s.toggle_lyrics_words())
-        .child(text(label).font(TextStyle::new(12.0, 600.0)).color(PAL.text2))
-        .ml(4.0)
+    Some(
+        icon_button("np-word-mode", "Lyrics highlight: word by word or line by line", &WORDS_ICON, 18.0,
+            if words { PAL.accent } else { PAL.text2 })
+            .help(help)
+            .on_press(|s: &mut State| s.toggle_lyrics_words()),
+    )
 }
 
 /// The current song's loaded lyrics are synced with timing for single words.
@@ -305,6 +348,13 @@ fn queue_panel(s: &State, narrow: bool, cx: &Cx<State>) -> El {
     let c = if narrow { c.w_full().grow(1.0).min_h(0.0) } else { c.grow(1.0).max_w(520.0).h_full().pt(24.0) };
     c.child(super::up_next::list(s, super::up_next::Look::NowPlaying, cx))
 }
+
+/// Word by word: two lines of text broken into words, the first word lit (filled).
+static WORDS_ICON: rune::Icon = rune::Icon {
+    name: "np-words",
+    view: 24.0,
+    body: r#"<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M13 8.5h3.5M19.5 8.5h1.5M3.5 15.5h6M12.5 15.5h8"/><rect x="2.5" y="6" width="7.5" height="5" rx="1.5" fill="currentColor"/>"#,
+};
 
 static LYRICS_ICON: rune::Icon = rune::Icon {
     name: "np-lyrics",
@@ -355,7 +405,7 @@ pub fn overlay(s: &State, cx: &mut Cx<State>) -> Option<El> {
         let head = row().key("np-head").w_full().gap(14.0).center_y()
             .child(cover(s, song, 64.0))
             .child(el().grow(1.0).min_w(0.0).child(meta(s, song)));
-        let lower = col().key("np-low").w_full().gap(10.0).child(seek_row(s)).child(transport(s)).child(bottom_row(s));
+        let lower = col().key("np-low").w_full().gap(10.0).child(seek_row(s)).child(transport(s)).child(bottom_rows(s, true));
         col().w_full().h_full().px(20.0).pt(72.0).pb(20.0).gap(12.0)
             .child(head)
             .child(side_panel(s, cx, true))
@@ -371,7 +421,7 @@ pub fn overlay(s: &State, cx: &mut Cx<State>) -> Option<El> {
             .child(meta(s, song).mt(6.0))
             .child(seek_row(s))
             .child(transport(s))
-            .child(bottom_row(s));
+            .child(bottom_rows(s, narrow));
         if !side && lyrics_on(s) && !pending {
             left = left.child(
                 row().w_full().justify_center().child(
