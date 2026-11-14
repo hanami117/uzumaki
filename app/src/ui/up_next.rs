@@ -192,6 +192,15 @@ fn now_label(s: &State, look: Look) -> El {
     r.child(autoplay_button(s, look))
 }
 
+/// The ∞ buttons' tooltip: off, on, or on but paused while Repeat is on.
+pub fn autoplay_help(s: &State) -> &'static str {
+    match (s.settings.autoplay, s.playback.repeat) {
+        (false, _) => "AutoPlay is off",
+        (true, crate::state::Repeat::Off) => "AutoPlay is on: similar music keeps playing when the queue ends",
+        (true, _) => "AutoPlay is on, paused while Repeat is on",
+    }
+}
+
 /// ∞: turns AutoPlay on or off (the same setting as Settings → Playback → AutoPlay).
 pub fn autoplay_button(s: &State, look: Look) -> El {
     let on = s.settings.autoplay;
@@ -206,11 +215,7 @@ pub fn autoplay_button(s: &State, look: Look) -> El {
         (Look::Sidebar, true) => PAL.accent,
         (Look::NowPlaying, true) => PAL.text,
     };
-    let help = match (on, s.playback.repeat) {
-        (false, _) => "AutoPlay is off",
-        (true, crate::state::Repeat::Off) => "AutoPlay is on: similar music keeps playing when the queue ends",
-        (true, _) => "AutoPlay is on, paused while Repeat is on",
-    };
+    let help = autoplay_help(s);
     el().key("un-autoplay").role("switch").label("AutoPlay").focusable(true).size(34.0, 26.0).radius(13.0).center()
         .fill(fill).hover(hover).cursor(Cursor::Pointer).help(help)
         .on_press_tx(|s: &mut State, tx: &mut rune::Tx| {

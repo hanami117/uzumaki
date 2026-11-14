@@ -241,13 +241,41 @@ fn seek_row(s: &State) -> El {
         .child(time(fmt_time(dur), true))
 }
 
+/// Shuffle, previous, play, next, repeat, and AutoPlay's ∞ after repeat where AutoPlay applies
+/// (`autoplay_offered`). The two ends are always laid out, a button or an empty cell of the same
+/// size, so the row is symmetric and nothing moves when a station starts or ends and the ∞
+/// comes or goes: play stays under the middle of the cover and the scrubber.
 fn transport(s: &State) -> El {
+    let offered = s.autoplay_offered();
+    let end_cell = |b: Option<El>| el().size(TRANSPORT_BUTTON, TRANSPORT_BUTTON).children(b);
     row().w_full().justify_center().center_y().gap(10.0)
+        .child(end_cell(None))
         .child(shuffle_button(s, "np-shuffle"))
         .child(icon_button("np-prev", "Previous", &icons::PREV, 22.0, PAL.text).on_press(|s: &mut State| s.previous()))
         .child(play_pause(s, "np-play-pause", 56.0))
         .child(icon_button("np-next", "Next", &icons::NEXT, 22.0, PAL.text).on_press(|s: &mut State| s.next()))
         .child(repeat_button(s, "np-repeat"))
+        .child(end_cell(offered.then(|| autoplay_button(s))))
+}
+
+/// The size of a transport button (`player_bar::icon_button`).
+const TRANSPORT_BUTTON: f32 = 36.0;
+
+/// ∞ like shuffle and repeat: the accent while AutoPlay is on, dimmed while it is on but paused
+/// by Repeat, the quiet grey while off. The same setting and tooltips as Up Next's ∞.
+fn autoplay_button(s: &State) -> El {
+    let color = match (s.settings.autoplay, s.playback.repeat) {
+        (false, _) => PAL.text2,
+        (true, crate::state::Repeat::Off) => PAL.accent,
+        (true, _) => PAL.accent.alpha(0.45),
+    };
+    icon_button("np-autoplay", "AutoPlay", &icons::INFINITY, 18.0, color)
+        .role("switch")
+        .help(super::up_next::autoplay_help(s))
+        .on_press_tx(|s: &mut State, tx: &mut rune::Tx| {
+            s.toggle_autoplay();
+            tx.instant();
+        })
 }
 
 /// The seek row's time columns: the volume row's speakers sit in the same slots, so its slider
@@ -645,6 +673,43 @@ mod tests {
     use crate::state::State;
 
     const DT: f64 = 1.0 / 60.0;
+
+    /// The ∞ after repeat: there where AutoPlay applies, none (and no jump of the other
+    /// buttons) in local only mode or in a station, and the row stays symmetric either way.
+    #[test]
+    fn the_autoplay_button_sits_after_repeat_and_nothing_moves_without_it() {
+        let rects = |setup: fn(&mut State), width: f32| {
+            let mut s = State::offline();
+            (crate::scenes::SCENES.iter().find(|(n, _)| *n == "now-playing").unwrap().1)(&mut s);
+            setup(&mut s);
+            let mut rt = Runtime::new(s, crate::ui::view, (width, 860.0), Env { system_dark: true, scale: 1.0 });
+            rt.frame(DT);
+            let key = |k: &str| rt.presented(k).map(|(r, _)| r);
+            ["np-shuffle", "np-prev", "np-play-pause", "np-next", "np-repeat", "np-autoplay"].map(key)
+        };
+        for width in [1360.0, 420.0] {
+            let on = rects(|_| {}, width);
+            let off = rects(|s| s.settings.music_source = crate::settings::MusicSource::LocalOnly, width);
+            let (repeat, auto) = (on[4].expect("repeat"), on[5].expect("offered: the ∞ is there"));
+            assert!(auto[0] > repeat[0] + repeat[2], "{width}: right after repeat");
+            assert_eq!((auto[1], auto[2], auto[3]), (repeat[1], repeat[2], repeat[3]), "{width}: same size and line as repeat");
+            assert!(off[5].is_none(), "{width}: local only mode: no ∞");
+            assert_eq!(on[..5], off[..5], "{width}: the other buttons stay where they were");
+            // Play sits under the middle of the scrubber, with the ∞ there or not.
+            let seek = |setup: fn(&mut State)| {
+                let mut s = State::offline();
+                (crate::scenes::SCENES.iter().find(|(n, _)| *n == "now-playing").unwrap().1)(&mut s);
+                setup(&mut s);
+                let mut rt = Runtime::new(s, crate::ui::view, (width, 860.0), Env { system_dark: true, scale: 1.0 });
+                rt.frame(DT);
+                rt.presented("np-seek").unwrap().0
+            };
+            let mid = |r: [f32; 4]| r[0] + r[2] / 2.0;
+            let centre = mid(seek(|_| {}));
+            assert!((mid(on[2].unwrap()) - centre).abs() < 1.0, "{width}: play is centred with the ∞");
+            assert!((mid(off[2].unwrap()) - centre).abs() < 1.0, "{width}: and without it");
+        }
+    }
 
     /// Animated artwork arriving while Now Playing shows: the clip fades in over the still in
     /// the same box (nothing moves), and closing Now Playing takes it away. macOS's native
