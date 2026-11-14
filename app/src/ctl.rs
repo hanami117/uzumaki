@@ -166,7 +166,13 @@ impl Ctl {
                     s.ctl_airplay()
                 })
             }
-            R::AirPlay { to: uzumaki_ctl::AirPlayTo::Off } => self.act(|s| s.airplay_pick(None)),
+            R::AirPlay { to: uzumaki_ctl::AirPlayTo::Off } => self.try_act(|s| {
+                if !s.airplay.available {
+                    return Err(crate::state::airplay::AIRPLAY_UNAVAILABLE.to_string());
+                }
+                s.airplay_pick(None);
+                Ok(())
+            }),
             R::AirPlay { to: uzumaki_ctl::AirPlayTo::Name(name) } => self.try_act(move |s| s.airplay_pick_named(&name)),
             R::Quit => {
                 let reply = self.read(|s| Reply::Status(s.ctl_status()));

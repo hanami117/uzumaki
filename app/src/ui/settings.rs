@@ -269,6 +269,8 @@ fn available(s: &State, row: Row) -> bool {
         Row::AppleMusic | Row::Quality | Row::Lyrics | Row::AutoPlay => !s.local_only(),
         Row::NpCoverEffect => s.settings.appearance.np == NpBg::Cover,
         Row::AppIcon => cfg!(any(target_os = "linux", target_os = "macos")),
+        // No cliairplay helper (Linux for now): no AirPlay anywhere, the setting included.
+        Row::AirPlay => s.airplay.available,
         Row::Binding(i) => i < super::keys::BINDINGS.len(),
         _ => true,
     }
@@ -1384,6 +1386,17 @@ mod tests {
         s.settings.music_source = MusicSource::LocalOnly;
         set_query(&mut s, "lyrics");
         assert!(results(&s).iter().all(|(t, _)| *t == Tab::Keyboard), "{:?}", results(&s));
+    }
+
+    #[test]
+    fn the_airplay_row_shows_only_with_a_helper() {
+        let mut s = State::offline();
+        s.airplay.available = false;
+        set_query(&mut s, "airplay");
+        assert!(results(&s).iter().all(|(_, r)| *r != Row::AirPlay), "{:?}", results(&s));
+        s.airplay.available = true;
+        set_query(&mut s, "airplay");
+        assert!(results(&s).iter().any(|(_, r)| *r == Row::AirPlay), "{:?}", results(&s));
     }
 
     #[test]
