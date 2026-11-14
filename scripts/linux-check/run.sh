@@ -17,7 +17,7 @@ mkdir -p "$out"
 docker build -q -t uzu-linux-check "$here" >/dev/null
 docker run --rm -v "$src":/src:ro -v "$out":/out \
   -v uzu-linux-cargo:/cargo -v uzu-linux-target:/target \
-  -e STEPS="$steps" uzu-linux-check sh -c '
+  -e STEPS="$steps" -e WGPU_BACKEND="${WGPU_BACKEND:-gl}" uzu-linux-check sh -c '
 set -u
 mkdir -p /work "$HOME" && rsync -a --delete --exclude .git --exclude target --exclude node_modules /src/ /work/
 cd /work
@@ -28,7 +28,7 @@ for s in $STEPS; do
     test)   cmd="cargo test --workspace" ;;
     clippy) cmd="cargo clippy --workspace --all-targets" ;;
     node)   cmd="node --test bridge/*.test.js" ;;
-    snap)   cmd="sh -c \"for sc in album-motion up-next-autoplay; do UZUMAKI_MOTION=ffmpeg cargo run -q -p uzumaki -- --snap /out/\\\$sc.png --scene \\\$sc --size 1360x860 --scale 1 || exit 1; done\"" ;;
+    snap)   cmd="sh -c \"for sc in album-motion up-next-autoplay; do WGPU_BACKEND=${WGPU_BACKEND:-gl} UZUMAKI_MOTION=ffmpeg cargo run -q -p uzumaki -- --snap /out/\\\$sc.png --scene \\\$sc --size 1360x860 --scale 1 || exit 1; done\"" ;;
     *) echo "unknown step $s"; continue ;;
   esac
   echo "== $s: $cmd"

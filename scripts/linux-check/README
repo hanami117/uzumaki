@@ -3,3 +3,4 @@ Run: scripts/linux-check/run.sh [SOURCE_DIR] [build test clippy node snap]   (de
 It mounts the source read-only and copies it in; cargo's cache and target live in docker volumes uzu-linux-cargo and uzu-linux-target.
 Logs and snaps go to /tmp/linux-check/<folder name>/. Compare clippy by running it on main's checkout too.
 Remove the volumes with: docker volume rm uzu-linux-cargo uzu-linux-target
+Headless snaps need a software GL renderer that supports f16 shaders: Debian trixie's Mesa does (WGPU_BACKEND=gl, the default here); bookworm's lavapipe/llvmpipe does not.

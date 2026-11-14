@@ -1,10 +1,10 @@
 # Linux check image: native Debian (arm64 on Apple silicon, amd64 elsewhere) with what CI, install.sh and
 # the PKGBUILD need to build and test the workspace headless. Nothing here runs the real app.
-FROM rust:1-bookworm
+FROM rust:1-trixie
 RUN apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
       pkg-config build-essential git rsync ca-certificates curl xz-utils \
       libdbus-1-dev libasound2-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libssl-dev \
-      libudev-dev libx11-dev libxcb1-dev libvulkan1 mesa-vulkan-drivers \
+      libudev-dev libx11-dev libxcb1-dev libvulkan1 mesa-vulkan-drivers libegl1 libgl1-mesa-dri libgles2 \
       ffmpeg fonts-dejavu-core fonts-noto-core \
  && rm -rf /var/lib/apt/lists/*
 # Node for the bridge tests (plain node:test files, no Electron needed).
