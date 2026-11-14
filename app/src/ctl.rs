@@ -153,7 +153,13 @@ impl Ctl {
             R::Lyrics => self.on_ui(true, |s| s.ctl_lyrics()),
             R::AirPlay { to: uzumaki_ctl::AirPlayTo::List } => {
                 // Speakers are looked for only on request: for a moment here, as while the picker is open.
-                self.on_ui(false, |s| if s.airplay.available { Ok(s.airplay_ctl_browse(true)) } else { Err(crate::state::airplay::AIRPLAY_UNAVAILABLE.to_string()) })??;
+                self.on_ui(false, |s| {
+                    if !s.airplay.available {
+                        return Err(crate::state::airplay::AIRPLAY_UNAVAILABLE.to_string());
+                    }
+                    s.airplay_ctl_browse(true);
+                    Ok(())
+                })??;
                 std::thread::sleep(AIRPLAY_LOOK);
                 self.on_ui(false, |s| {
                     s.airplay_ctl_browse(false);
