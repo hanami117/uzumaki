@@ -52,12 +52,14 @@ pub fn open(s: &mut State, list: &str, key: &str, at: [f32; 2]) {
     }
     let songs = select::unique(rows.iter().map(|(_, x)| x.clone()).collect());
     s.ui.ctx = None;
+    crate::share::prepare();
     s.ui.menu = Some(MenuState { at, list: list.into(), id: key.into(), songs, rows, sub: false, share: false, context: MenuContext::List, confirm: false });
 }
 
 /// The menu for one song outside the page's lists: the player bar's, or an Up Next row's.
 pub fn open_song(s: &mut State, song: Song, context: MenuContext, at: [f32; 2]) {
     s.ui.ctx = None;
+    crate::share::prepare();
     let id = song.id.clone();
     s.ui.menu = Some(MenuState { at, list: String::new(), id, rows: Vec::new(), songs: vec![song], sub: false, share: false, context, confirm: false });
 }
@@ -77,14 +79,57 @@ fn playlists(s: &State) -> Vec<&Collection> {
 }
 
 pub(super) fn item(key: String, label: &str, chevron: bool) -> El {
+    item_led(key, label, chevron, None)
+}
+
+/// `item` with `lead` (a 16 pt icon) before the label.
+fn item_led(key: String, label: &str, chevron: bool, lead: Option<El>) -> El {
     let mut r = row().key(key).role("menuitem").label(label.to_string()).focusable(true).w_full().h(ITEM_H).px(12.0).gap(8.0)
         .center_y().radius(6.0).hover(crate::theme::ov(0.09)).press(crate::theme::ov(0.14))
-        .cursor(Cursor::Pointer)
-        .child(text(label.to_string()).font(TextStyle::new(13.5, 400.0)).color(PAL.text).truncate().grow(1.0).min_w(0.0));
+        .cursor(Cursor::Pointer);
+    if let Some(lead) = lead {
+        r = r.child(lead);
+    }
+    r = r.child(text(label.to_string()).font(TextStyle::new(13.5, 400.0)).color(PAL.text).truncate().grow(1.0).min_w(0.0));
     if chevron {
         r = r.child(icon(&icons::CHEVRON_RIGHT, 14.0).color(PAL.muted));
     }
     r
+}
+
+/// What a Share submenu item does with its choice (the clipboard or a service).
+pub(super) type ShareAct = std::rc::Rc<dyn Fn(&mut State, crate::share::Via)>;
+
+/// The Share submenu (macOS), as Apple Music's: Copy Link, then the system's sharing services
+/// with their own titles and icons (`share::services`, read when the menu opened). `x` is the
+/// main panel's left, `item_y` the Share item's top, both in window points. `act` closes the
+/// menu and sends the link on.
+pub(super) fn share_panel(x: f32, item_y: f32, win: [f32; 2], act: ShareAct) -> El {
+    use crate::share::Via;
+    let services = crate::share::services();
+    let seps = if services.is_empty() { 0.0 } else { 9.0 };
+    let h = 12.0 + (1 + services.len()) as f32 * ITEM_H + seps;
+    let sx = if x + 2.0 * W + 12.0 > win[0] { x - W - 4.0 } else { x + W + 4.0 };
+    let sy = (item_y - 6.0).min(win[1] - h - 8.0).max(8.0);
+    let a = act.clone();
+    let link = icon(&icons::LINK, 15.0).color(PAL.text2);
+    let mut p = panel(sx, sy).key("menu-share-panel").child(
+        item_led("share-copy-link".into(), "Copy Link", false, Some(el().size(16.0, 16.0).center().child(link)))
+            .on_press(move |s: &mut State| a(s, Via::Copy)),
+    );
+    if !services.is_empty() {
+        p = p.child(sep());
+    }
+    for (i, svc) in services.iter().enumerate() {
+        let a = act.clone();
+        let lead = match &svc.icon {
+            Some(px) => el().size(16.0, 16.0).pixels_fit(px, rune::SurfaceFit::Fill),
+            // Sample lists (tests, snaps off the Mac) have no icons: a plain tile keeps the column.
+            None => el().size(16.0, 16.0).radius(4.0).fill(PAL.chip_hover),
+        };
+        p = p.child(item_led(format!("share-service-{i}"), &svc.title, false, Some(lead)).on_press(move |s: &mut State| a(s, Via::Service(i))));
+    }
+    p
 }
 
 pub(super) fn panel(x: f32, y: f32) -> El {
@@ -299,23 +344,32 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
                     s.toast = Some("Couldn't open the link.".into());
                 }
             })));
-            // Share ▸ Copy Link, as in Apple's menus; the submenu opens like Add to Playlist's.
-            share = Some((p.next_y(), u2));
-            let shown = m.share;
-            let e = item("menu-share".into(), "Share", true).on_press(|s: &mut State| {
-                if let Some(m) = &mut s.ui.menu {
-                    m.share = true;
-                    m.sub = false;
-                }
-            });
-            let e = if shown { e.fill(crate::theme::ov(0.09)) } else { e };
-            p.add(e.on_hover_change(|s: &mut State, inside, tx: &mut rune::Tx| {
-                if let (true, Some(m)) = (inside, &mut s.ui.menu) {
-                    m.share = true;
-                    m.sub = false;
-                    tx.instant();
-                }
-            }));
+            if crate::share::submenu() {
+                // Share ▸ Copy Link and the system's services, as in Apple Music; the submenu
+                // opens like Add to Playlist's.
+                share = Some((p.next_y(), u2));
+                let shown = m.share;
+                let e = item("menu-share".into(), "Share", true).on_press(|s: &mut State| {
+                    if let Some(m) = &mut s.ui.menu {
+                        m.share = true;
+                        m.sub = false;
+                    }
+                });
+                let e = if shown { e.fill(crate::theme::ov(0.09)) } else { e };
+                p.add(e.on_hover_change(|s: &mut State, inside, tx: &mut rune::Tx| {
+                    if let (true, Some(m)) = (inside, &mut s.ui.menu) {
+                        m.share = true;
+                        m.sub = false;
+                        tx.instant();
+                    }
+                }));
+            } else {
+                // No system share menu here (Linux): Copy Link itself, where Share would be.
+                p.add(closes(item("menu-copy-link".into(), "Copy Link", false).on_press(move |s: &mut State| {
+                    s.ui.menu = None;
+                    s.copy_link(&crate::share::Link::Url(u2.clone()));
+                })));
+            }
         }
     }
     // Placed once its height is known (the Now Playing menu is much shorter than a list's).
@@ -361,11 +415,11 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
         );
     }
     if let (true, Some((share_y, url))) = (m.share, share) {
-        let sx = if x + 2.0 * W + 12.0 > win[0] { x - W - 4.0 } else { x + W + 4.0 };
-        let sy = (y + share_y - 6.0).min(win[1] - 60.0).max(8.0);
-        layer = layer.child(panel(sx, sy).child(item("menu-copy-link".into(), "Copy Link", false).on_press(move |s: &mut State| {
+        let link = crate::share::Link::Url(url);
+        let at = m.at;
+        layer = layer.child(share_panel(x, y + share_y, win, std::rc::Rc::new(move |s: &mut State, via| {
             s.ui.menu = None;
-            s.copy_link(&crate::share::Link::Url(url.clone()));
+            s.share_link(&link, via, at);
         })));
     }
     Some(layer)

@@ -219,6 +219,108 @@ pub fn resolved(kind: Kind, library_id: &str, title: &str, catalog: (String, Opt
     }
 }
 
+// ---- Where the link goes ----
+//
+// On macOS Share is a submenu as in Apple Music: Copy Link, then the system's sharing services for
+// a URL (AirDrop, Messages, Mail, Notes, Reminders, Freeform, extensions...) with their own titles
+// and icons (`share_mac.rs`). Elsewhere there is no system share menu, so the menus have a flat
+// Copy Link in Share's place.
+
+/// What to do with a link once it is known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Via {
+    /// The clipboard, with a "Link copied" toast.
+    Copy,
+    /// The system sharing service at this index of `services()` (macOS).
+    Service(usize),
+}
+
+/// A system sharing service as the Share submenu lists it.
+#[derive(Clone, Debug)]
+pub struct Service {
+    /// Its title as macOS gives it ("AirDrop", "Messages", ...).
+    pub title: String,
+    /// Its icon as RGBA, ready for Rune (rendered once, when the list is read).
+    pub icon: Option<rune::Pixels>,
+}
+
+thread_local! {
+    /// Scenes and tests: the menu style (`Some(false)`: the flat Copy Link of Linux) and the services listed.
+    static STYLE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    static FIXTURE: std::cell::RefCell<Option<std::rc::Rc<[Service]>>> = const { std::cell::RefCell::new(None) };
+    /// Tests: what was handed to a sharing service instead of performing it.
+    #[cfg(test)]
+    static PERFORMED: std::cell::RefCell<Vec<(usize, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Share is a submenu with the system services (macOS), else a flat Copy Link.
+pub fn submenu() -> bool {
+    STYLE.with(|s| s.get()).unwrap_or(cfg!(target_os = "macos"))
+}
+
+/// Scenes and tests: forces the submenu (true) or the flat item (false) on any system.
+pub fn set_submenu(on: Option<bool>) {
+    STYLE.with(|s| s.set(on));
+}
+
+/// Scenes and tests: the services the submenu lists, instead of the system's.
+pub fn set_services(list: Option<Vec<Service>>) {
+    FIXTURE.with(|f| *f.borrow_mut() = list.map(Into::into));
+}
+
+/// A stand-in list for tests and for snaps where the system's can't be read.
+pub fn sample_services() -> Vec<Service> {
+    ["AirDrop", "Mail", "Messages", "Notes", "Reminders", "Freeform"]
+        .into_iter()
+        .map(|t| Service { title: t.into(), icon: None })
+        .collect()
+}
+
+/// Reads the system's services if not read yet (macOS; a few hundred ms the first time, so the
+/// app warms it after start). Call it where a menu opens (a handler), never from the view.
+pub fn prepare() {
+    #[cfg(all(target_os = "macos", not(test)))]
+    if FIXTURE.with(|f| f.borrow().is_none()) {
+        crate::share_mac::load();
+    }
+}
+
+/// The services read so far (none before `prepare`, none outside macOS). Cheap: for the view.
+pub fn services() -> std::rc::Rc<[Service]> {
+    if let Some(list) = FIXTURE.with(|f| f.borrow().clone()) {
+        return list;
+    }
+    #[cfg(all(target_os = "macos", not(test)))]
+    if let Some(list) = crate::share_mac::loaded() {
+        return list;
+    }
+    std::rc::Rc::from(Vec::new())
+}
+
+/// Hands `url` to service `index` of `services()`; `at` is the point the menu opened at (window
+/// points), where macOS anchors the service's sheet. Tests only record it.
+pub fn perform(index: usize, url: &str, at: [f32; 2]) {
+    #[cfg(test)]
+    {
+        let _ = at;
+        PERFORMED.with(|p| p.borrow_mut().push((index, url.to_string())));
+    }
+    #[cfg(all(target_os = "macos", not(test)))]
+    {
+        let url = url.to_string();
+        // After this frame: the menu closes first, and the service's sheet comes up over the window.
+        dispatch2::DispatchQueue::main().exec_async(move || crate::share_mac::perform(index, &url, at));
+    }
+    #[cfg(not(any(test, target_os = "macos")))]
+    let _ = (index, url, at);
+}
+
+/// Tests: the (service, url) pairs handed over so far, emptied.
+#[cfg(test)]
+pub fn take_performed() -> Vec<(usize, String)> {
+    PERFORMED.with(|p| std::mem::take(&mut *p.borrow_mut()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

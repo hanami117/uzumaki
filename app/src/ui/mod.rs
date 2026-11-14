@@ -174,8 +174,11 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
     // Data that landed since the last frame makes this frame's commit instant: the lyrics
     // views and a pin drag then hold a change back a frame so it glides (see `State::landing`).
     let landed = crate::state::take_landed();
-    if let Some(url) = s.pending_copy.take() {
-        tx.copy(url);
+    if let Some(p) = s.pending_share.take() {
+        match p.via {
+            crate::share::Via::Copy => tx.copy(p.url),
+            crate::share::Via::Service(i) => crate::share::perform(i, &p.url, p.at),
+        }
     }
     let a = dnd::poll(s, t, landed, tx);
     let b = now_playing::poll(s, landed, tx);
