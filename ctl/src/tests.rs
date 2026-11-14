@@ -150,6 +150,13 @@ fn commands_against_a_fake_app() {
     assert!(r.is_ok());
     assert!(out.starts_with("Daft Punk - Lose Yourself to Dance\n[playing] #1/6   1:23/3:20 (41%)   "), "{out}");
 
+    // `status --line` is one line from a format; the fake plays "Lose Yourself to Dance" at 1:23/3:20.
+    let (r, out) = drive(&path, "status --format={artist}:{title}:{elapsed}/{duration}:{percent}%");
+    assert!(r.is_ok());
+    assert_eq!(out, "Daft Punk:Lose Yourself to Dance:1:23/3:20:41%\n");
+    let (_, out) = drive(&path, "status --line");
+    assert_eq!(out, "Daft Punk — Lose Yourself to Dance\n", "no format anywhere: the built-in one");
+
     // `next` answers before the song changes; the runner polls until it has.
     let (r, out) = drive(&path, "next");
     assert!(r.is_ok());

@@ -99,6 +99,7 @@ pub struct Chord {
 }
 
 impl Chord {
+    #[cfg(test)]
     pub const fn plain(code: KeyCode) -> Chord {
         Chord { code, ctrl: false, alt: false }
     }
@@ -269,7 +270,7 @@ impl Keymap {
         let mut taken = Vec::new();
         let mut out = String::new();
         let mut word = String::new();
-        let mut flush = |word: &mut String, out: &mut String, taken: &mut Vec<usize>| {
+        let flush = |word: &mut String, out: &mut String, taken: &mut Vec<usize>| {
             if !word.is_empty() {
                 match self.relabel_one(word, taken) {
                     Some(s) => out.push_str(&s),

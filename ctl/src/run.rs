@@ -466,6 +466,11 @@ pub fn run(inv: &Invocation, be: &mut dyn Backend, env: &Env, out: &mut dyn Writ
             let st = status(be)?;
             print_status(out, env, &st)
         }
+        Command::Line { format, idle } => {
+            let st = status(be)?;
+            let (format, _) = crate::config::format::Format::parse(format.as_deref().unwrap_or(crate::config::format::DEFAULT));
+            put(out, &crate::config::format::line(&format, idle.as_deref().unwrap_or(""), &st))
+        }
         Command::Play => act(be, env, out, Request::Play, false, q),
         Command::PlayNumber(i) => play_number(be, env, out, *i, q),
         Command::PlayCollection { kind, words, song } => {

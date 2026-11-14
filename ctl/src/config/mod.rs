@@ -10,6 +10,7 @@
 //!
 //! The reading of the file's text is in `toml`; each section has its own module.
 
+pub mod format;
 pub mod keys;
 pub mod theme;
 pub mod toml;
@@ -58,6 +59,9 @@ pub struct Config {
     pub warnings: Vec<Warning>,
     pub theme: Theme,
     pub keys: Keymap,
+    /// `[format] status_format` (`None`: [`format::DEFAULT`]) and `status_idle`.
+    pub status_format: Option<String>,
+    pub status_idle: String,
     /// `[theme] respect_no_color`: `NO_COLOR` turns the colours off.
     pub respect_no_color: bool,
 }
@@ -77,7 +81,7 @@ pub fn path_in(xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>
 
 impl Default for Config {
     fn default() -> Self {
-        Config { path: None, found: false, warnings: Vec::new(), theme: Theme::default(), keys: Keymap::default(), respect_no_color: true }
+        Config { path: None, found: false, warnings: Vec::new(), theme: Theme::default(), keys: Keymap::default(), status_format: None, status_idle: String::new(), respect_no_color: true }
     }
 }
 
@@ -158,6 +162,24 @@ impl Config {
 
     /// One accepted key of a known section.
     fn take(&mut self, e: &Entry, w: &mut Warnings, theme: &mut ThemeSpec) {
+        if e.section == "format" {
+            match e.key.as_str() {
+                "status_format" => {
+                    if let Some(text) = want_str(e, w) {
+                        for problem in format::Format::parse(text).1 {
+                            w.add(e.line, problem);
+                        }
+                        self.status_format = Some(text.to_string());
+                    }
+                }
+                "status_idle" => {
+                    if let Some(text) = want_str(e, w) {
+                        self.status_idle = text.to_string();
+                    }
+                }
+                _ => {}
+            }
+        }
         if e.section == "theme" {
             if e.key == "respect_no_color" {
                 if let Some(b) = want_bool(e, w) {
@@ -372,5 +394,12 @@ impl ThemeSpec {
             theme.set(role, colour);
         }
         theme
+    }
+}
+
+impl Config {
+    /// The format `uzu status --line` uses.
+    pub fn line_format(&self) -> &str {
+        self.status_format.as_deref().unwrap_or(format::DEFAULT)
     }
 }

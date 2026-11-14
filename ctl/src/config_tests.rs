@@ -489,3 +489,158 @@ fn help_and_hints_show_the_user_s_keys() {
     assert_eq!(map.relabel_hint("Space play/pause"), "Space play/pause");
     assert_eq!(map.relabel_hint("q quit"), "q quit");
 }
+
+// ------------------------------------------------------------------------------------ formats
+
+use crate::config::format::{self, Format};
+use uzumaki_ctl::{PlayState, RepeatMode, SongInfo, Status};
+
+fn playing() -> Status {
+    Status {
+        state: PlayState::Playing,
+        song: Some(SongInfo { id: "s".into(), title: "Instant Crush".into(), artist: "Daft Punk".into(), album: "Random Access Memories".into(), duration: 239.0, ..Default::default() }),
+        position: 72.0,
+        duration: 239.0,
+        volume: 0.82,
+        shuffle: true,
+        repeat: RepeatMode::All,
+        source: "Anima".into(),
+        index: Some(2),
+        count: 12,
+        queued: 3,
+        connected: true,
+        ..Default::default()
+    }
+}
+
+fn show(text: &str) -> String {
+    let (f, problems) = Format::parse(text);
+    assert!(problems.is_empty(), "{text}: {problems:?}");
+    f.render(&playing())
+}
+
+#[test]
+fn the_example_from_the_plan() {
+    assert_eq!(show("{artist} — {title} [{elapsed}/{duration}]"), "Daft Punk — Instant Crush [1:12/3:59]");
+}
+
+#[test]
+fn every_placeholder() {
+    assert_eq!(show("{artist}|{title}|{album}"), "Daft Punk|Instant Crush|Random Access Memories");
+    assert_eq!(show("{elapsed} {duration} {remaining}"), "1:12 3:59 2:47");
+    assert_eq!(show("{percent}% {volume}%"), "30% 82%");
+    assert_eq!(show("{state} {icon}"), "playing ▶");
+    assert_eq!(show("{shuffle} {repeat}"), "on all");
+    assert_eq!(show("{source} {index}/{count} +{queued}"), "Anima 3/12 +3");
+    // Every name in the list works (none is unknown).
+    for name in format::FIELDS {
+        assert!(Format::parse(&format!("{{{name}}}")).1.is_empty(), "{name}");
+    }
+}
+
+#[test]
+fn state_and_icon_follow_the_player() {
+    let mut st = playing();
+    for (state, word, icon) in [(PlayState::Paused, "paused", "‖"), (PlayState::Loading, "loading", "…"), (PlayState::Stopped, "stopped", "■")] {
+        st.state = state;
+        assert_eq!(Format::parse("{state} {icon}").0.render(&st), format!("{word} {icon}"));
+    }
+}
+
+#[test]
+fn widths_cut_with_an_ellipsis_and_braces_can_be_escaped() {
+    assert_eq!(show("{title:7}|"), "Instan…|");
+    assert_eq!(show("{title:40}|"), "Instant Crush|");
+    assert_eq!(show("{{{title}}}"), "{Instant Crush}");
+    assert_eq!(show("{ title : 7 }"), "Instan…");
+    // Wide characters count by columns.
+    let mut st = playing();
+    st.song.as_mut().unwrap().title = "夜に駆ける".into();
+    assert_eq!(Format::parse("{title:6}").0.render(&st), "夜に…");
+}
+
+#[test]
+fn what_is_not_there_is_empty_not_an_error() {
+    let st = Status::default();
+    assert_eq!(Format::parse("{artist}|{title}|{index}|{count}|{percent}|{elapsed}|{source}").0.render(&st), "||||0|0:00|");
+    let mut st = playing();
+    st.index = None;
+    st.count = 0;
+    assert_eq!(Format::parse("[{index}/{count}]").0.render(&st), "[/]");
+    st.duration = 0.0;
+    assert_eq!(Format::parse("{percent} {remaining}").0.render(&st), "0 0:00");
+    st.position = 500.0;
+    st.duration = 100.0;
+    assert_eq!(Format::parse("{percent} {remaining}").0.render(&st), "100 0:00");
+}
+
+#[test]
+fn mistakes_in_a_format_get_hints_and_still_render() {
+    let (f, p) = Format::parse("{artst} - {title}");
+    assert_eq!(p, ["unknown name '{artst}' in the format; did you mean {artist}?"]);
+    assert_eq!(f.render(&playing()), " - Instant Crush");
+    let (_, p) = Format::parse("{banana}");
+    assert!(p[0].contains("the names are artist, title, album"), "{p:?}");
+    let (f, p) = Format::parse("a { b");
+    assert!(p[0].contains("no closing '}'"), "{p:?}");
+    assert_eq!(f.render(&playing()), "a { b");
+    let (f, p) = Format::parse("a } b");
+    assert!(p[0].contains("lone '}'"));
+    assert_eq!(f.render(&playing()), "a } b");
+    for bad in ["{title:0}", "{title:x}", "{title:}", "{title:-3}"] {
+        let (f, p) = Format::parse(bad);
+        assert!(p[0].contains("width after ':'"), "{bad}: {p:?}");
+        assert_eq!(f.render(&playing()), "Instant Crush", "{bad}");
+    }
+}
+
+#[test]
+fn the_line_is_the_idle_text_when_nothing_plays() {
+    let (f, _) = Format::parse("{artist} — {title}");
+    assert_eq!(format::line(&f, "", &Status::default()), "");
+    assert_eq!(format::line(&f, "♪ idle", &Status::default()), "♪ idle");
+    assert_eq!(format::line(&f, "x", &playing()), "Daft Punk — Instant Crush");
+    // Stopped with a song still in the status counts as nothing playing.
+    let mut st = playing();
+    st.state = PlayState::Stopped;
+    assert_eq!(format::line(&f, "x", &st), "x");
+    // Paused still shows the song.
+    st.state = PlayState::Paused;
+    assert_eq!(format::line(&f, "x", &st), "Daft Punk — Instant Crush");
+}
+
+#[test]
+fn the_file_sets_the_format_and_the_idle_text() {
+    let cfg = Config::parse("[format]\nstatus_format = \"{icon} {title:20}\"\nstatus_idle = \"nothing\"\n");
+    assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    assert_eq!(cfg.line_format(), "{icon} {title:20}");
+    assert_eq!(cfg.status_idle, "nothing");
+    // No file, no format: the built-in one, and an empty idle text.
+    let cfg = Config::default();
+    assert_eq!(cfg.line_format(), format::DEFAULT);
+    assert_eq!(cfg.status_idle, "");
+    assert_eq!(Format::parse(format::DEFAULT).0.render(&playing()), "Daft Punk — Instant Crush");
+}
+
+#[test]
+fn a_wrong_placeholder_in_the_file_is_a_warning_on_its_line() {
+    let cfg = Config::parse("[format]\n# a comment\nstatus_format = \"{artst}\"\nstatus_idle = 5\n");
+    assert_eq!(lines(&cfg), ["line 3: unknown name '{artst}' in the format; did you mean {artist}?", "line 4: 'status_idle' needs text in quotes (got a whole number)"]);
+    // The format is kept (unknown names show nothing), so a bar still shows the rest.
+    assert_eq!(cfg.line_format(), "{artst}");
+}
+
+#[test]
+fn status_line_takes_the_files_format_unless_the_command_line_has_one() {
+    let cfg = Config::parse("[format]\nstatus_format = \"{title}\"\nstatus_idle = \"zzz\"\n");
+    let line = |args: &str| {
+        let args: Vec<String> = args.split_whitespace().map(String::from).collect();
+        crate::line_with(&crate::cli::parse(&args).unwrap().cmd, &cfg)
+    };
+    use crate::cli::Command;
+    assert_eq!(line("status --line"), Command::Line { format: Some("{title}".into()), idle: Some("zzz".into()) });
+    assert_eq!(line("status --format={artist}"), Command::Line { format: Some("{artist}".into()), idle: Some("zzz".into()) });
+    let plain = Config::default();
+    let cmd = crate::line_with(&crate::cli::parse(&["status".to_string(), "-l".to_string()]).unwrap().cmd, &plain);
+    assert_eq!(cmd, Command::Line { format: Some(format::DEFAULT.into()), idle: Some(String::new()) });
+}

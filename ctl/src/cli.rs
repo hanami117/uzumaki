@@ -7,6 +7,9 @@ use crate::args::{parse_seek, parse_song_number, parse_volume, split_song_number
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Status,
+    /// `uzu status --line` / `--format <text>`: one line from a format (for status bars). `None`
+    /// takes `status_format` / `status_idle` from `uzu.toml` (`main` fills them in).
+    Line { format: Option<String>, idle: Option<String> },
     Play,
     /// A bare `play <n>`: entry n (0-based) of the list `uzu` printed last.
     PlayNumber(usize),
@@ -95,6 +98,31 @@ fn song_numbers(name: &str, params: &[String]) -> Result<Vec<usize>, String> {
     params.iter().map(|p| parse_song_number(p)).collect()
 }
 
+/// `status`, alone or with `--line` / `-l` or `--format <text>` / `-f <text>` (also `--format=<text>`).
+fn status(params: &[String]) -> Result<Command, String> {
+    let mut format = None;
+    let mut line = false;
+    let mut it = params.iter();
+    while let Some(p) = it.next() {
+        if p == "--line" || p == "-l" {
+            line = true;
+        } else if p == "--format" || p == "-f" {
+            let Some(text) = it.next() else { return Err(format!("'status {p}' needs the format text, like \"{{artist}} - {{title}}\"")) };
+            format = Some(text.clone());
+        } else if let Some(text) = p.strip_prefix("--format=") {
+            format = Some(text.to_string());
+        } else {
+            return Err(format!("'status' takes --line or --format <text> (got '{p}')"));
+        }
+    }
+    if let Some(text) = &format {
+        if let Some(problem) = crate::config::format::Format::parse(text).1.first() {
+            return Err(format!("{problem}"));
+        }
+    }
+    Ok(if line || format.is_some() { Command::Line { format, idle: None } } else { Command::Status })
+}
+
 fn play(params: &[String]) -> Result<Command, String> {
     let (kind, words, explicit) = match params.split_first() {
         Some((a, rest)) if a == "-a" || a == "album" => (Kind::Album, rest, true),
@@ -134,7 +162,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let Some((name, p)) = rest.split_first() else { return Ok(Invocation { cmd: Command::Status, quiet }) };
     let name = name.as_str();
     let cmd = match name {
-        "status" => none(name, p).map(|_| Command::Status)?,
+        "status" => status(p)?,
         "play" => play(p)?,
         "pause" | "stop" => none(name, p).map(|_| Command::Pause)?,
         // `toggle` alone is play/pause; `toggle shuffle` / `toggle repeat` are what people try next.
@@ -220,6 +248,8 @@ the cover whenever there is room (about 70 columns), under it in a narrower one;
 In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (to the tray).
 
   status                      what plays now (the default when piped)
+  status --line               one line for a status bar, from status_format in uzu.toml
+                              (or --format \"{artist} - {title} [{elapsed}/{duration}]\")
   toggle                      play/pause (also: play, pause)
   next                        next song
   prev                        previous song (restarts it after 3 s)
@@ -292,6 +322,13 @@ mod tests {
         assert_eq!(p("quit"), Ok(Command::Quit));
         assert_eq!(p("restart"), Ok(Command::Restart));
         assert!(p("quit now").is_err() && p("restart now").is_err());
+        assert_eq!(p("status"), Ok(Command::Status));
+        assert_eq!(p("status --line"), Ok(Command::Line { format: None, idle: None }));
+        assert_eq!(p("status -l"), Ok(Command::Line { format: None, idle: None }));
+        assert_eq!(p("status --format={title}"), Ok(Command::Line { format: Some("{title}".into()), idle: None }));
+        assert_eq!(p("status -f {artist}"), Ok(Command::Line { format: Some("{artist}".into()), idle: None }));
+        assert!(p("status --format").is_err() && p("status now").is_err());
+        assert!(p("status --format {artst}").unwrap_err().contains("did you mean {artist}?"));
         assert_eq!(p("config"), Ok(Command::Config(ConfigShow::Check)));
         assert_eq!(p("config --default"), Ok(Command::Config(ConfigShow::Default)));
         assert_eq!(p("config --path"), Ok(Command::Config(ConfigShow::Path)));

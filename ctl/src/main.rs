@@ -102,12 +102,39 @@ fn execute(inv: &Invocation) -> Result<(), Fail> {
     if matches!(inv.cmd, Command::Watch | Command::Screen) {
         install_sigint();
     }
+    // `status --line` takes its text from uzu.toml unless the command line gave one.
+    let resolved;
+    let inv = if matches!(inv.cmd, Command::Line { .. }) {
+        let cfg = config::Config::load();
+        if !inv.quiet {
+            for w in &cfg.warnings {
+                eprintln!("uzu: uzu.toml {w}");
+            }
+        }
+        resolved = Invocation { cmd: line_with(&inv.cmd, &cfg), quiet: inv.quiet };
+        &resolved
+    } else {
+        inv
+    };
     let result = match Client::connect() {
         Ok(client) => dispatch(inv, client, &env, &mut out),
+        // A status bar polls this: with no app running it shows its idle text, it doesn't start one.
+        Err(_) if matches!(inv.cmd, Command::Line { .. }) => {
+            let idle = if let Command::Line { idle, .. } = &inv.cmd { idle.clone().unwrap_or_default() } else { String::new() };
+            writeln!(out, "{idle}").map_err(|e| Fail::err(e))
+        }
         Err(_) => start_then_run(inv, &env, &mut out),
     };
     let _ = out.flush();
     result
+}
+
+/// A `Line` command with the format and idle text of the config where the command line gave none.
+fn line_with(cmd: &Command, cfg: &config::Config) -> Command {
+    match cmd {
+        Command::Line { format, idle } => Command::Line { format: Some(format.clone().unwrap_or_else(|| cfg.line_format().to_string())), idle: Some(idle.clone().unwrap_or_else(|| cfg.status_idle.clone())) },
+        other => unreachable!("not a line command: {other:?}"),
+    }
 }
 
 /// `uzu config`: no app needed. With problems in the file it exits 1, so it can be used as a check.
