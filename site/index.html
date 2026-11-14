@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Uzumaki: a native Apple Music desktop client for Linux and macOS</title>
-<meta name="description" content="Uzumaki is a native Apple Music desktop client for Linux and macOS: fast, GPU-rendered and written in Rust. Synced lyrics, local files in the same queue, media keys, and a terminal client called uzu.">
+<title>Uzumaki: a free Apple Music app for Linux and macOS</title>
+<meta name="description" content="Uzumaki is a free, GPU-rendered Apple Music desktop app for Linux and macOS: synced lyrics, local files, media keys, a terminal player. AUR, AppImage, Homebrew.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0e0e11">
-<meta property="og:title" content="Uzumaki: a native Apple Music desktop client for Linux and macOS">
-<meta property="og:description" content="A native Apple Music desktop client for Linux and macOS, GPU-rendered and written in Rust. Synced lyrics, local files, media keys and a terminal client.">
+<meta property="og:title" content="Uzumaki: a free Apple Music app for Linux and macOS">
+<meta property="og:description" content="Uzumaki is a free, GPU-rendered Apple Music desktop app for Linux and macOS: synced lyrics, local files, media keys, a terminal player. AUR, AppImage, Homebrew.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://getuzumaki.app/">
 <meta property="og:site_name" content="Uzumaki">
@@ -19,11 +19,71 @@
 <meta property="og:image:alt" content="The Uzumaki logo">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@Uzumaki_App">
+<meta name="twitter:title" content="Uzumaki: a free Apple Music app for Linux and macOS">
+<meta name="twitter:description" content="Uzumaki is a free, GPU-rendered Apple Music desktop app for Linux and macOS: synced lyrics, local files, media keys, a terminal player. AUR, AppImage, Homebrew.">
+<meta name="twitter:image" content="https://getuzumaki.app/assets/og-v2.jpg">
 <link rel="canonical" href="https://getuzumaki.app/">
 <link rel="icon" href="assets/icon-coral.svg" type="image/svg+xml">
 <link rel="icon" href="favicon.ico" sizes="48x48">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="preload" as="image" href="assets/swirl.webp" type="image/webp">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "WebSite",
+   "@id": "https://getuzumaki.app/#website",
+   "url": "https://getuzumaki.app/",
+   "name": "Uzumaki",
+   "alternateName": [
+    "Uzumaki music player",
+    "Uzumaki for Apple Music"
+   ],
+   "inLanguage": "en"
+  },
+  {
+   "@type": "SoftwareApplication",
+   "@id": "https://getuzumaki.app/#app",
+   "name": "Uzumaki",
+   "alternateName": "Uzumaki music player",
+   "description": "A free, GPU-rendered Apple Music desktop client for Linux and macOS, written in Rust. Synced lyrics, local files in the same queue, media keys (MPRIS) and a terminal player, uzu. Streaming needs an Apple Music subscription.",
+   "url": "https://getuzumaki.app/",
+   "operatingSystem": "Linux, macOS",
+   "applicationCategory": "MultimediaApplication",
+   "softwareVersion": "0.2.0",
+   "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+   "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+   },
+   "downloadUrl": "https://github.com/hanami117/uzumaki/releases/latest",
+   "installUrl": "https://getuzumaki.app/#download",
+   "screenshot": "https://getuzumaki.app/assets/shots/np-bg-cover.webp",
+   "image": "https://getuzumaki.app/assets/og-v2.jpg",
+   "author": {
+    "@type": "Person",
+    "@id": "https://github.com/hanami117#person",
+    "name": "hanami117",
+    "url": "https://github.com/hanami117"
+   },
+   "publisher": {
+    "@id": "https://github.com/hanami117#person"
+   },
+   "isPartOf": {
+    "@id": "https://getuzumaki.app/#website"
+   },
+   "sameAs": [
+    "https://github.com/hanami117/uzumaki",
+    "https://x.com/Uzumaki_App",
+    "https://aur.archlinux.org/packages/uzumaki",
+    "https://aur.archlinux.org/packages/uzumaki-bin"
+   ]
+  }
+ ]
+}
+</script>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="demo/demo.css">
 <link rel="stylesheet" href="demo/mine.css">
@@ -262,7 +322,6 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
       <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
 <symbol id="i-star-o" viewBox="0 0 24 24"><path d="M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.8L12 16.9l-5.2 2.75 1-5.8-4.2-4.1 5.8-.85z"/></symbol>
     </defs></svg>
-  </div>
   </div>
 </section>
 
@@ -552,7 +611,7 @@ Juniper Vale - Small Rooms
 <section class="wrap dl" id="download" aria-labelledby="dl-h">
   <span class="eyebrow reveal"><b>05</b> &middot; download</span>
   <h2 id="dl-h" class="reveal">Get Uzumaki</h2>
-  <p class="lead reveal">The latest beta, version 0.2.0, is out for macOS and Linux. Free and open source under the GPL. Each system has an install page.</p>
+  <p class="lead reveal">The latest beta, version 0.2.0, is out for macOS and Linux. Free and open source under the GPL. Each system has an install page, and <a href="/apple-music-linux/">Apple Music on Linux</a> sums up what you get on Linux.</p>
   <div class="dl-grid stagger">
     <div class="card reveal" id="download-macos">
       <h3>macOS</h3>
@@ -662,7 +721,7 @@ Juniper Vale - Small Rooms
     </div>
     <p class="foot-social"><a href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg> Follow @Uzumaki_App on X</a></p>
     <p class="foot-contact">Install: <a href="/download/macos/">macOS</a> · <a href="/download/arch/">Arch Linux</a> · <a href="/download/linux/">AppImage · any distro</a> · <a href="/download/windows/">Windows (soon)</a></p>
-    <p class="foot-contact"><a href="https://github.com/hanami117/uzumaki">GitHub</a> · <a href="https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki/blob/main/LICENSE">GPL-3.0</a></p>
+    <p class="foot-contact"><a href="/apple-music-linux/">Apple Music on Linux</a> · <a href="https://github.com/hanami117/uzumaki">GitHub</a> · <a href="https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki/blob/main/LICENSE">GPL-3.0</a></p>
     <p class="foot-contact">Questions or ideas: <a href="mailto:hello@getuzumaki.app">hello@getuzumaki.app</a> · Help with the app: <a href="mailto:support@getuzumaki.app">support@getuzumaki.app</a></p>
     <p class="disclaimer">Uzumaki is an independent project, not affiliated with or endorsed by Apple. Apple Music is a trademark of Apple Inc.</p>
     <p class="fine">Uzumaki streams through Apple's own web player and does not download, convert or decrypt music.</p>
