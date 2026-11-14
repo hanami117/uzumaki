@@ -21,6 +21,7 @@ use crate::tray::TrayCtl;
 
 mod actions;
 mod artist;
+pub mod autoplay;
 pub use artist::More;
 pub mod ctl;
 mod edits;
@@ -379,6 +380,10 @@ pub enum Msg {
     AlbumPage { id: String, motion: Option<crate::motion::MotionArt>, result: Result<(Collection, Option<String>), String> },
     /// Go to Album for a library song: its library album id.
     AlbumOf { result: Result<Option<String>, String> },
+    /// AutoPlay's station for queue `run` (`state/autoplay.rs`).
+    AutoplayStation { run: u64, result: Result<String, String> },
+    /// Songs of AutoPlay's station for queue `run`.
+    AutoplayTracks { run: u64, result: Result<Vec<Song>, String> },
     /// The bridge's answer to `signOut`.
     SignedOut(Result<(), String>),
     /// Apple's storefront (id, name): a name lookup (`/v1/storefronts/{id}`).
@@ -548,6 +553,8 @@ pub struct State {
     pending_play: Option<PendingPlay>,
     /// The list playing now is still getting its later pages of songs (`grow_queue`).
     growing: Option<Growing>,
+    /// AutoPlay's station for the queue playing (`autoplay.rs`).
+    autoplay: autoplay::Run,
     /// Script hooks (`hooks.rs`): told after each change of song or play state.
     hooks: crate::hooks::Hooks,
     /// "Notify on song change" (`notify.rs`), fed by the hooks' song detector.
@@ -642,6 +649,7 @@ impl State {
             last_play: None,
             pending_play: None,
             growing: None,
+            autoplay: autoplay::Run::default(),
             hooks: if persist { crate::hooks::Hooks::for_app() } else { crate::hooks::Hooks::off() },
             notifier,
             starting: None,
@@ -927,6 +935,11 @@ impl State {
                 }
                 return self.apply_msg(Msg::Collection { id, result });
             }
+            Msg::AutoplayStation { run, result } => {
+                self.autoplay_station(run, result);
+                return false;
+            }
+            Msg::AutoplayTracks { run, result } => self.autoplay_tracks(run, result),
             Msg::AlbumOf { result } => match result {
                 Ok(Some(id)) => self.navigate(Route::Collection { kind: CollectionKind::Album, id }),
                 Ok(None) => self.toast = Some("Couldn't find the album of this song.".into()),
@@ -1059,6 +1072,8 @@ impl State {
                 // tell the bridge the order it should loop into.
                 if self.queue.plan_lap(self.playback.repeat) || self.queue.lap_gen != lap {
                     self.sync_upcoming();
+                } else {
+                    self.autoplay_check(); // fewer songs left: maybe time for AutoPlay's next ones
                 }
                 self.want_lyrics(&song);
                 if let Some(a) = &song.artwork {

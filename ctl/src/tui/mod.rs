@@ -10,7 +10,7 @@ mod lyrics;
 mod probe;
 mod search;
 mod showcase;
-mod sort;
+pub(crate) mod sort;
 mod table;
 mod view;
 #[cfg(test)]
@@ -70,11 +70,13 @@ pub fn run(client: Client, env: &Env) -> Result<(), Fail> {
 fn event_loop(terminal: &mut DefaultTerminal, be: &mut dyn Backend, env: &Env) -> io::Result<()> {
     let mut app = App::new(Instant::now(), Box::new(Threaded::new()));
     app.last = env.last.clone();
+    app.set_config(crate::config::Config::load(), Instant::now());
     app.cover = cover::Cover::new(cover::Mode::from_env());
     app.layout = showcase::Layout::from_env();
     if let Some(path) = sort::state_path() {
         app.use_sort_file(path);
     }
+    app.start(be, std::env::var_os("UZUMAKI_VIEW").is_some(), Instant::now());
     let result = screens(terminal, be, env, &mut app);
     // Take our kitty image out of the terminal before handing it back.
     app.cover.clear();

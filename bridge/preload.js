@@ -516,8 +516,29 @@ function pageBridge() {
     },
   };
 
+  // MusicKit's own AutoPlay would put Apple's suggestions into its queue, where the lazy queue's
+  // top-up expects the list's next song (`ahead()` would count them). The app runs AutoPlay itself
+  // (app/src/state/autoplay.rs) and hands its songs over like any other. music.apple.com turns
+  // MusicKit's on from its saved preference (`music-app-pref:autoplay-…`), so it goes off again
+  // whenever it changes. Off is MusicKit's default.
+  function keepOwnAutoplayOff(inst) {
+    const off = () => {
+      try {
+        if (inst.autoplayEnabled === true) {
+          inst.autoplayEnabled = false;
+          mark("MusicKit's own autoplay turned off (the app runs AutoPlay)");
+        }
+      } catch {}
+    };
+    off();
+    try {
+      inst.addEventListener('autoplayEnabledDidChange', off);
+    } catch {}
+  }
+
   function attach(inst) {
     mk = inst;
+    keepOwnAutoplayOff(inst);
     // Best quality Apple streams to the web player (AAC 256 kbps). MusicKit may otherwise drop to
     // 64 kbps on its own when it guesses the network is slow. `setBitrate` changes it.
     try {

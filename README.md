@@ -214,6 +214,7 @@ uzu status               # what plays now
 uzu toggle | next | prev # play/pause, next, previous
 uzu seek +10 | vol 60    # seek, volume
 uzu shuffle | repeat     # shuffle on/off, cycle repeat
+uzu autoplay [on|off]    # AutoPlay (∞): similar songs after the queue; prints the new state
 uzu playlists            # a numbered list; `uzu play <n|name>` plays one
 uzu albums [filter]      # `uzu play -a <n|name>` plays an album
 uzu search <words>       # then `uzu pick <n>`, `uzu insert <n>` (play next), `uzu add <n>`
@@ -223,6 +224,10 @@ uzu start | show | quit  # start hidden, show the window, quit
 
 A lone number, as in `uzu play 3`, picks from the last list that `uzu` printed. `uzu help` lists everything.
 Playlists and albums work offline from the disk cache.
+
+You can change the keys, the colours, the layout and a one-line status for a bar (`uzu status --line`)
+with an optional file, `~/.config/uzumaki/uzu.toml`. `uzu config --default` prints a commented one to start
+from. See [docs/UZU-CONFIG.md](docs/UZU-CONFIG.md).
 
 ## How it works
 

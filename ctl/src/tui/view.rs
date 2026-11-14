@@ -9,7 +9,7 @@ use std::time::Instant;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph};
 use ratatui_image::Image;
@@ -19,7 +19,7 @@ use super::app::{App, COMPACT_BELOW, Screen, chrome_top};
 use super::cover;
 use super::showcase::{self, Layout};
 use super::sort::{Key, View};
-use super::table::{self, Mark, Row, Table, bold, coral, dim, frame};
+use super::table::{self, Mark, Row, Table, bold, coral, dim, frame, paint, theme};
 use super::{browse, lyrics, search};
 use crate::fmt::{fmt_time, pad_right, plural, repeat_name, text_width, truncate};
 
@@ -53,7 +53,7 @@ pub fn state_glyph(state: Option<PlayState>) -> &'static str {
 pub(super) fn state_word(state: PlayState) -> (&'static str, &'static str, Style) {
     match state {
         PlayState::Playing => ("▶", "Playing", coral()),
-        PlayState::Paused => ("‖", "Paused", Style::default().fg(Color::Yellow)),
+        PlayState::Paused => ("‖", "Paused", paint(theme().paused)),
         PlayState::Loading => ("…", "Loading", dim()),
         PlayState::Stopped => ("■", "Stopped", dim()),
     }
@@ -111,6 +111,9 @@ fn fold_text(app: &App, now: Instant, level: usize) -> String {
         }
         if shuffle {
             flags.push("[z]");
+        }
+        if app.autoplay() == Some(true) {
+            flags.push("[\u{221e}]");
         }
         if !flags.is_empty() {
             out.push_str(&format!("  {}", flags.join(" ")));
@@ -199,7 +202,11 @@ fn status_lines(app: &App, width: usize, now: Instant) -> Vec<Line<'static>> {
     };
     let bar = bar_spans(app, width, now, true);
     vec![
-        Line::from(vec![label("Volume:"), Span::raw(volume)]),
+        match app.autoplay() {
+            // Only where the app offers it (an older app, local files and stations don't).
+            Some(on) => Line::from(vec![label("Volume:"), Span::raw(pad_right(&volume, 6)), Span::raw(if on { "AutoPlay: \u{221e}" } else { "AutoPlay: off" })]),
+            None => Line::from(vec![label("Volume:"), Span::raw(volume)]),
+        },
         Line::from(vec![label("Status:"), status]),
         Line::from(vec![label("Repeat:"), Span::raw(pad_right(repeat_name(repeat), 8)), Span::raw(format!("Shuffle: {}", if shuffle { "on" } else { "off" }))]),
         Line::from(vec![label("Time:"), Span::raw(time_text(app, now))]),
@@ -405,6 +412,7 @@ const HELP_COMMON: &[(&str, &str)] = &[
     ("f  b", "seek +10 s / -10 s"),
     ("+  -", "volume +5% / -5%"),
     ("s  r", "shuffle / repeat (off, all, one)"),
+    ("A", "AutoPlay (\u{221e}) on / off"),
     ("1 2 3 4 5", "queue/playlists/search/albums/lyrics"),
     ("i", "show / hide the cover"),
     ("F", "view: normal, showcase, solo (Esc: normal)"),
@@ -468,10 +476,10 @@ pub(super) fn help_rect(area: Rect, screen: Screen) -> Rect {
     Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
 }
 
-fn help_overlay(f: &mut Frame, area: Rect, screen: Screen) {
+fn help_overlay(f: &mut Frame, area: Rect, screen: Screen, app: &App) {
     let keys: Vec<_> = help_for(screen).iter().chain(HELP_COMMON).collect();
     let r = help_rect(area, screen);
-    let lines: Vec<Line> = keys.iter().map(|(k, d)| Line::from(vec![Span::styled(pad_right(k, 16), coral()), Span::raw(*d)])).collect();
+    let lines: Vec<Line> = keys.iter().map(|(k, d)| Line::from(vec![Span::styled(pad_right(&truncate(&app.config.keys.relabel(k), 15), 16), coral()), Span::raw(*d)])).collect();
     f.render_widget(Clear, r);
     f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(format!(" Keys: {} ", screen.name())).border_style(frame())), r);
 }
@@ -524,11 +532,12 @@ fn overlays(f: &mut Frame, app: &App) {
         sort_popup(f, area, app, view);
     }
     if app.help {
-        help_overlay(f, area, app.screen);
+        help_overlay(f, area, app.screen, app);
     }
 }
 
 pub fn draw(f: &mut Frame, app: &App, now: Instant) {
+    table::set_look(app.config.theme, app.config.layout.columns);
     let area = f.area();
     let (w, h) = (area.width, area.height);
     // The screenshot views (`F`), on the queue screen; the showcase needs room, else this one.
@@ -612,7 +621,12 @@ pub fn draw(f: &mut Frame, app: &App, now: Instant) {
     // The bottom border carries the key hints (drawn last: it owns the last row).
     let buf = f.buffer_mut();
     hline(buf, h - 1, w, ("╰", "╯"));
-    let text = hint_text(hints(app), (w as usize).saturating_sub(6));
+    let text = if app.config.keys.is_default() || app.filter_text().is_some() || (app.screen == Screen::Search && app.search.typing) {
+        hint_text(hints(app), (w as usize).saturating_sub(6))
+    } else {
+        let items: Vec<String> = hints(app).iter().map(|h| app.config.keys.relabel_hint(h)).collect();
+        hint_text(&items.iter().map(String::as_str).collect::<Vec<_>>(), (w as usize).saturating_sub(6))
+    };
     if !text.is_empty() {
         put(buf, 2, h - 1, &format!(" {text} "), w as usize - 4, dim());
     }

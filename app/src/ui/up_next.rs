@@ -1,7 +1,8 @@
 //! One scrollable Up Next list shared by the sidebar and full-screen player.
 //! Confirmed session History sits above Now Playing; initial placement hides it above the top.
-//! After current come manually queued songs, the context and (repeat all) the next lap.
-//! Stations show an explanation instead of upcoming tracks picked by Apple.
+//! After current come manually queued songs, the context and (repeat all) the next lap, or
+//! (repeat off) AutoPlay's suggestions. Stations show an explanation instead of upcoming tracks
+//! picked by Apple. The "Now Playing" label carries the AutoPlay (∞) switch, as Apple's queue does.
 //! Virtualised, since the list context can be thousands of songs.
 
 use rune::{Cursor, El, GrowthSpec, Live, ScrollPos, ScrollSpec, TextStyle, col, el, icon, row, text};
@@ -40,6 +41,10 @@ enum Item {
     Repeat,
     /// Index in `queue.next_lap_songs()`.
     Lap(usize),
+    /// The "AutoPlay" header: similar music will keep playing.
+    AutoPlay,
+    /// Index in `queue.autoplay`.
+    Auto(usize),
     /// The radio station's header: songs are picked as you listen.
     Station,
     /// Index in `queue.station_played()`.
@@ -47,10 +52,10 @@ enum Item {
     Gap,
 }
 
-/// What row `i` of the list is, given `u` user songs, `rest` context songs and `lap` songs of the
-/// next lap (`current`: the list opens with the playing song). `station`: on a radio station,
-/// with that many songs played so far.
-fn item_at(i: usize, current: bool, u: usize, rest: usize, lap: usize, station: Option<usize>) -> Item {
+/// What row `i` of the list is, given `u` user songs, `rest` context songs, `lap` songs of the
+/// next lap and `auto` AutoPlay songs (`current`: the list opens with the playing song).
+/// `station`: on a radio station, with that many songs played so far.
+fn item_at(i: usize, current: bool, u: usize, rest: usize, lap: usize, auto: usize, station: Option<usize>) -> Item {
     let mut k = i;
     if current {
         match k {
@@ -89,6 +94,16 @@ fn item_at(i: usize, current: bool, u: usize, rest: usize, lap: usize, station: 
             return Item::Lap(k);
         }
         k -= lap;
+    }
+    if auto > 0 {
+        if k == 0 {
+            return Item::AutoPlay;
+        }
+        k -= 1;
+        if k < auto {
+            return Item::Auto(k);
+        }
+        k -= auto;
     }
     if let Some(played) = station {
         if k == 0 {
@@ -166,6 +181,56 @@ fn repeat_label() -> El {
         .child(text("Repeat").font(SECTION11).color(PAL.dim).truncate().min_w(0.0))
 }
 
+/// The "Now Playing" label, with the AutoPlay switch on its right where AutoPlay can play
+/// (Apple Music, not a station): coral while on, like Apple's ∞ button.
+fn now_label(s: &State, look: Look) -> El {
+    let r = row().w_full().pl(20.0).pr(12.0).pt(10.0).pb(0.0).gap(6.0).center_y()
+        .child(text("Now Playing").font(SECTION11).color(PAL.dim).truncate().min_w(0.0).grow(1.0));
+    if !s.autoplay_offered() {
+        return r.min_h(36.0);
+    }
+    r.child(autoplay_button(s, look))
+}
+
+/// ∞: turns AutoPlay on or off (the same setting as Settings → Playback → AutoPlay).
+pub fn autoplay_button(s: &State, look: Look) -> El {
+    let on = s.settings.autoplay;
+    let (fill, hover) = match (look, on) {
+        (Look::Sidebar, true) => (PAL.accent.alpha(0.16), PAL.accent.alpha(0.24)),
+        (Look::Sidebar, false) => (rune::Color::TRANSPARENT, PAL.chip_hover),
+        (Look::NowPlaying, true) => (crate::theme::ov(0.16), crate::theme::ov(0.24)),
+        (Look::NowPlaying, false) => (rune::Color::TRANSPARENT, crate::theme::ov(0.12)),
+    };
+    let color = match (look, on) {
+        (_, false) => PAL.muted,
+        (Look::Sidebar, true) => PAL.accent,
+        (Look::NowPlaying, true) => PAL.text,
+    };
+    let help = match (on, s.playback.repeat) {
+        (false, _) => "AutoPlay is off",
+        (true, crate::state::Repeat::Off) => "AutoPlay is on: similar music keeps playing when the queue ends",
+        (true, _) => "AutoPlay is on, paused while Repeat is on",
+    };
+    el().key("un-autoplay").role("switch").label("AutoPlay").focusable(true).size(34.0, 26.0).radius(13.0).center()
+        .fill(fill).hover(hover).cursor(Cursor::Pointer).help(help)
+        .on_press_tx(|s: &mut State, tx: &mut rune::Tx| {
+            s.toggle_autoplay();
+            tx.instant();
+        })
+        .child(icon(&icons::INFINITY, 18.0).color(color))
+}
+
+/// The "AutoPlay" header before the suggested songs, as Apple words it.
+fn autoplay_label() -> El {
+    row().key("un-autoplay-label").w_full().px(20.0).pt(16.0).pb(6.0).gap(8.0).center_y()
+        .child(icon(&icons::INFINITY, 15.0).color(PAL.accent))
+        .child(
+            col().grow(1.0).min_w(0.0).gap(1.0)
+                .child(text("AutoPlay").font(SECTION11).color(PAL.dim).truncate().min_w(0.0))
+                .child(text("Similar music will keep playing").font(SMALL13).color(PAL.dim).truncate().min_w(0.0)),
+        )
+}
+
 /// The radio station's header, in place of the Up Next the station doesn't have.
 fn station_label(name: &str) -> El {
     row().key("un-station").w_full().px(20.0).pt(16.0).pb(6.0).gap(8.0)
@@ -175,9 +240,15 @@ fn station_label(name: &str) -> El {
 
 /// `lap`: a song of the next lap or of the station's history: dimmed, no remove button, and its
 /// menu has no "Remove". Then `up_next_index` is the number `play_up_next` takes.
+/// `auto`: an AutoPlay suggestion (`queue.autoplay[k]`): dimmed like `lap`, but its remove
+/// button takes it off the suggestions.
 fn song_row(s: &State, song: &Song, key: String, up_next_index: Option<usize>, lap: bool, hover: rune::Color) -> El {
+    song_row_with(s, song, key, up_next_index, lap, None, hover)
+}
+
+fn song_row_with(s: &State, song: &Song, key: String, up_next_index: Option<usize>, lap: bool, auto: Option<usize>, hover: rune::Color) -> El {
     let cur = key == "un-now";
-    let (title_color, artist_color) = if cur { (PAL.accent, PAL.muted) } else if lap { (PAL.dim, PAL.dim) } else { (PAL.text, PAL.muted) };
+    let (title_color, artist_color) = if cur { (PAL.accent, PAL.muted) } else if lap || auto.is_some() { (PAL.dim, PAL.dim) } else { (PAL.text, PAL.muted) };
     // The song tables' star: filled when favourite, outline on hover when it can be.
     let star = super::tracks::star_slot(s, song, &key);
     let mut r = row().key(key).role("button").label(song.title.clone()).w_full().min_h(52.0).px(12.0).gap(10.0).center_y()
@@ -202,6 +273,22 @@ fn song_row(s: &State, song: &Song, key: String, up_next_index: Option<usize>, l
         _ => super::menu::MenuContext::NowPlaying,
     };
     r = r.on_secondary_press(move |s: &mut State, p, _tx: &mut rune::Tx| super::menu::open_song(s, menu_song.clone(), context, [p.x, p.y]));
+    if let (Some(k), Some(i)) = (auto, up_next_index) {
+        // Plays the suggestion now (the ones before it are skipped), or takes it off the list.
+        r = r.hover(hover).focusable(true).on_press_tx(move |s: &mut State, tx: &mut rune::Tx| {
+            s.play_up_next(i);
+            tx.instant();
+        }).child(
+            el().key(format!("un-ax-{k}")).role("button").label("Remove from AutoPlay").focusable(true).size(28.0, 28.0).radius(14.0).center()
+                .hover(crate::theme::ov(0.1)).cursor(Cursor::Pointer).group_opacity(0.0, 1.0)
+                .on_press_tx(move |s: &mut State, tx: &mut rune::Tx| {
+                    s.remove_autoplay(k);
+                    tx.instant();
+                })
+                .child(icon(&icons::CLOSE, 14.0).color(PAL.muted)),
+        );
+        return r;
+    }
     if lap {
         // Plays the song (and makes its lap the current one, or replays it from the station's
         // history); nothing to remove or move here.
@@ -237,6 +324,7 @@ struct Rows {
     u: usize,
     rest: usize,
     lap: usize,
+    auto: usize,
     station: Option<usize>,
     /// History rows (its label included) above Now Playing.
     prefix: usize,
@@ -267,6 +355,7 @@ impl Rows {
         let u = s.queue.user.len();
         let rest = s.queue.up_next_len().saturating_sub(u);
         let lap = s.queue.next_lap_songs().len();
+        let auto = s.queue.autoplay.len();
         let station = s.queue.station.as_ref().map(|_| 0);
         let history = s.history_indices();
         let h = history.len();
@@ -275,6 +364,7 @@ impl Rows {
             + if u > 0 { 1 + u } else { 0 }
             + if rest > 0 { 1 + rest } else { 0 }
             + if lap > 0 { 1 + lap } else { 0 }
+            + if auto > 0 { 1 + auto } else { 0 }
             + station.map_or(0, |p| 1 + p);
         // A short station/empty upcoming list still needs enough trailing space to put current
         // at the top. Virtual blank rows cost no off-screen layout and keep row geometry exact.
@@ -291,11 +381,11 @@ impl Rows {
             c.set((at.0, at.1, dups));
             dups
         });
-        Rows { current, u, rest, lap, station, prefix, history, filled, count, user_dups, context_dups }
+        Rows { current, u, rest, lap, auto, station, prefix, history, filled, count, user_dups, context_dups }
     }
 
     fn item(&self, i: usize) -> Item {
-        item_at(i - self.prefix, self.current, self.u, self.rest, self.lap, self.station)
+        item_at(i - self.prefix, self.current, self.u, self.rest, self.lap, self.auto, self.station)
     }
 
     /// Row `i`'s key. Stable for a song while it stays in its part of the list, wherever it
@@ -323,6 +413,8 @@ impl Rows {
             }
             Item::Repeat => "label-repeat".into(),
             Item::Lap(k) => format!("l{k}-{}", s.queue.next_lap_songs().get(k).map_or("", |x| x.id.as_str())).into(),
+            Item::AutoPlay => "label-autoplay".into(),
+            Item::Auto(k) => format!("a-{}", s.queue.autoplay.get(k).map_or("", |x| x.id.as_str())).into(),
             Item::Station => "label-station".into(),
             Item::Played(k) => format!("p-{}", s.queue.station_played().get(k).map_or("", |x| x.id.as_str())).into(),
             Item::Gap => format!("gap-{}", i - self.filled).into(),
@@ -356,6 +448,9 @@ pub fn list(s: &State, look: Look, cx: &rune::Cx<State>) -> El {
         use std::hash::{Hash, Hasher};
         let mut hs = std::collections::hash_map::DefaultHasher::new();
         for x in &s.queue.user { x.id.hash(&mut hs); }
+        // AutoPlay's songs, and its switch on the Now Playing label.
+        for x in &s.queue.autoplay { x.id.hash(&mut hs); }
+        (s.settings.autoplay, s.autoplay_offered(), s.playback.repeat.bridge_name()).hash(&mut hs);
         hs.finish()
     };
     let version = (history_version, count, rows.u, user_ids, s.queue.pos, s.queue.lap_gen, rows.station.is_some(), rows.context_dups, s.queue.source.clone(), s.playback.song.as_ref().map(|x| x.id.clone()), s.favourites_rev());
@@ -382,7 +477,7 @@ pub fn list(s: &State, look: Look, cx: &rune::Cx<State>) -> El {
             } else if i >= rows.filled {
                 col().h(24.0)
             } else { match rows.item(i) {
-                Item::Label(Label::Now) => label("Now Playing".into()),
+                Item::Label(Label::Now) => now_label(s, look),
                 Item::Label(Label::Next) => label("Playing Next".into()),
                 Item::Label(Label::Continue) => label(if s.queue.source.is_empty() { "Up Next".to_string() } else { format!("Continue playing from {}", s.queue.source) }),
                 // The song playing (a Play Next song isn't `queue.current()`, the list's place).
@@ -399,10 +494,15 @@ pub fn list(s: &State, look: Look, cx: &rune::Cx<State>) -> El {
                     Some(song) => row().w_full().px(8.0).py(1.0).child(song_row(s, song, format!("unl{k}-{}", song.id), Some(s.queue.up_next_len() + k), true, hover)),
                     None => col().h(1.0),
                 },
+                Item::AutoPlay => autoplay_label(),
+                Item::Auto(k) => match s.queue.autoplay.get(k) {
+                    Some(song) => row().w_full().px(8.0).py(1.0).child(song_row_with(s, song, format!("una{k}-{}", song.id), Some(s.queue.autoplay_offset() + k), false, Some(k), hover)),
+                    None => col().h(1.0),
+                },
                 Item::Station => station_label(&s.queue.station.as_ref().map_or(String::new(), |r| r.name.clone())),
                 Item::Played(k) => match s.queue.station_played().get(k) {
                     Some(song) => {
-                        let n = s.queue.up_next_len() + s.queue.next_lap_songs().len() + k;
+                        let n = s.queue.autoplay_offset() + s.queue.autoplay.len() + k;
                         row().w_full().px(8.0).py(1.0).child(song_row(s, song, format!("unp{k}-{}", song.id), Some(n), true, hover))
                     }
                     None => col().h(1.0),
@@ -455,13 +555,19 @@ mod tests {
     use super::*;
 
     fn kinds(n: usize, current: bool, u: usize, rest: usize, lap: usize, station: Option<usize>) -> String {
+        kinds_auto(n, current, u, rest, lap, 0, station)
+    }
+
+    fn kinds_auto(n: usize, current: bool, u: usize, rest: usize, lap: usize, auto: usize, station: Option<usize>) -> String {
         (0..n)
-            .map(|i| match item_at(i, current, u, rest, lap, station) {
+            .map(|i| match item_at(i, current, u, rest, lap, auto, station) {
                 Item::Label(_) => 'L',
                 Item::Current => 'C',
                 Item::Song(_) => 's',
                 Item::Repeat => 'R',
                 Item::Lap(_) => 'l',
+                Item::AutoPlay => 'A',
+                Item::Auto(_) => 'a',
                 Item::Station => 'S',
                 Item::Played(_) => 'p',
                 Item::Gap => '.',
@@ -477,6 +583,16 @@ mod tests {
         assert_eq!(kinds(8, false, 0, 0, 3, None), "Rlll....");
         // Repeat off: no divider.
         assert_eq!(kinds(5, false, 0, 2, 0, None), "Lss..");
+    }
+
+    #[test]
+    fn autoplay_follows_the_rest_of_the_list_under_its_header() {
+        // Now Playing + song, 1 queued, 2 left of the list, then AutoPlay's header and 3 songs.
+        assert_eq!(kinds_auto(13, true, 1, 2, 0, 3, None), "LCLsLssAaaa..");
+        // The list played out (an AutoPlay song plays): the header right after the playing song.
+        assert_eq!(kinds_auto(7, true, 0, 0, 0, 2, None), "LCAaa..");
+        // AutoPlay off or nothing suggested yet: no header.
+        assert_eq!(kinds_auto(5, true, 0, 1, 0, 0, None), "LCLs.");
     }
 
     #[test]

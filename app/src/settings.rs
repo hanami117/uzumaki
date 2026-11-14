@@ -266,6 +266,9 @@ pub struct Settings {
     /// Resume where you left off: the last song, its position and the queue come back paused
     /// at the next start (Settings → Playback; `resume.rs`). On by default.
     pub resume_playback: bool,
+    /// AutoPlay: when the queue ends, similar songs keep playing (Settings → Playback, the ∞
+    /// button in Up Next; `state/autoplay.rs`). On by default, as in Apple Music.
+    pub autoplay: bool,
     /// Pictures the user chose for playlists, by playlist id: shown only in Uzumaki (Apple's
     /// web API can't change a playlist's artwork). `file://` artwork in `playlist_art_dir`.
     pub playlist_art: BTreeMap<String, Artwork>,
@@ -323,6 +326,7 @@ impl Default for Settings {
             notify_song_change: false,
             check_updates: true,
             resume_playback: true,
+            autoplay: true,
             playlist_art: BTreeMap::new(),
             music_source: MusicSource::Apple,
             onboarded: None,

@@ -115,6 +115,13 @@ impl Ctl {
             R::Volume { to } => self.act(move |s| s.ctl_volume(to)),
             R::Shuffle { on } => self.act(move |s| s.set_shuffle(on.unwrap_or(!s.playback.shuffle))),
             R::Repeat { mode } => self.act(move |s| s.set_repeat(mode.map_or(s.playback.repeat.next(), repeat_from))),
+            R::Autoplay { on } => self.on_ui(true, move |s| {
+                if !s.autoplay_offered() {
+                    return Err("AutoPlay isn't offered here (local files only, or a station is playing)".to_string());
+                }
+                s.set_autoplay(on.unwrap_or(!s.settings.autoplay));
+                Ok(Reply::Queue(s.ctl_queue()))
+            })?,
             R::Playlists => {
                 let entries = self.on_ui(false, |s| s.ctl_playlist_entries())?;
                 let mut memo = self.disk_counts.lock().unwrap_or_else(|e| e.into_inner());

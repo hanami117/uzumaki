@@ -3153,3 +3153,594 @@ fn dump_the_history_screens() {
         eprintln!("{l}");
     }
 }
+
+// ------------------------------------------------------------------------------- uzu.toml
+
+use crate::config::Config;
+
+/// A fixture app with the config the text gives.
+fn with_config(text: &str, now: Instant) -> App {
+    let mut app = fixture(now);
+    app.set_config(Config::parse(text), now);
+    app
+}
+
+#[test]
+fn no_config_and_an_empty_one_draw_exactly_what_the_defaults_draw() {
+    let now = Instant::now();
+    for (w, h) in [(140, 20), (100, 30), (60, 14), (40, 12), (80, 10)] {
+        let mut plain = fixture(now);
+        plain.resize(h);
+        let mut empty = with_config("# nothing here\n", now);
+        empty.resize(h);
+        assert_eq!(lines(&draw(&plain, now, w, h)), lines(&draw(&empty, now, w, h)), "{w}x{h}");
+        assert_eq!(draw(&plain, now, w, h), draw(&empty, now, w, h), "styles differ at {w}x{h}");
+    }
+}
+
+#[test]
+fn a_problem_in_the_file_shows_in_the_status_line_and_leaves_the_screen_whole() {
+    let now = Instant::now();
+    let mut app = with_config("[theme]\nacent = \"red\"\nbad line\n", now);
+    app.resize(20);
+    let text = lines(&draw(&app, now, 140, 20));
+    assert!(text[8].starts_with("│ uzu.toml line 2: unknown key 'acent' in [theme]; did you mean 'accent'?"), "{}", text[8]);
+    assert!(text[8].contains("(+1 more; 'uzu config' lists them)"), "{}", text[8]);
+    // The frame is intact: every row as wide as the terminal, borders where they belong.
+    assert!(text.iter().all(|l| text_width(l) == 140));
+    assert!(text[8].ends_with('│') && text[0].starts_with('╭') && text[19].starts_with('╰'));
+    // A narrow screen cuts it instead of breaking the box.
+    let narrow = lines(&draw(&app, now, 50, 20));
+    assert!(narrow.iter().all(|l| text_width(l) == 50), "{narrow:?}");
+    // It stays a while, then the usual line is back.
+    let later = now + Duration::from_secs(9);
+    assert!(lines(&draw(&app, later, 140, 20))[8].starts_with("│ Playing from: Anima"));
+}
+
+#[test]
+fn no_problems_means_no_message() {
+    let now = Instant::now();
+    let mut app = with_config("[format]\nstatus_idle = \"-\"\n", now);
+    app.resize(20);
+    assert!(lines(&draw(&app, now, 140, 20))[8].starts_with("│ Playing from: Anima"));
+}
+
+/// The foreground colours used on a frame, as a set.
+fn colours(buf: &Buffer) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for y in 0..buf.area.height {
+        for x in 0..buf.area.width {
+            if let Color::Reset = buf[(x, y)].fg {
+                continue;
+            }
+            out.insert(format!("{:?}", buf[(x, y)].fg));
+        }
+    }
+    out
+}
+
+#[test]
+fn the_default_theme_uses_coral_green_cyan_and_magenta() {
+    let now = Instant::now();
+    let mut app = fixture(now);
+    app.resize(20);
+    let got = colours(&draw(&app, now, 140, 20));
+    assert_eq!(got, ["Cyan", "Green", "Magenta", "Rgb(255, 122, 138)"].map(String::from).into_iter().collect());
+}
+
+#[test]
+fn a_theme_in_the_file_recolours_the_roles() {
+    let now = Instant::now();
+    let mut app = with_config("[theme]\naccent = \"#112233\"\nnumber = \"red\"\nalbum = \"blue\"\ntime = 99\n", now);
+    app.resize(20);
+    let buf = draw(&app, now, 140, 20);
+    assert_eq!(colours(&buf), ["Blue", "Indexed(99)", "Red", "Rgb(17, 34, 51)"].map(String::from).into_iter().collect());
+    // The playing row's title carries the accent, the # column the number colour.
+    let text = lines(&buf);
+    let row = text.iter().position(|l| l.contains("Instant Crush") && l.contains('▶')).unwrap();
+    let x = text[row].find("Instant Crush").map(|b| text[row][..b].chars().count()).unwrap();
+    assert_eq!(buf[(x as u16, row as u16)].fg, Color::Rgb(17, 34, 51));
+}
+
+#[test]
+fn mono_and_no_color_draw_no_colour_at_all() {
+    let now = Instant::now();
+    for app in [with_config("[theme]\npalette = \"mono\"\n", now), {
+        let mut a = fixture(now);
+        a.set_config(Config::parse("").with_no_color(true), now);
+        a
+    }] {
+        let mut app = app;
+        app.resize(20);
+        let buf = draw(&app, now, 140, 20);
+        assert!(colours(&buf).is_empty(), "{:?}", colours(&buf));
+        // Bold and the selection still show: it is colour that goes, not emphasis.
+        let bold = (0..20u16).any(|y| (0..140u16).any(|x| buf[(x, y)].modifier.contains(Modifier::BOLD)));
+        assert!(bold);
+    }
+}
+
+#[test]
+fn the_paused_state_and_every_screen_follow_the_theme() {
+    let now = Instant::now();
+    let mut app = with_config("[theme]\npaused = \"light-red\"\naccent = \"green\"\n", now);
+    app.set_status(Status { state: PlayState::Paused, song: app.queue.current.clone(), position: 72.0, duration: 239.0, volume: 0.82, connected: true, ..Default::default() }, now);
+    app.resize(20);
+    let buf = draw(&app, now, 140, 20);
+    assert!(colours(&buf).contains("LightRed"), "{:?}", colours(&buf));
+    // The accent also colours the tabs and the help's key names.
+    app.help = true;
+    let buf = draw(&app, now, 140, 24);
+    assert!(colours(&buf).contains("Green") && !colours(&buf).contains("Rgb(255, 122, 138)"), "{:?}", colours(&buf));
+    // One theme per frame: a frame with the default theme on the same thread is coral again.
+    let mut plain = fixture(now);
+    plain.resize(20);
+    assert!(colours(&draw(&plain, now, 140, 20)).contains("Rgb(255, 122, 138)"));
+}
+
+// ------------------------------------------------------------------- uzu.toml: [keys]
+
+fn rig_with(name: &str, config: &str) -> Rig {
+    let mut rig = Rig::new(name);
+    rig.app.set_config(Config::parse(config), rig.now);
+    rig
+}
+
+#[test]
+fn remapped_keys_drive_the_same_actions() {
+    use uzumaki_ctl::VolumeTo;
+    let mut rig = rig_with("keys-remap", "[keys]\nnext = [\"]\", \"ctrl+n\"]\nvolume_up = \"u\"\nplay_pause = \"enter\"\nselect = \"x\"\n");
+    rig.press(&[ch(']')]);
+    assert_eq!(rig.last(), Request::Next);
+    rig.log.lock().unwrap().clear();
+    rig.press(&[KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL)]);
+    assert_eq!(rig.last(), Request::Next);
+    rig.press(&[ch('u')]);
+    assert_eq!(rig.last(), Request::Volume { to: VolumeTo::Change(0.05) });
+    // The old keys do nothing: n, + and = (volume_up's two defaults).
+    rig.log.lock().unwrap().clear();
+    rig.press(&[ch('n'), ch('+'), ch('=')]);
+    assert!(rig.log.lock().unwrap().is_empty(), "{:?}", rig.log.lock().unwrap());
+    // Enter is play/pause now, and x plays the selected song.
+    rig.press(&[key(KeyCode::Enter)]);
+    assert_eq!(rig.last(), Request::Toggle);
+    rig.press(&[ch('j'), ch('x')]);
+    assert_eq!(rig.last(), Request::Jump { index: 0 });
+}
+
+#[test]
+fn an_unbound_quit_key_does_not_quit_but_ctrl_c_still_does() {
+    let mut rig = rig_with("keys-quit", "[keys]\nquit = []\n");
+    rig.press(&[ch('q')]);
+    assert!(!rig.app.quit);
+    rig.press(&[KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)]);
+    assert!(rig.app.quit);
+    // Esc on the queue still quits (its own action, `back`).
+    let mut rig = rig_with("keys-quit2", "[keys]\nquit = []\n");
+    rig.press(&[key(KeyCode::Esc)]);
+    assert!(rig.app.quit);
+}
+
+#[test]
+fn screens_and_lists_follow_the_keymap() {
+    let mut rig = rig_with("keys-screens", "[keys]\ngoto_search = \"s\"\nshuffle = \"S\"\ndown = [\"ctrl+j\"]\n");
+    assert!(rig.app.config.warnings.is_empty());
+    rig.press(&[ch('3')]);
+    assert_eq!(rig.app.screen, Screen::Queue, "3 is not bound to Search any more");
+    rig.press(&[ch('s')]);
+    assert_eq!(rig.app.screen, Screen::Search);
+    // Search opens in its box: the first Esc leaves the box, the second goes back.
+    rig.press(&[key(KeyCode::Esc), key(KeyCode::Esc)]);
+    assert_eq!(rig.app.screen, Screen::Queue);
+    rig.press(&[KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL)]);
+    assert_eq!(rig.app.cursor, 1);
+    rig.press(&[ch('j'), key(KeyCode::Down)]);
+    assert_eq!(rig.app.cursor, 1, "j and Down were replaced by ctrl+j");
+}
+
+#[test]
+fn typing_takes_every_key_whatever_the_keymap_says() {
+    let mut rig = rig_with("keys-typing", "[keys]\nquit = []\nfilter = \"F4\"\nnext = \"x\"\n");
+    // `/` is no longer the filter key (F4 is).
+    rig.press(&[ch('/')]);
+    assert!(!rig.app.filtering);
+    rig.press(&[key(KeyCode::F(4))]);
+    assert!(rig.app.filtering);
+    rig.press(&[ch('q')]);
+    assert_eq!(rig.app.filter, "q");
+    let mut rig = rig_with("keys-typing2", "[keys]\nfilter = \"v\"\nnext = \"x\"\nquit = \"z\"\n");
+    rig.press(&[ch('v')]);
+    assert!(rig.app.filtering);
+    // Inside the filter every key is text, even the ones bound or unbound.
+    rig.press(&[ch('x'), ch('z'), ch('n'), ch('q')]);
+    assert_eq!(rig.app.filter, "xznq");
+    assert!(!rig.app.quit);
+    rig.press(&[key(KeyCode::Esc)]);
+    assert!(!rig.app.filtering);
+    // The search box too.
+    let mut rig = rig_with("keys-search", "[keys]\ngoto_search = \"s\"\nfilter = \"v\"\nquit = \"z\"\n");
+    rig.press(&[ch('s')]);
+    assert!(rig.app.search.typing, "a search with no results opens in the box");
+    rig.press(&[ch('z'), ch('s'), ch('q')]);
+    assert_eq!(rig.app.search.input, "zsq");
+    assert!(!rig.app.quit);
+}
+
+#[test]
+fn the_help_and_the_hints_show_the_remapped_keys() {
+    let now = Instant::now();
+    let mut app = with_config("[keys]\nnext = \"ctrl+n\"\nquit = []\n", now);
+    app.resize(30);
+    let text = lines(&draw(&app, now, 140, 30));
+    let hints = text.last().unwrap();
+    assert!(hints.contains("ctrl+n/p next/prev") && hints.contains("– quit"), "{hints}");
+    app.help = true;
+    let help = lines(&draw(&app, now, 140, 40));
+    assert!(help.iter().any(|l| l.contains("ctrl+n  p") && l.contains("next / previous song")), "{help:#?}");
+    assert!(help.iter().any(|l| l.contains("–  Ctrl+C") && l.contains("quit")), "{help:#?}");
+    // With the default keymap both are as they were.
+    let mut plain = fixture(now);
+    plain.resize(30);
+    assert!(lines(&draw(&plain, now, 140, 30)).last().unwrap().contains("n/p next/prev"));
+}
+
+#[test]
+fn a_keymap_works_in_every_view_and_a_popup_still_takes_any_key() {
+    let mut rig = rig_with("keys-popups", "[keys]\nhelp = \"h\"\nsort = \"S\"\n");
+    rig.press(&[ch('?')]);
+    assert!(!rig.app.help, "? is not the help key any more");
+    rig.press(&[ch('h')]);
+    assert!(rig.app.help);
+    // Any key closes the help, bound or not.
+    rig.press(&[ch('z')]);
+    assert!(!rig.app.help);
+    // The sort popup reads its own letters (n, a, y, …) untranslated.
+    rig.press(&[ch('2')]);
+    rig.press(&[ch('S')]);
+    assert!(rig.app.sorting.is_some());
+}
+
+// ------------------------------------------------------- uzu.toml: layout and defaults
+
+use crate::config::Placement;
+
+#[test]
+fn the_start_screen_and_view_come_from_the_file() {
+    let mut rig = rig_with("start-playlists", "[layout]\nstart_screen = \"playlists\"\n");
+    rig.app.start(&mut rig.client, false, rig.now);
+    assert_eq!(rig.app.screen, Screen::Playlists);
+    assert!(rig.requests().contains(&Request::Playlists), "the list loads as when 2 is pressed");
+    // No `[layout]`: the queue, as always, and nothing asked.
+    let mut rig = Rig::new("start-default");
+    let before = rig.requests().len();
+    rig.app.start(&mut rig.client, false, rig.now);
+    assert_eq!(rig.app.screen, Screen::Queue);
+    assert_eq!(rig.requests().len(), before);
+    // A view on the queue; UZUMAKI_VIEW beats the file.
+    let mut rig = rig_with("start-solo", "[layout]\nstart_view = \"solo\"\n");
+    rig.app.start(&mut rig.client, false, rig.now);
+    assert!(rig.app.solo());
+    let mut rig = rig_with("start-solo-env", "[layout]\nstart_view = \"solo\"\n");
+    rig.app.start(&mut rig.client, true, rig.now);
+    assert!(!rig.app.solo());
+    // Another screen than the queue has no view.
+    let mut rig = rig_with("start-lyrics", "[layout]\nstart_screen = 5\nstart_view = \"showcase\"\n");
+    rig.app.start(&mut rig.client, false, rig.now);
+    assert_eq!(rig.app.screen, Screen::Lyrics);
+    assert!(!rig.app.solo());
+}
+
+#[test]
+fn lyrics_beside_or_under_the_cover() {
+    use super::showcase::solo_lyrics_in;
+    let caps = None;
+    // Auto is what it always was: beside when it fits, else under, else nothing.
+    assert!(solo_lyrics_in(120, 34, caps, Placement::Auto).is_some_and(|g| g.lyrics.unwrap().x > 40));
+    assert!(solo_lyrics_in(60, 40, caps, Placement::Auto).is_some_and(|g| g.lyrics.unwrap().x == 2));
+    // Under: under even where there is room beside.
+    assert!(solo_lyrics_in(120, 34, caps, Placement::Under).is_some_and(|g| g.lyrics.unwrap().x == 2));
+    // Beside: beside where it fits; a narrow terminal has no lyrics in solo.
+    assert!(solo_lyrics_in(120, 34, caps, Placement::Beside).is_some_and(|g| g.lyrics.unwrap().x > 40));
+    assert!(solo_lyrics_in(60, 40, caps, Placement::Beside).is_none());
+}
+
+#[test]
+fn column_shares_and_hidden_columns() {
+    let now = Instant::now();
+    let head = |text: &str| {
+        let mut app = with_config(text, now);
+        app.resize(20);
+        lines(&draw(&app, now, 140, 20))[10].clone()
+    };
+    let col = |line: &str, name: &str| line.find(name).unwrap();
+    let plain = head("");
+    // A heavier Title pushes the Album column right; the order stays Artist, #, Title, Album, Time.
+    let heavy = head("[layout]\ntitle_width = 20\n");
+    assert!(col(&heavy, "Album") > col(&plain, "Album"), "{plain}\n{heavy}");
+    let light = head("[layout]\nartist_width = 1\n");
+    assert!(col(&light, "#") < col(&plain, "#"), "{plain}\n{light}");
+    // Hiding.
+    let no_album = head("[layout]\nshow_album = false\n");
+    assert!(!no_album.contains("Album") && no_album.contains("Artist") && no_album.contains("Time"), "{no_album}");
+    let neither = head("[layout]\nshow_album = false\nshow_artist = false\n");
+    assert!(!neither.contains("Album") && !neither.contains("Artist") && neither.contains("Title"), "{neither}");
+    // Every row of every size still fits the screen.
+    let mut app = with_config("[layout]\nartist_width = 7\ntitle_width = 1\nshow_artist = false\n", now);
+    app.resize(20);
+    for w in [140, 100, 60, 40] {
+        assert!(lines(&draw(&app, now, w, 20)).iter().all(|l| text_width(l) == w as usize));
+    }
+}
+
+#[test]
+fn a_default_sort_applies_until_the_user_picks_one_and_is_never_saved() {
+    let path = sort_file("config-default");
+    let mut rig = rig_with("sort-default", "[defaults]\nsort_playlists = \"name desc\"\nsort_songs = \"duration\"\n");
+    rig.app.use_sort_file(path.clone());
+    assert_eq!(rig.app.sort_of(View::Playlists), Some(Sort { key: Key::Name, desc: true }));
+    rig.press(&[ch('2')]);
+    rig.advance(300);
+    let text = rig.frame(100, 24);
+    assert!(text[8].starts_with("│ Playlists (4) · by name ↓") && text[11].contains("Road Trip Two"), "{}", text[11]);
+    // Picking a sort for another view saves only that pick, not the defaults.
+    rig.press(&[ch('l'), ch(','), ch('T')]);
+    let saved = crate::tui::sort::load(&path);
+    assert_eq!(saved.songs, Some(Sort { key: Key::Title, desc: true }));
+    assert_eq!(saved.playlists, None, "the config's default is not written to uzu.json");
+    // A pick beats the default on the next run; the default still fills the other views.
+    let mut next = rig_with("sort-default-2", "[defaults]\nsort_playlists = \"name desc\"\nsort_songs = \"duration\"\n");
+    next.app.use_sort_file(path.clone());
+    assert_eq!(next.app.sort_of(View::Songs), Some(Sort { key: Key::Title, desc: true }));
+    assert_eq!(next.app.sort_of(View::Playlists), Some(Sort { key: Key::Name, desc: true }));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
+fn notifications_off_hides_the_short_messages_but_not_errors() {
+    let mut rig = rig_with("notify-off", "[defaults]\nnotifications = false\n");
+    rig.press(&[ch(' ')]);
+    assert_eq!(rig.app.message(rig.now), None, "'Paused' stays quiet");
+    rig.press(&[ch('d')]);
+    assert_eq!(rig.app.message(rig.now), None, "so does a refusal");
+    // An error answer from the app still shows.
+    let mut rig = Rig::serving("notify-error", Arc::default(), |req| match req {
+        Request::Next => uzumaki_ctl::Reply::Error { message: "nothing to skip to".into() },
+        other => fake_handler_logged(Arc::default())(other),
+    });
+    rig.app.set_config(Config::parse("[defaults]\nnotifications = false\n"), rig.now);
+    rig.press(&[ch('n')]);
+    assert_eq!(rig.app.message(rig.now), Some("nothing to skip to"));
+    // On (the default), the messages show as they did.
+    let mut rig = Rig::new("notify-on");
+    rig.press(&[ch(' ')]);
+    assert_eq!(rig.app.message(rig.now), Some("Paused"));
+    // And a problem in the file shows even with notifications off.
+    let mut app = fixture(rig.now);
+    app.set_config(Config::parse("[defaults]\nnotifications = false\nbad line\n"), rig.now);
+    assert!(app.message(rig.now).is_some_and(|m| m.contains("line 3")));
+}
+
+// ------------------------------------------------------------------------------- AutoPlay (∞)
+
+/// The fixture's queue with AutoPlay's suggestions after Up Next, AutoPlay on.
+fn with_autoplay(app: &mut App, now: Instant) {
+    let mut q = app.queue.clone();
+    q.repeat = RepeatMode::Off;
+    q.next_lap.clear();
+    q.autoplay = vec![s("x1", "Suggested One", "Ss", "S", 100.0), s("x2", "Suggested Two", "Tt", "T", 200.0)];
+    q.autoplay_on = Some(true);
+    app.set_queue(q, now);
+}
+
+fn playing_status(app: &App, autoplay: Option<bool>) -> Status {
+    Status { state: PlayState::Playing, song: app.queue.current.clone(), position: 72.0, duration: 239.0, volume: 0.82, connected: true, autoplay, ..Default::default() }
+}
+
+#[test]
+fn the_queue_has_an_autoplay_section_with_dim_numbered_suggestions() {
+    let now = Instant::now();
+    let mut app = fixture(now);
+    with_autoplay(&mut app, now);
+    app.resize_to(120, 30);
+    let buf = draw(&app, now, 120, 30);
+    let text = lines(&buf);
+    let at = text.iter().position(|l| l.contains("\u{221e} AutoPlay \u{b7} similar music will keep playing")).expect("the header");
+    assert!(text[at - 1].contains("Lose Yourself to Dance"), "after Up Next, whose last song is above: {}", text[at - 1]);
+    // Numbered on after the seven Up Next songs: 8 and 9.
+    assert!(text[at + 1].contains("Suggested One") && text[at + 1].contains(" 8 "), "{}", text[at + 1]);
+    assert!(text[at + 2].contains("Suggested Two") && text[at + 2].contains(" 9 "), "{}", text[at + 2]);
+    let x = text[at + 1].find("Suggested One").map(|b| text_width(&text[at + 1][..b])).unwrap();
+    assert!(buf[(x as u16, (at + 1) as u16)].modifier.contains(Modifier::DIM), "suggestions are dim");
+    // No section without suggestions (AutoPlay off, an old app).
+    let mut q = app.queue.clone();
+    q.autoplay.clear();
+    app.set_queue(q, now);
+    assert!(!lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("AutoPlay")));
+}
+
+#[test]
+fn the_cursor_skips_the_autoplay_header_and_enter_plays_a_suggestion() {
+    let mut rig = Rig::new("autoplay-rows");
+    let now = rig.now;
+    with_autoplay(&mut rig.app, now);
+    rig.app.resize(30);
+    let up = rig.app.queue.up_next.len();
+    rig.press(&[ch('G')]);
+    let rows = rig.app.rows();
+    assert!(rows[rig.app.cursor].kind == RowKind::Suggested);
+    assert_eq!(rows[rig.app.cursor].song.title, "Suggested Two");
+    rig.press(&[ch('k'), ch('k')]);
+    assert_eq!(rig.app.rows()[rig.app.cursor].song.title, rig.app.queue.up_next[up - 1].title, "k steps over the header onto the last Up Next song");
+    rig.press(&[ch('j'), ch('j'), key(KeyCode::Enter)]);
+    assert_eq!(rig.last(), Request::Jump { index: up + 1 }, "the second suggestion is entry {}", up + 2);
+    // They can't be removed or moved from here; the message says so.
+    rig.press(&[ch('d')]);
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay songs can't be edited (A turns AutoPlay off)"));
+    assert!(!rig.log.lock().unwrap().iter().any(|r| matches!(r, Request::Remove { .. })));
+    rig.press(&[ch('J')]);
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay songs can't be edited (A turns AutoPlay off)"));
+    // A filter hides the header and keeps the real numbers.
+    rig.press(&[ch('/'), ch('S'), ch('u'), ch('g')]);
+    let rows = rig.app.rows();
+    let vis = rig.app.visible();
+    assert!(vis.iter().all(|&i| rows[i].kind != RowKind::AutoPlay));
+    assert_eq!(vis.iter().map(|&i| rows[i].number).collect::<Vec<_>>(), [Some(up + 1), Some(up + 2)]);
+}
+
+#[test]
+fn history_keeps_its_numbers_with_suggestions_in_the_queue() {
+    let mut rig = Rig::new("autoplay-history");
+    let now = rig.now;
+    with_autoplay(&mut rig.app, now);
+    let mut q = rig.app.queue.clone();
+    q.history = vec![s("h1", "Older", "Hh", "H", 100.0), s("h2", "Old", "Hh", "H", 100.0)];
+    rig.app.set_queue(q, now);
+    rig.app.resize(40);
+    let up = rig.app.queue.up_next.len();
+    let rows = rig.app.rows();
+    let past: Vec<_> = rows.iter().filter(|r| matches!(r.kind, RowKind::Past(_))).map(|r| r.number).collect();
+    assert_eq!(past, [Some(up + 2 + 1), Some(up + 2 + 2)], "History numbers come after the suggestions");
+    let first_past = rows.iter().position(|r| matches!(r.kind, RowKind::Past(_))).unwrap();
+    rig.app.cursor = first_past;
+    rig.press(&[key(KeyCode::Enter)]);
+    assert_eq!(rig.last(), Request::History { index: 0 }, "the oldest history song is History entry 0");
+}
+
+/// The fake app plus AutoPlay: `Autoplay` flips the setting and answers with the queue.
+fn autoplay_rig(name: &str, old_app: bool) -> Rig {
+    let log: Arc<Mutex<Vec<Request>>> = Arc::default();
+    let inner = fake_handler_logged(log.clone());
+    let on = Mutex::new(true);
+    let handler = move |req: Request| match req {
+        Request::Autoplay { on: want } => {
+            let mut on = on.lock().unwrap();
+            if old_app {
+                return uzumaki_ctl::Reply::Error { message: "bad request: unknown variant `autoplay`".into() };
+            }
+            *on = want.unwrap_or(!*on);
+            uzumaki_ctl::Reply::Queue(Queue { autoplay_on: Some(*on), ..Default::default() })
+        }
+        other => inner(other),
+    };
+    // The fake logs what it answers itself; log the AutoPlay requests here too.
+    let log2 = log.clone();
+    Rig::serving(name, log, move |req| {
+        if matches!(req, Request::Autoplay { .. }) {
+            log2.lock().unwrap().push(req.clone());
+        }
+        handler(req)
+    })
+}
+
+#[test]
+fn a_capital_a_toggles_autoplay_and_says_the_new_state() {
+    let mut rig = autoplay_rig("autoplay-key", false);
+    rig.press(&[ch('A')]);
+    assert_eq!(rig.last(), Request::Autoplay { on: None });
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay: off"));
+    rig.press(&[ch('A')]);
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay: on \u{221e}"));
+    // On every screen (a common key), and typing in the filter is still typing.
+    rig.press(&[ch('2'), ch('A')]);
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay: off"));
+    rig.press(&[ch('1'), ch('/'), ch('A')]);
+    assert_eq!(rig.app.filter, "A");
+    assert_eq!(rig.log.lock().unwrap().iter().filter(|r| matches!(r, Request::Autoplay { .. })).count(), 3);
+}
+
+#[test]
+fn autoplay_on_an_old_app_is_an_error_message_not_a_crash() {
+    let mut rig = autoplay_rig("autoplay-old", true);
+    rig.press(&[ch('A')]);
+    assert_eq!(rig.last(), Request::Autoplay { on: None });
+    assert!(rig.app.message(rig.now).is_some_and(|m| m.contains("bad request")), "{:?}", rig.app.message(rig.now));
+    assert!(!rig.app.quit);
+}
+
+#[test]
+fn the_autoplay_key_can_be_remapped_or_unbound() {
+    let mut rig = rig_with_autoplay("autoplay-remap", "[keys]\nautoplay = \"u\"\n");
+    rig.press(&[ch('A')]);
+    assert!(!rig.log.lock().unwrap().iter().any(|r| matches!(r, Request::Autoplay { .. })), "the old key does nothing");
+    rig.press(&[ch('u')]);
+    assert_eq!(rig.last(), Request::Autoplay { on: None });
+    let mut rig = rig_with_autoplay("autoplay-unbound", "[keys]\nautoplay = []\n");
+    rig.press(&[ch('A')]);
+    assert!(!rig.log.lock().unwrap().iter().any(|r| matches!(r, Request::Autoplay { .. })));
+    // The default key is free of the others: nothing else answers to A, and no warning in the default file.
+    assert!(crate::config::Config::parse(&crate::config::default_file()).warnings.is_empty());
+    assert_eq!(crate::config::keys::ACTIONS.iter().filter(|a| a.keys.contains(&"A")).count(), 1);
+}
+
+fn rig_with_autoplay(name: &str, config: &str) -> Rig {
+    let mut rig = autoplay_rig(name, false);
+    rig.app.set_config(Config::parse(config), rig.now);
+    rig
+}
+
+#[test]
+fn the_help_and_hints_show_the_autoplay_key() {
+    let now = Instant::now();
+    let mut app = fixture(now);
+    app.resize_to(120, 40);
+    app.help = true;
+    let text = lines(&draw(&app, now, 120, 40));
+    assert!(text.iter().any(|l| l.contains("AutoPlay (\u{221e}) on / off")), "{text:?}");
+    app.set_config(Config::parse("[keys]\nautoplay = \"u\"\n"), now);
+    let text = lines(&draw(&app, now, 120, 40));
+    let row = text.iter().find(|l| l.contains("AutoPlay (\u{221e}) on / off")).expect("the row");
+    assert!(row.contains(" u ") || row.contains("│u"), "relabelled: {row}");
+}
+
+#[test]
+fn the_player_shows_the_infinity_only_where_the_app_offers_autoplay() {
+    let now = Instant::now();
+    let mut app = fixture(now);
+    app.resize_to(120, 30);
+    // An older app says nothing: no AutoPlay line anywhere (the frames stay as they were).
+    assert!(!lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("AutoPlay") || l.contains('\u{221e}')));
+    let st = playing_status(&app, Some(true));
+    app.set_status(st, now);
+    assert!(lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("Volume:  82%") && l.contains("AutoPlay: \u{221e}")), "{:?}", lines(&draw(&app, now, 120, 30)));
+    let st = playing_status(&app, Some(false));
+    app.set_status(st, now);
+    let text = lines(&draw(&app, now, 120, 30));
+    assert!(text.iter().any(|l| l.contains("Volume:  82%") && l.contains("AutoPlay: off")), "{text:?}");
+    // Narrow: the compact player folds it into the flags.
+    let st = playing_status(&app, Some(true));
+    app.set_status(st, now);
+    app.resize_to(70, 12);
+    let text = lines(&draw(&app, now, 70, 12));
+    assert!(text.iter().any(|l| l.contains("[\u{221e}]")), "{text:?}");
+    let st = playing_status(&app, Some(false));
+    app.set_status(st, now);
+    assert!(!lines(&draw(&app, now, 70, 12)).iter().any(|l| l.contains('\u{221e}')));
+}
+
+#[test]
+fn the_showcase_settings_line_ends_with_the_infinity_when_on() {
+    let now = Instant::now();
+    let (mut app, _) = in_view(Layout::Showcase, 120, 30, now);
+    let st = playing_status(&app, Some(true));
+    app.set_status(st, now);
+    assert!(lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("autoplay \u{221e}")));
+    let st = playing_status(&app, Some(false));
+    app.set_status(st, now);
+    assert!(!lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("autoplay")));
+}
+
+#[test]
+fn a_change_of_autoplay_elsewhere_refreshes_the_queue() {
+    let mut rig = Rig::new("autoplay-refresh");
+    let now = rig.now;
+    let st = playing_status(&rig.app, Some(true));
+    rig.app.set_status(st, now);
+    rig.app.tick(&mut rig.client, now);
+    let asked = |rig: &Rig| rig.log.lock().unwrap().iter().filter(|r| **r == Request::Queue).count();
+    let before = asked(&rig);
+    // The setting flips in the app (its window, another uzu): the next status poll carries it.
+    let st = playing_status(&rig.app, Some(false));
+    rig.app.set_status(st, now);
+    rig.app.tick(&mut rig.client, now + Duration::from_millis(1));
+    assert!(asked(&rig) > before, "the suggestions came or went with it");
+}

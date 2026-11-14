@@ -10,14 +10,42 @@ use uzumaki_ctl::SongInfo;
 
 use crate::fmt::{fmt_time, pad_left, pad_right, truncate};
 
-pub const CORAL: Color = Color::Rgb(255, 122, 138);
+#[cfg(test)]
+pub use crate::config::theme::CORAL;
+use crate::config::Columns;
+use crate::config::theme::Theme;
+use std::cell::Cell;
+
+thread_local! {
+    /// The colours and column shares drawing uses: `view::draw` sets them from the config at the
+    /// start of each frame (drawing is one thread; a test's frames are its own thread's).
+    static LOOK: Cell<(Theme, Columns)> = Cell::new((Theme::default(), Columns::default()));
+}
+
+pub fn set_look(theme: Theme, columns: Columns) {
+    LOOK.with(|l| l.set((theme, columns)));
+}
+
+pub fn theme() -> Theme {
+    LOOK.with(|l| l.get().0)
+}
+
+fn column_setup() -> Columns {
+    LOOK.with(|l| l.get().1)
+}
+
+/// A foreground colour for a role; no colour is the terminal's own foreground.
+pub fn paint(colour: Option<Color>) -> Style {
+    colour.map_or_else(Style::default, |c| Style::default().fg(c))
+}
 pub const GAP: usize = 2;
 /// Narrower than this and the Album column goes; narrower than `MIN_ARTIST_WIDTH`, Artist too.
 const MIN_ALBUM_WIDTH: usize = 90;
 const MIN_ARTIST_WIDTH: usize = 50;
 
+/// The accent (coral unless `[theme]` says otherwise).
 pub fn coral() -> Style {
-    Style::default().fg(CORAL)
+    paint(theme().accent)
 }
 
 pub fn dim() -> Style {
@@ -65,12 +93,16 @@ pub enum RowKind {
     Station,
     /// A song the station already played (dim; Enter plays it on its own).
     Played,
+    /// The "∞ AutoPlay" header above the suggestions (`song.title` is its text).
+    AutoPlay,
+    /// A song AutoPlay suggests after Up Next (dim; Enter plays it, but it can't be moved or removed).
+    Suggested,
 }
 
 impl RowKind {
     /// A line the cursor skips (it is not a song).
     pub fn is_divider(self) -> bool {
-        matches!(self, RowKind::Repeat | RowKind::Station | RowKind::History | RowKind::UpNext)
+        matches!(self, RowKind::Repeat | RowKind::Station | RowKind::History | RowKind::UpNext | RowKind::AutoPlay)
     }
 }
 
@@ -113,18 +145,21 @@ enum Col {
 
 /// The columns that fit `width` and their widths (they add up to `width`).
 fn columns(width: usize, num_w: usize, time_w: usize) -> Vec<(Col, usize)> {
+    let setup = column_setup();
     let mut cols = vec![Col::Num, Col::Title, Col::Time];
-    if width >= MIN_ARTIST_WIDTH {
+    if setup.show_artist && width >= MIN_ARTIST_WIDTH {
         cols.insert(0, Col::Artist);
     }
-    if width >= MIN_ALBUM_WIDTH {
-        cols.insert(3, Col::Album);
+    if setup.show_album && width >= MIN_ALBUM_WIDTH {
+        let at = cols.iter().position(|c| *c == Col::Title).map_or(cols.len(), |i| i + 1);
+        cols.insert(at, Col::Album);
     }
     let fixed = num_w + time_w + GAP * (cols.len() - 1);
     let flex = width.saturating_sub(fixed);
     let weight = |c: Col| match c {
-        Col::Artist | Col::Album => 3,
-        _ => 5,
+        Col::Artist => usize::from(setup.artist),
+        Col::Album => usize::from(setup.album),
+        _ => usize::from(setup.title),
     };
     let total: usize = cols.iter().filter(|c| matches!(c, Col::Artist | Col::Title | Col::Album)).map(|c| weight(*c)).sum();
     let mut left = flex;
@@ -156,9 +191,9 @@ fn cell(col: Col, w: usize, text: &str) -> String {
 
 fn cell_style(col: Col) -> Style {
     match col {
-        Col::Num => Style::default().fg(Color::Green),
-        Col::Album => Style::default().fg(Color::Cyan),
-        Col::Time => Style::default().fg(Color::Magenta),
+        Col::Num => paint(theme().number),
+        Col::Album => paint(theme().album),
+        Col::Time => paint(theme().time),
         _ => Style::default(),
     }
 }
@@ -179,7 +214,7 @@ fn row_line(row: &Row, cols: &[(Col, usize)], mark: Option<Mark>, glyph: &str) -
         let indent: usize = cols.iter().take_while(|(c, _)| *c != Col::Title).map(|(_, w)| w + GAP).sum();
         let text = match row.kind {
             RowKind::Station => format!("◉ {}", row.song.title),
-            RowKind::History | RowKind::UpNext => row.song.title.clone(),
+            RowKind::History | RowKind::UpNext | RowKind::AutoPlay => row.song.title.clone(),
             _ => "↻ Repeat".to_string(),
         };
         return Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(text, dim())]);
@@ -203,7 +238,7 @@ fn row_line(row: &Row, cols: &[(Col, usize)], mark: Option<Mark>, glyph: &str) -
         if row.playing {
             style = coral().add_modifier(Modifier::BOLD);
         }
-        if !row.song.playable || matches!(row.kind, RowKind::NextLap | RowKind::Played | RowKind::Past(_)) {
+        if !row.song.playable || matches!(row.kind, RowKind::NextLap | RowKind::Played | RowKind::Suggested | RowKind::Past(_)) {
             style = style.add_modifier(Modifier::DIM);
         }
         if let Some(m) = mark {

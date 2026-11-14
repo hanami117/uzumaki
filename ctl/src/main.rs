@@ -5,11 +5,14 @@ mod args;
 mod boot;
 mod cache;
 mod cli;
+mod config;
 mod fmt;
 mod last;
 mod list;
 mod run;
 mod tui;
+#[cfg(test)]
+mod config_tests;
 #[cfg(test)]
 mod tests;
 
@@ -83,6 +86,9 @@ fn execute(inv: &Invocation) -> Result<(), Fail> {
         println!("{}", tui::cover_info()?);
         return Ok(());
     }
+    if let Command::Config(show) = inv.cmd {
+        return show_config(show);
+    }
     let env = Env { term: Term::detect(), timing: Timing::default(), stop: &STOP, last: Some(uzumaki_ctl::last_path()) };
     // Not locked for the whole run: the screens' worker threads may write too (a held lock
     // made the cover's terminal query wait until uzu quit).
@@ -96,12 +102,65 @@ fn execute(inv: &Invocation) -> Result<(), Fail> {
     if matches!(inv.cmd, Command::Watch | Command::Screen) {
         install_sigint();
     }
+    // `status --line` takes its text from uzu.toml unless the command line gave one.
+    let resolved;
+    let inv = if matches!(inv.cmd, Command::Line { .. }) {
+        let cfg = config::Config::load();
+        if !inv.quiet {
+            for w in &cfg.warnings {
+                eprintln!("uzu: uzu.toml {w}");
+            }
+        }
+        resolved = Invocation { cmd: line_with(&inv.cmd, &cfg), quiet: inv.quiet };
+        &resolved
+    } else {
+        inv
+    };
     let result = match Client::connect() {
         Ok(client) => dispatch(inv, client, &env, &mut out),
+        // A status bar polls this: with no app running it shows its idle text, it doesn't start one.
+        Err(_) if matches!(inv.cmd, Command::Line { .. }) => {
+            let idle = if let Command::Line { idle, .. } = &inv.cmd { idle.clone().unwrap_or_default() } else { String::new() };
+            writeln!(out, "{idle}").map_err(Fail::err)
+        }
         Err(_) => start_then_run(inv, &env, &mut out),
     };
     let _ = out.flush();
     result
+}
+
+/// A `Line` command with the format and idle text of the config where the command line gave none.
+fn line_with(cmd: &Command, cfg: &config::Config) -> Command {
+    match cmd {
+        Command::Line { format, idle } => Command::Line { format: Some(format.clone().unwrap_or_else(|| cfg.line_format().to_string())), idle: Some(idle.clone().unwrap_or_else(|| cfg.status_idle.clone())) },
+        other => unreachable!("not a line command: {other:?}"),
+    }
+}
+
+/// `uzu config`: no app needed. With problems in the file it exits 1, so it can be used as a check.
+fn show_config(show: cli::ConfigShow) -> Result<(), Fail> {
+    let Some(path) = config::default_path() else {
+        return Err(Fail::err("can't tell where the config file is (no HOME)"));
+    };
+    match show {
+        cli::ConfigShow::Path => println!("{}", path.display()),
+        cli::ConfigShow::Default => print!("{}", config::default_file()),
+        cli::ConfigShow::Check => {
+            let cfg = config::Config::load_from(&path);
+            println!("{}", path.display());
+            if !cfg.found {
+                println!("No file there, so uzu uses its built-in settings. 'uzu config --default' prints a commented file to start from.");
+            } else if cfg.warnings.is_empty() {
+                println!("No problems.");
+            } else {
+                for w in &cfg.warnings {
+                    println!("  {w}");
+                }
+                return Err(Fail { code: 1, msg: String::new() });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn dispatch(inv: &Invocation, mut client: Client, env: &Env, out: &mut dyn Write) -> Result<(), Fail> {

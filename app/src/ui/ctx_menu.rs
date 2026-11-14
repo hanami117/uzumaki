@@ -172,7 +172,19 @@ pub fn artist_items(s: &State, a: &Artist) -> Vec<CtxItem> {
         return local_items(LocalWhat::Artist(a.id.clone()), a.name.clone());
     }
     let a2 = a.clone();
-    vec![pin_item(s, &a.id, move |s| s.pin_artist(&a2))]
+    let mut v = Vec::new();
+    // Apple's "Create Station" on an artist: its catalog id (a library artist's page knows it).
+    let catalog = if crate::models::Artist::is_library_id(&a.id) {
+        s.artist_pages.get(&a.id).and_then(|l| l.ready()).and_then(|p| p.as_ref()).map(|p| p.id.clone())
+    } else {
+        Some(a.id.clone())
+    };
+    if let Some(id) = catalog.filter(|_| !s.local_only()) {
+        let name = a.name.clone();
+        v.push(it("Create Station", move |s| s.create_artist_station(&id, &name)));
+    }
+    v.push(pin_item(s, &a.id, move |s| s.pin_artist(&a2)));
+    v
 }
 
 pub fn open_artist(s: &mut State, a: &Artist, at: [f32; 2]) {

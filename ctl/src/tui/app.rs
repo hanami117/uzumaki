@@ -16,6 +16,7 @@ use super::search::Search;
 use super::showcase::{self, Layout};
 use super::sort::{self, Sort, View};
 use super::table::{Row, RowKind};
+use crate::config::Config;
 use crate::fmt::repeat_name;
 use crate::last::{self, Last};
 use crate::run::Backend;
@@ -26,6 +27,8 @@ const STATUS_EVERY: Duration = Duration::from_millis(500);
 const QUEUE_EVERY: Duration = Duration::from_secs(3);
 /// How long a message replaces the status line.
 const MESSAGE_FOR: Duration = Duration::from_secs(2);
+/// How long the config file's first problem shows at the start.
+const CONFIG_NOTICE_FOR: Duration = Duration::from_secs(8);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// Below this terminal height the player shrinks to two rows.
 pub const COMPACT_BELOW: u16 = 18;
@@ -120,6 +123,8 @@ pub struct App {
     have_queue: bool,
     /// Stand-in song for the station header row, its title the text (set with the queue).
     station_head: uzumaki_ctl::SongInfo,
+    /// The text of the "∞ AutoPlay" divider above the suggested songs.
+    autoplay_head: uzumaki_ctl::SongInfo,
     /// `title` is the History divider's text ("⟲ History · 7 songs"), set with each queue.
     history_head: uzumaki_ctl::SongInfo,
     /// The text of the "▸ Up Next · n songs" divider between the history and Up Next.
@@ -136,13 +141,18 @@ pub struct App {
     pub help: bool,
     /// The sort popup (`,`) is open for this view.
     pub sorting: Option<View>,
+    /// The sort each view uses: what was picked, else the config's default.
     sorts: sort::Prefs,
+    /// What the user picked (what `uzu.json` holds); the config's defaults are not saved there.
+    picked: sort::Prefs,
     /// Where the sort choices are remembered (`None`: nowhere).
     sort_file: Option<PathBuf>,
     /// The app can't be reached; keep retrying.
     pub away: bool,
     pub quit: bool,
-    message: Option<(String, Instant)>,
+    message: Option<(String, Instant, Duration)>,
+    /// What `uzu.toml` said (the defaults when there is no file).
+    pub config: Config,
     last_status: Option<Instant>,
     last_queue: Option<Instant>,
     queue_dirty: bool,
@@ -176,6 +186,7 @@ impl App {
             queue: Queue::default(),
             have_queue: false,
             station_head: Default::default(),
+            autoplay_head: Default::default(),
             history_head: Default::default(),
             upnext_head: Default::default(),
             cursor: 0,
@@ -187,10 +198,12 @@ impl App {
             help: false,
             sorting: None,
             sorts: sort::Prefs::default(),
+            picked: sort::Prefs::default(),
             sort_file: None,
             away: false,
             quit: false,
             message: None,
+            config: Config::default(),
             last_status: None,
             last_queue: None,
             queue_dirty: true,
@@ -204,12 +217,18 @@ impl App {
 
     /// Remembers sort choices in `path` from now on, and takes up the ones saved there.
     pub fn use_sort_file(&mut self, path: PathBuf) {
-        let prefs = sort::load(&path);
+        self.picked = sort::load(&path);
         self.sort_file = Some(path);
+        self.refresh_sorts();
+    }
+
+    /// Each view's sort: the remembered pick, else `[defaults] sort_*` of the config.
+    fn refresh_sorts(&mut self) {
         for view in [View::Playlists, View::Albums, View::Songs, View::Search] {
-            self.apply_sort(view, prefs.get(view));
+            let sort = self.picked.get(view).or(self.config.sorts.get(view));
+            self.sorts.set(view, sort);
+            self.apply_sort(view, sort);
         }
-        self.sorts = prefs;
     }
 
     pub fn sort_of(&self, view: View) -> Option<Sort> {
@@ -227,9 +246,10 @@ impl App {
 
     fn set_sort(&mut self, view: View, sort: Option<Sort>) {
         self.sorts.set(view, sort);
+        self.picked.set(view, sort);
         self.apply_sort(view, sort);
         if let Some(path) = &self.sort_file {
-            sort::save(path, &self.sorts);
+            sort::save(path, &self.picked);
         }
     }
 
@@ -271,13 +291,13 @@ impl App {
     /// the next lap, numbered on from Up Next (only Enter takes those: `Jump` knows them).
     pub fn rows(&self) -> Vec<Row<'_>> {
         let (n, lap) = (self.queue.up_next.len(), &self.queue.next_lap);
-        let mut rows = Vec::with_capacity(n + lap.len() + 2);
+        let mut rows = Vec::with_capacity(n + lap.len() + self.queue.autoplay.len() + 3);
         let past = self.queue.history.len();
         if past > 0 {
             // Oldest first, as the app sends it: entry i is `H(past - i)`, so the song played just
             // before the current one is H1. The number stays the entry number Enter sends.
             rows.push(Row { number: None, song: &self.history_head, playing: false, kind: RowKind::History });
-            rows.extend(self.queue.history.iter().enumerate().map(|(i, song)| Row { number: Some(n + lap.len() + self.queue.station_played.len() + i + 1), song, playing: false, kind: RowKind::Past(past - i) }));
+            rows.extend(self.queue.history.iter().enumerate().map(|(i, song)| Row { number: Some(self.entries_before_history() + i + 1), song, playing: false, kind: RowKind::Past(past - i) }));
         }
         if let Some(song) = &self.queue.current {
             rows.push(Row { number: None, song, playing: true, kind: RowKind::Song });
@@ -293,9 +313,14 @@ impl App {
             rows.push(Row { number: None, song: &REPEAT_ROW, playing: false, kind: RowKind::Repeat });
             rows.extend(lap.iter().enumerate().map(|(i, song)| Row { number: Some(n + i + 1), song, playing: false, kind: RowKind::NextLap }));
         }
+        if !self.queue.autoplay.is_empty() {
+            // Suggestions numbered on after Up Next and the next lap (only Enter takes them: `Jump`).
+            rows.push(Row { number: None, song: &self.autoplay_head, playing: false, kind: RowKind::AutoPlay });
+            rows.extend(self.queue.autoplay.iter().enumerate().map(|(i, song)| Row { number: Some(n + lap.len() + i + 1), song, playing: false, kind: RowKind::Suggested }));
+        }
         if self.queue.station.is_some() {
             rows.push(Row { number: None, song: &self.station_head, playing: false, kind: RowKind::Station });
-            let from = n + lap.len();
+            let from = n + lap.len() + self.queue.autoplay.len();
             if self.queue.history.is_empty() {
                 rows.extend(self.queue.station_played.iter().enumerate().map(|(i, song)| Row { number: Some(from + i + 1), song, playing: false, kind: RowKind::Played }));
             }
@@ -308,7 +333,7 @@ impl App {
     pub fn num_width(&self) -> usize {
         let q = &self.queue;
         let digits = |n: usize| n.to_string().len();
-        let top = q.up_next.len() + q.next_lap.len() + q.station_played.len() + q.history.len();
+        let top = self.entries_before_history() + q.history.len();
         let past = if q.history.is_empty() { 0 } else { 1 + digits(q.history.len()) };
         digits(top).max(past).max(1)
     }
@@ -379,7 +404,7 @@ impl App {
             return None;
         }
         let caps = self.cover.caps();
-        let with = if self.solo_lyrics_shown() { showcase::solo_lyrics(self.width, self.height, caps) } else { None };
+        let with = if self.solo_lyrics_shown() { showcase::solo_lyrics_in(self.width, self.height, caps, self.config.layout.lyrics) } else { None };
         Some(with.unwrap_or_else(|| showcase::solo(self.width, self.height, caps)))
     }
 
@@ -439,6 +464,15 @@ impl App {
         }
     }
 
+    /// AutoPlay (∞) on or off; `None` where the app doesn't offer it (an older app, local files,
+    /// a station) or isn't known yet.
+    pub fn autoplay(&self) -> Option<bool> {
+        match &self.status {
+            Some(st) => st.autoplay,
+            None => self.queue.autoplay_on,
+        }
+    }
+
     /// Seconds into the song, moving on between polls while it plays.
     pub fn position(&self, now: Instant) -> f64 {
         let Some(st) = &self.status else { return 0.0 };
@@ -448,11 +482,43 @@ impl App {
     }
 
     pub fn message(&self, now: Instant) -> Option<&str> {
-        self.message.as_ref().filter(|(_, at)| now.saturating_duration_since(*at) < MESSAGE_FOR).map(|(m, _)| m.as_str())
+        self.message.as_ref().filter(|(_, at, hold)| now.saturating_duration_since(*at) < *hold).map(|(m, _, _)| m.as_str())
     }
 
+    /// A short message in the status line (`[defaults] notifications = false` hides these).
     pub fn set_message(&mut self, text: impl Into<String>, now: Instant) {
-        self.message = Some((text.into(), now));
+        if self.config.notifications {
+            self.message = Some((text.into(), now, MESSAGE_FOR));
+        }
+    }
+
+    /// An error from the app: shown whatever the notifications setting is.
+    fn set_error(&mut self, text: impl Into<String>, now: Instant) {
+        self.message = Some((text.into(), now, MESSAGE_FOR));
+    }
+
+    /// Takes up what `uzu.toml` said. Its problems show in the status line for a while (and
+    /// `uzu config` lists them all), so a typo never leaves the screen broken or silent.
+    pub fn set_config(&mut self, config: Config, now: Instant) {
+        if let Some(text) = config.status_line() {
+            self.message = Some((text, now, CONFIG_NOTICE_FOR));
+        }
+        self.config = config;
+        self.refresh_sorts();
+    }
+
+    /// Where the screens start, as `[layout]` says: the screen and, on the queue, its view.
+    /// `UZUMAKI_VIEW` (`env_view`) still beats the file.
+    pub fn start(&mut self, be: &mut dyn Backend, env_view: bool, now: Instant) {
+        if !env_view && let Some(view) = &self.config.layout.start_view {
+            self.layout = Layout::parse(Some(view));
+        }
+        let screen = Screen::ALL[self.config.layout.start_screen.min(Screen::ALL.len() - 1)];
+        if screen != Screen::Queue {
+            // A view only shows on the queue; the screen asked for wins.
+            self.layout = Layout::Normal;
+            self.goto(screen, be, now);
+        }
     }
 
     // ------------------------------------------------------------------------------ selection
@@ -577,7 +643,7 @@ impl App {
         }
         let changed = match &self.status {
             None => true,
-            Some(old) => old.song.as_ref().map(|s| &s.id) != st.song.as_ref().map(|s| &s.id) || old.queued != st.queued || old.shuffle != st.shuffle || old.repeat != st.repeat,
+            Some(old) => old.song.as_ref().map(|s| &s.id) != st.song.as_ref().map(|s| &s.id) || old.queued != st.queued || old.shuffle != st.shuffle || old.repeat != st.repeat || old.autoplay != st.autoplay,
         };
         self.queue_dirty |= changed;
         self.status = Some(st);
@@ -590,6 +656,7 @@ impl App {
         let screen_row = old_pos.saturating_sub(self.offset);
         self.upnext_head.title = format!("\u{25b8} Up Next \u{b7} {}", crate::fmt::plural(q.up_next.len(), "song"));
         self.history_head.title = format!("\u{27f2} History \u{b7} {}", crate::fmt::plural(q.history.len(), "song"));
+        self.autoplay_head.title = "\u{221e} AutoPlay \u{b7} similar music will keep playing".to_string();
         self.station_head.title = q.station.as_ref().map(|n| format!("{n} \u{2014} songs are picked as you listen")).unwrap_or_default();
         self.queue = q;
         self.have_queue = true;
@@ -613,7 +680,7 @@ impl App {
     fn send(&mut self, be: &mut dyn Backend, req: Request, now: Instant) -> Option<Reply> {
         match be.request(&req) {
             Ok(Reply::Error { message }) => {
-                self.set_message(message, now);
+                self.set_error(message, now);
                 None
             }
             Ok(reply) => {
@@ -801,6 +868,16 @@ impl App {
             self.sort_key(view, key.code);
             return;
         }
+        // The keymap (`[keys]` in uzu.toml) turns the user's keys into the default ones the code
+        // below answers to. Typing a filter or a query takes every key as it comes.
+        let key = if self.typing() {
+            key
+        } else {
+            match self.config.keys.translate(key) {
+                Some(k) => k,
+                None => return,
+            }
+        };
         let comma = key.code == KeyCode::Char(',');
         match self.screen {
             Screen::Queue => {
@@ -866,6 +943,16 @@ impl App {
         self.drain(now);
     }
 
+    /// A filter or the search box is taking text.
+    fn typing(&self) -> bool {
+        match self.screen {
+            Screen::Queue => self.filtering,
+            Screen::Playlists | Screen::Albums => self.browse[usize::from(self.screen == Screen::Albums)].filtering,
+            Screen::Search => self.search.typing,
+            Screen::Lyrics => false,
+        }
+    }
+
     fn apply(&mut self, out: Out, be: &mut dyn Backend, now: Instant) {
         match out {
             Out::None => {}
@@ -917,6 +1004,7 @@ impl App {
                     self.set_message(format!("Repeat: {}", repeat_name(st.repeat)), now);
                 }
             }
+            KeyCode::Char('A') => self.toggle_autoplay(be, now),
             KeyCode::Char('f') => self.act(be, Request::Seek { to: SeekTo::Relative(SEEK_SECONDS) }, now),
             KeyCode::Char('b') => self.act(be, Request::Seek { to: SeekTo::Relative(-SEEK_SECONDS) }, now),
             KeyCode::Left if matches!(self.screen, Screen::Queue | Screen::Search | Screen::Lyrics) => self.act(be, Request::Seek { to: SeekTo::Relative(-SEEK_SECONDS) }, now),
@@ -1010,7 +1098,7 @@ impl App {
     fn activate(&mut self, be: &mut dyn Backend, now: Instant) {
         match self.selected_number() {
             Some(Some(n)) => {
-                let start = self.queue.up_next.len() + self.queue.next_lap.len() + self.queue.station_played.len();
+                let start = self.entries_before_history();
                 let req = if n > start { Request::History { index: n - start - 1 } } else { Request::Jump { index: n - 1 } };
                 self.act(be, req, now);
             },
@@ -1021,7 +1109,38 @@ impl App {
 
     /// Why entry `n` (past Up Next) can't be removed or moved.
     fn uneditable(&self, n: usize) -> &'static str {
-        if n > self.queue.up_next.len() + self.queue.next_lap.len() + self.queue.station_played.len() { "History songs can't be edited" } else if n > self.queue.up_next.len() + self.queue.next_lap.len() { "Songs the station played can't be edited" } else { "The next lap can't be edited" }
+        let (up, lap, auto) = (self.queue.up_next.len(), self.queue.next_lap.len(), self.queue.autoplay.len());
+        if n > self.entries_before_history() {
+            "History songs can't be edited"
+        } else if n > up + lap + auto {
+            "Songs the station played can't be edited"
+        } else if n > up + lap {
+            "AutoPlay songs can't be edited (A turns AutoPlay off)"
+        } else {
+            "The next lap can't be edited"
+        }
+    }
+
+    /// How many entries `Jump` knows before the History ones: Up Next, the next lap, AutoPlay's
+    /// suggestions and the songs a station played (the numbers the rows carry).
+    fn entries_before_history(&self) -> usize {
+        let q = &self.queue;
+        q.up_next.len() + q.next_lap.len() + q.autoplay.len() + q.station_played.len()
+    }
+
+    /// The `A` key: AutoPlay on or off. The answer is the queue, with the new state.
+    fn toggle_autoplay(&mut self, be: &mut dyn Backend, now: Instant) {
+        if let Some(Reply::Queue(q)) = self.send(be, Request::Autoplay { on: None }, now) {
+            self.poll_soon(now);
+            self.set_message(
+                match q.autoplay_on {
+                    Some(true) => "AutoPlay: on \u{221e}",
+                    Some(false) => "AutoPlay: off",
+                    None => "AutoPlay isn't offered here",
+                },
+                now,
+            );
+        }
     }
 
     fn remove_selected(&mut self, be: &mut dyn Backend, now: Instant) {

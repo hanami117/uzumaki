@@ -46,6 +46,7 @@ pub fn plan(cmd: &Command, has_cache: bool) -> Plan {
         | Command::Seek(_)
         | Command::Shuffle(_)
         | Command::Repeat(_)
+        | Command::Autoplay(_)
         | Command::Jump(_)
         | Command::JumpTitle(_)
         | Command::Move { .. }
@@ -206,7 +207,7 @@ mod tests {
             assert_eq!(plan(&parse(c), true), Plan::Cache, "{c}");
             assert_eq!(plan(&parse(c), false), Plan::Socket, "{c} without a cache");
         }
-        for c in ["play 3", "play mix 2", "toggle", "next", "prev", "seek +10", "jump 2", "jump numb", "pick 1", "insert 1", "add 1", "move 2 1", "del 1", "shuffle", "repeat all"] {
+        for c in ["play 3", "play mix 2", "toggle", "next", "prev", "seek +10", "jump 2", "jump numb", "pick 1", "insert 1", "add 1", "move 2 1", "del 1", "shuffle", "repeat all", "autoplay", "autoplay off"] {
             assert_eq!(plan(&parse(c), true), Plan::Connected, "{c}");
         }
         for c in ["status", "watch", "queue", "search x", "show", "vol", "vol 50", "pause"] {
