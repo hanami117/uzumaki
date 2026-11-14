@@ -42,6 +42,7 @@ impl Sym {
 }
 
 /// Point size of the glyph and side of the square it is centred in (points).
+#[cfg(target_os = "macos")]
 pub const GLYPH: f32 = 17.0;
 pub const CANVAS: f32 = 26.0;
 

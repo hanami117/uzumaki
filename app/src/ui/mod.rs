@@ -158,7 +158,9 @@ impl UiState {
 
 pub use airplay::{scene as scene_airplay, this_computer};
 /// A menu's width and an item's height (window points), for anchoring the native share picker.
+#[cfg(target_os = "macos")]
 pub(crate) const MENU_W: f32 = menu::W;
+#[cfg(target_os = "macos")]
 pub(crate) const MENU_ITEM_H: f32 = menu::ITEM_H;
 pub use new_playlist::{open as new_playlist_open, open_edit as edit_playlist_open};
 pub use now_playing::{close as close_now_playing, open as open_now_playing};

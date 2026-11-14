@@ -139,6 +139,7 @@ impl std::ops::Deref for PalRef {
 pub static PAL: PalRef = PalRef;
 
 /// The colours the AirPlay glyphs are rasterised in (`symbols.rs`): text, secondary text and accent of every palette.
+#[cfg(target_os = "macos")]
 pub fn symbol_colors() -> Vec<Color> {
     [&*DARK, &*LIGHT, &*LIGHT_INK].into_iter().flat_map(|p| [p.text, p.text2, p.accent]).chain([Color::WHITE]).collect()
 }
