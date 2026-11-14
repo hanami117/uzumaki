@@ -117,6 +117,7 @@ The actions and their default keys:
 | `volume_down`    | `-`                | volume down 5%                                   |
 | `shuffle`        | `s`                | shuffle on or off                                |
 | `repeat`         | `r`                | repeat: off, all, one                            |
+| `autoplay`       | `A`                | AutoPlay (∞) on or off                           |
 | `goto_queue`     | `1`                | the Queue screen                                 |
 | `goto_playlists` | `2`                | the Playlists screen                             |
 | `goto_search`    | `3`                | the Search screen                                |
@@ -220,6 +221,7 @@ The names you can use:
 | `{index}`     | the place of the song in that list         |
 | `{count}`     | the number of songs in that list           |
 | `{queued}`    | songs added with Play Next or Add to Queue |
+| `{autoplay}`  | `on` or `off` (AutoPlay, ∞); empty where it is not offered (local files, a station, an old app) |
 
 - `{title:20}` cuts the title to 20 columns and adds `…`.
 - `{{` and `}}` print a brace.

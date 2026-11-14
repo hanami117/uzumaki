@@ -112,6 +112,9 @@ fn fold_text(app: &App, now: Instant, level: usize) -> String {
         if shuffle {
             flags.push("[z]");
         }
+        if app.autoplay() == Some(true) {
+            flags.push("[\u{221e}]");
+        }
         if !flags.is_empty() {
             out.push_str(&format!("  {}", flags.join(" ")));
         }
@@ -199,7 +202,11 @@ fn status_lines(app: &App, width: usize, now: Instant) -> Vec<Line<'static>> {
     };
     let bar = bar_spans(app, width, now, true);
     vec![
-        Line::from(vec![label("Volume:"), Span::raw(volume)]),
+        match app.autoplay() {
+            // Only where the app offers it (an older app, local files and stations don't).
+            Some(on) => Line::from(vec![label("Volume:"), Span::raw(pad_right(&volume, 6)), Span::raw(if on { "AutoPlay: \u{221e}" } else { "AutoPlay: off" })]),
+            None => Line::from(vec![label("Volume:"), Span::raw(volume)]),
+        },
         Line::from(vec![label("Status:"), status]),
         Line::from(vec![label("Repeat:"), Span::raw(pad_right(repeat_name(repeat), 8)), Span::raw(format!("Shuffle: {}", if shuffle { "on" } else { "off" }))]),
         Line::from(vec![label("Time:"), Span::raw(time_text(app, now))]),
@@ -405,6 +412,7 @@ const HELP_COMMON: &[(&str, &str)] = &[
     ("f  b", "seek +10 s / -10 s"),
     ("+  -", "volume +5% / -5%"),
     ("s  r", "shuffle / repeat (off, all, one)"),
+    ("A", "AutoPlay (\u{221e}) on / off"),
     ("1 2 3 4 5", "queue/playlists/search/albums/lyrics"),
     ("i", "show / hide the cover"),
     ("F", "view: normal, showcase, solo (Esc: normal)"),

@@ -3519,3 +3519,228 @@ fn notifications_off_hides_the_short_messages_but_not_errors() {
     app.set_config(Config::parse("[defaults]\nnotifications = false\nbad line\n"), rig.now);
     assert!(app.message(rig.now).is_some_and(|m| m.contains("line 3")));
 }
+
+// ------------------------------------------------------------------------------- AutoPlay (∞)
+
+/// The fixture's queue with AutoPlay's suggestions after Up Next, AutoPlay on.
+fn with_autoplay(app: &mut App, now: Instant) {
+    let mut q = app.queue.clone();
+    q.repeat = RepeatMode::Off;
+    q.next_lap.clear();
+    q.autoplay = vec![s("x1", "Suggested One", "Ss", "S", 100.0), s("x2", "Suggested Two", "Tt", "T", 200.0)];
+    q.autoplay_on = Some(true);
+    app.set_queue(q, now);
+}
+
+fn playing_status(app: &App, autoplay: Option<bool>) -> Status {
+    Status { state: PlayState::Playing, song: app.queue.current.clone(), position: 72.0, duration: 239.0, volume: 0.82, connected: true, autoplay, ..Default::default() }
+}
+
+#[test]
+fn the_queue_has_an_autoplay_section_with_dim_numbered_suggestions() {
+    let now = Instant::now();
+    let mut app = fixture(now);
+    with_autoplay(&mut app, now);
+    app.resize_to(120, 30);
+    let buf = draw(&app, now, 120, 30);
+    let text = lines(&buf);
+    let at = text.iter().position(|l| l.contains("\u{221e} AutoPlay \u{b7} similar music will keep playing")).expect("the header");
+    assert!(text[at - 1].contains("Lose Yourself to Dance"), "after Up Next, whose last song is above: {}", text[at - 1]);
+    // Numbered on after the seven Up Next songs: 8 and 9.
+    assert!(text[at + 1].contains("Suggested One") && text[at + 1].contains(" 8 "), "{}", text[at + 1]);
+    assert!(text[at + 2].contains("Suggested Two") && text[at + 2].contains(" 9 "), "{}", text[at + 2]);
+    let x = text[at + 1].find("Suggested One").map(|b| text_width(&text[at + 1][..b])).unwrap();
+    assert!(buf[(x as u16, (at + 1) as u16)].modifier.contains(Modifier::DIM), "suggestions are dim");
+    // No section without suggestions (AutoPlay off, an old app).
+    let mut q = app.queue.clone();
+    q.autoplay.clear();
+    app.set_queue(q, now);
+    assert!(!lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("AutoPlay")));
+}
+
+#[test]
+fn the_cursor_skips_the_autoplay_header_and_enter_plays_a_suggestion() {
+    let mut rig = Rig::new("autoplay-rows");
+    let now = rig.now;
+    with_autoplay(&mut rig.app, now);
+    rig.app.resize(30);
+    let up = rig.app.queue.up_next.len();
+    rig.press(&[ch('G')]);
+    let rows = rig.app.rows();
+    assert!(rows[rig.app.cursor].kind == RowKind::Suggested);
+    assert_eq!(rows[rig.app.cursor].song.title, "Suggested Two");
+    rig.press(&[ch('k'), ch('k')]);
+    assert_eq!(rig.app.rows()[rig.app.cursor].song.title, rig.app.queue.up_next[up - 1].title, "k steps over the header onto the last Up Next song");
+    rig.press(&[ch('j'), ch('j'), key(KeyCode::Enter)]);
+    assert_eq!(rig.last(), Request::Jump { index: up + 1 }, "the second suggestion is entry {}", up + 2);
+    // They can't be removed or moved from here; the message says so.
+    rig.press(&[ch('d')]);
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay songs can't be edited (A turns AutoPlay off)"));
+    assert!(!rig.log.lock().unwrap().iter().any(|r| matches!(r, Request::Remove { .. })));
+    rig.press(&[ch('J')]);
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay songs can't be edited (A turns AutoPlay off)"));
+    // A filter hides the header and keeps the real numbers.
+    rig.press(&[ch('/'), ch('S'), ch('u'), ch('g')]);
+    let rows = rig.app.rows();
+    let vis = rig.app.visible();
+    assert!(vis.iter().all(|&i| rows[i].kind != RowKind::AutoPlay));
+    assert_eq!(vis.iter().map(|&i| rows[i].number).collect::<Vec<_>>(), [Some(up + 1), Some(up + 2)]);
+}
+
+#[test]
+fn history_keeps_its_numbers_with_suggestions_in_the_queue() {
+    let mut rig = Rig::new("autoplay-history");
+    let now = rig.now;
+    with_autoplay(&mut rig.app, now);
+    let mut q = rig.app.queue.clone();
+    q.history = vec![s("h1", "Older", "Hh", "H", 100.0), s("h2", "Old", "Hh", "H", 100.0)];
+    rig.app.set_queue(q, now);
+    rig.app.resize(40);
+    let up = rig.app.queue.up_next.len();
+    let rows = rig.app.rows();
+    let past: Vec<_> = rows.iter().filter(|r| matches!(r.kind, RowKind::Past(_))).map(|r| r.number).collect();
+    assert_eq!(past, [Some(up + 2 + 1), Some(up + 2 + 2)], "History numbers come after the suggestions");
+    let first_past = rows.iter().position(|r| matches!(r.kind, RowKind::Past(_))).unwrap();
+    rig.app.cursor = first_past;
+    rig.press(&[key(KeyCode::Enter)]);
+    assert_eq!(rig.last(), Request::History { index: 0 }, "the oldest history song is History entry 0");
+}
+
+/// The fake app plus AutoPlay: `Autoplay` flips the setting and answers with the queue.
+fn autoplay_rig(name: &str, old_app: bool) -> Rig {
+    let log: Arc<Mutex<Vec<Request>>> = Arc::default();
+    let inner = fake_handler_logged(log.clone());
+    let on = Mutex::new(true);
+    let handler = move |req: Request| match req {
+        Request::Autoplay { on: want } => {
+            let mut on = on.lock().unwrap();
+            if old_app {
+                return uzumaki_ctl::Reply::Error { message: "bad request: unknown variant `autoplay`".into() };
+            }
+            *on = want.unwrap_or(!*on);
+            uzumaki_ctl::Reply::Queue(Queue { autoplay_on: Some(*on), ..Default::default() })
+        }
+        other => inner(other),
+    };
+    // The fake logs what it answers itself; log the AutoPlay requests here too.
+    let log2 = log.clone();
+    Rig::serving(name, log, move |req| {
+        if matches!(req, Request::Autoplay { .. }) {
+            log2.lock().unwrap().push(req.clone());
+        }
+        handler(req)
+    })
+}
+
+#[test]
+fn a_capital_a_toggles_autoplay_and_says_the_new_state() {
+    let mut rig = autoplay_rig("autoplay-key", false);
+    rig.press(&[ch('A')]);
+    assert_eq!(rig.last(), Request::Autoplay { on: None });
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay: off"));
+    rig.press(&[ch('A')]);
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay: on \u{221e}"));
+    // On every screen (a common key), and typing in the filter is still typing.
+    rig.press(&[ch('2'), ch('A')]);
+    assert_eq!(rig.app.message(rig.now), Some("AutoPlay: off"));
+    rig.press(&[ch('1'), ch('/'), ch('A')]);
+    assert_eq!(rig.app.filter, "A");
+    assert_eq!(rig.log.lock().unwrap().iter().filter(|r| matches!(r, Request::Autoplay { .. })).count(), 3);
+}
+
+#[test]
+fn autoplay_on_an_old_app_is_an_error_message_not_a_crash() {
+    let mut rig = autoplay_rig("autoplay-old", true);
+    rig.press(&[ch('A')]);
+    assert_eq!(rig.last(), Request::Autoplay { on: None });
+    assert!(rig.app.message(rig.now).is_some_and(|m| m.contains("bad request")), "{:?}", rig.app.message(rig.now));
+    assert!(!rig.app.quit);
+}
+
+#[test]
+fn the_autoplay_key_can_be_remapped_or_unbound() {
+    let mut rig = rig_with_autoplay("autoplay-remap", "[keys]\nautoplay = \"u\"\n");
+    rig.press(&[ch('A')]);
+    assert!(!rig.log.lock().unwrap().iter().any(|r| matches!(r, Request::Autoplay { .. })), "the old key does nothing");
+    rig.press(&[ch('u')]);
+    assert_eq!(rig.last(), Request::Autoplay { on: None });
+    let mut rig = rig_with_autoplay("autoplay-unbound", "[keys]\nautoplay = []\n");
+    rig.press(&[ch('A')]);
+    assert!(!rig.log.lock().unwrap().iter().any(|r| matches!(r, Request::Autoplay { .. })));
+    // The default key is free of the others: nothing else answers to A, and no warning in the default file.
+    assert!(crate::config::Config::parse(&crate::config::default_file()).warnings.is_empty());
+    assert_eq!(crate::config::keys::ACTIONS.iter().filter(|a| a.keys.contains(&"A")).count(), 1);
+}
+
+fn rig_with_autoplay(name: &str, config: &str) -> Rig {
+    let mut rig = autoplay_rig(name, false);
+    rig.app.set_config(Config::parse(config), rig.now);
+    rig
+}
+
+#[test]
+fn the_help_and_hints_show_the_autoplay_key() {
+    let now = Instant::now();
+    let mut app = fixture(now);
+    app.resize_to(120, 40);
+    app.help = true;
+    let text = lines(&draw(&app, now, 120, 40));
+    assert!(text.iter().any(|l| l.contains("AutoPlay (\u{221e}) on / off")), "{text:?}");
+    app.set_config(Config::parse("[keys]\nautoplay = \"u\"\n"), now);
+    let text = lines(&draw(&app, now, 120, 40));
+    let row = text.iter().find(|l| l.contains("AutoPlay (\u{221e}) on / off")).expect("the row");
+    assert!(row.contains(" u ") || row.contains("│u"), "relabelled: {row}");
+}
+
+#[test]
+fn the_player_shows_the_infinity_only_where_the_app_offers_autoplay() {
+    let now = Instant::now();
+    let mut app = fixture(now);
+    app.resize_to(120, 30);
+    // An older app says nothing: no AutoPlay line anywhere (the frames stay as they were).
+    assert!(!lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("AutoPlay") || l.contains('\u{221e}')));
+    let st = playing_status(&app, Some(true));
+    app.set_status(st, now);
+    assert!(lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("Volume:  82%") && l.contains("AutoPlay: \u{221e}")), "{:?}", lines(&draw(&app, now, 120, 30)));
+    let st = playing_status(&app, Some(false));
+    app.set_status(st, now);
+    let text = lines(&draw(&app, now, 120, 30));
+    assert!(text.iter().any(|l| l.contains("Volume:  82%") && l.contains("AutoPlay: off")), "{text:?}");
+    // Narrow: the compact player folds it into the flags.
+    let st = playing_status(&app, Some(true));
+    app.set_status(st, now);
+    app.resize_to(70, 12);
+    let text = lines(&draw(&app, now, 70, 12));
+    assert!(text.iter().any(|l| l.contains("[\u{221e}]")), "{text:?}");
+    let st = playing_status(&app, Some(false));
+    app.set_status(st, now);
+    assert!(!lines(&draw(&app, now, 70, 12)).iter().any(|l| l.contains('\u{221e}')));
+}
+
+#[test]
+fn the_showcase_settings_line_ends_with_the_infinity_when_on() {
+    let now = Instant::now();
+    let (mut app, _) = in_view(Layout::Showcase, 120, 30, now);
+    let st = playing_status(&app, Some(true));
+    app.set_status(st, now);
+    assert!(lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("autoplay \u{221e}")));
+    let st = playing_status(&app, Some(false));
+    app.set_status(st, now);
+    assert!(!lines(&draw(&app, now, 120, 30)).iter().any(|l| l.contains("autoplay")));
+}
+
+#[test]
+fn a_change_of_autoplay_elsewhere_refreshes_the_queue() {
+    let mut rig = Rig::new("autoplay-refresh");
+    let now = rig.now;
+    let st = playing_status(&rig.app, Some(true));
+    rig.app.set_status(st, now);
+    rig.app.tick(&mut rig.client, now);
+    let asked = |rig: &Rig| rig.log.lock().unwrap().iter().filter(|r| **r == Request::Queue).count();
+    let before = asked(&rig);
+    // The setting flips in the app (its window, another uzu): the next status poll carries it.
+    let st = playing_status(&rig.app, Some(false));
+    rig.app.set_status(st, now);
+    rig.app.tick(&mut rig.client, now + Duration::from_millis(1));
+    assert!(asked(&rig) > before, "the suggestions came or went with it");
+}

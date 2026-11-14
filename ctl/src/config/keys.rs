@@ -43,6 +43,7 @@ pub const ACTIONS: &[Action] = &[
     a("volume_down", &["-"], "volume down 5%"),
     a("shuffle", &["s"], "shuffle on or off"),
     a("repeat", &["r"], "repeat: off, all, one"),
+    a("autoplay", &["A"], "AutoPlay (∞) on or off"),
     a("goto_queue", &["1"], "the Queue screen"),
     a("goto_playlists", &["2"], "the Playlists screen"),
     a("goto_search", &["3"], "the Search screen"),

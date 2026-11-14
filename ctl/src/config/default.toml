@@ -44,7 +44,7 @@
 # --------------------------------------------------------------------- [format]
 # One line of text for a status bar. Run it with: uzu status --line
 # {artist} {title} {album} {elapsed} {duration} {remaining} {percent} {state} {icon}
-# {volume} {shuffle} {repeat} {source} {index} {count} {queued}
+# {volume} {shuffle} {repeat} {source} {index} {count} {queued} {autoplay}
 # {title:20} cuts the title to 20 columns. {{ and }} are a brace.
 # status_idle is printed when nothing plays (empty: the bar module disappears).
 [format]

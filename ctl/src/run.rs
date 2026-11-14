@@ -359,6 +359,22 @@ fn print_queue(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, q: &Queue, 
     put_all(out, &queue_lines(q, st.as_ref(), all, env.term))
 }
 
+/// `autoplay [on|off|toggle]`: the answer is the new state, `autoplay: on` (or `off`).
+fn autoplay(be: &mut dyn Backend, out: &mut dyn Write, on: Option<bool>, quiet: bool) -> Result<(), Fail> {
+    let q = match call(be, Request::Autoplay { on }) {
+        Ok(Reply::Queue(q)) => q,
+        Ok(_) => return Err(unexpected()),
+        // An app from before AutoPlay doesn't know the command.
+        Err(f) if f.msg.contains("bad request") => return Err(Fail::err("this Uzumaki is too old for AutoPlay (update it)")),
+        Err(f) => return Err(f),
+    };
+    match q.autoplay_on {
+        Some(_) if quiet => Ok(()),
+        Some(state) => put(out, &format!("autoplay: {}", if state { "on" } else { "off" })),
+        None => Err(Fail::err("AutoPlay isn't offered here (local files only, or a station is playing)")),
+    }
+}
+
 /// `jump`, `move` and `del` change the queue; the answer is the new queue (unless `quiet`).
 fn change_queue(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, req: Request, quiet: bool) -> Result<(), Fail> {
     match call(be, req)? {
@@ -486,6 +502,7 @@ pub fn run(inv: &Invocation, be: &mut dyn Backend, env: &Env, out: &mut dyn Writ
         Command::Vol(None) => volume(be, env, out),
         Command::Shuffle(on) => act(be, env, out, Request::Shuffle { on: *on }, false, q),
         Command::Repeat(mode) => act(be, env, out, Request::Repeat { mode: *mode }, false, q),
+        Command::Autoplay(on) => autoplay(be, out, *on, q),
         Command::Playlists => list_collections(be, env, out, Kind::Playlist, ""),
         Command::Albums(filter) => list_collections(be, env, out, Kind::Album, filter),
         Command::Playlist(query) => show_tracks(be, env, out, Kind::Playlist, query),

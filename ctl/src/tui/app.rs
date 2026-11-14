@@ -123,6 +123,8 @@ pub struct App {
     have_queue: bool,
     /// Stand-in song for the station header row, its title the text (set with the queue).
     station_head: uzumaki_ctl::SongInfo,
+    /// The text of the "∞ AutoPlay" divider above the suggested songs.
+    autoplay_head: uzumaki_ctl::SongInfo,
     /// `title` is the History divider's text ("⟲ History · 7 songs"), set with each queue.
     history_head: uzumaki_ctl::SongInfo,
     /// The text of the "▸ Up Next · n songs" divider between the history and Up Next.
@@ -184,6 +186,7 @@ impl App {
             queue: Queue::default(),
             have_queue: false,
             station_head: Default::default(),
+            autoplay_head: Default::default(),
             history_head: Default::default(),
             upnext_head: Default::default(),
             cursor: 0,
@@ -288,13 +291,13 @@ impl App {
     /// the next lap, numbered on from Up Next (only Enter takes those: `Jump` knows them).
     pub fn rows(&self) -> Vec<Row<'_>> {
         let (n, lap) = (self.queue.up_next.len(), &self.queue.next_lap);
-        let mut rows = Vec::with_capacity(n + lap.len() + 2);
+        let mut rows = Vec::with_capacity(n + lap.len() + self.queue.autoplay.len() + 3);
         let past = self.queue.history.len();
         if past > 0 {
             // Oldest first, as the app sends it: entry i is `H(past - i)`, so the song played just
             // before the current one is H1. The number stays the entry number Enter sends.
             rows.push(Row { number: None, song: &self.history_head, playing: false, kind: RowKind::History });
-            rows.extend(self.queue.history.iter().enumerate().map(|(i, song)| Row { number: Some(n + lap.len() + self.queue.station_played.len() + i + 1), song, playing: false, kind: RowKind::Past(past - i) }));
+            rows.extend(self.queue.history.iter().enumerate().map(|(i, song)| Row { number: Some(self.entries_before_history() + i + 1), song, playing: false, kind: RowKind::Past(past - i) }));
         }
         if let Some(song) = &self.queue.current {
             rows.push(Row { number: None, song, playing: true, kind: RowKind::Song });
@@ -310,9 +313,14 @@ impl App {
             rows.push(Row { number: None, song: &REPEAT_ROW, playing: false, kind: RowKind::Repeat });
             rows.extend(lap.iter().enumerate().map(|(i, song)| Row { number: Some(n + i + 1), song, playing: false, kind: RowKind::NextLap }));
         }
+        if !self.queue.autoplay.is_empty() {
+            // Suggestions numbered on after Up Next and the next lap (only Enter takes them: `Jump`).
+            rows.push(Row { number: None, song: &self.autoplay_head, playing: false, kind: RowKind::AutoPlay });
+            rows.extend(self.queue.autoplay.iter().enumerate().map(|(i, song)| Row { number: Some(n + lap.len() + i + 1), song, playing: false, kind: RowKind::Suggested }));
+        }
         if self.queue.station.is_some() {
             rows.push(Row { number: None, song: &self.station_head, playing: false, kind: RowKind::Station });
-            let from = n + lap.len();
+            let from = n + lap.len() + self.queue.autoplay.len();
             if self.queue.history.is_empty() {
                 rows.extend(self.queue.station_played.iter().enumerate().map(|(i, song)| Row { number: Some(from + i + 1), song, playing: false, kind: RowKind::Played }));
             }
@@ -325,7 +333,7 @@ impl App {
     pub fn num_width(&self) -> usize {
         let q = &self.queue;
         let digits = |n: usize| n.to_string().len();
-        let top = q.up_next.len() + q.next_lap.len() + q.station_played.len() + q.history.len();
+        let top = self.entries_before_history() + q.history.len();
         let past = if q.history.is_empty() { 0 } else { 1 + digits(q.history.len()) };
         digits(top).max(past).max(1)
     }
@@ -453,6 +461,15 @@ impl App {
         match &self.status {
             Some(st) => (st.shuffle, st.repeat),
             None => (self.queue.shuffle, self.queue.repeat),
+        }
+    }
+
+    /// AutoPlay (∞) on or off; `None` where the app doesn't offer it (an older app, local files,
+    /// a station) or isn't known yet.
+    pub fn autoplay(&self) -> Option<bool> {
+        match &self.status {
+            Some(st) => st.autoplay,
+            None => self.queue.autoplay_on,
         }
     }
 
@@ -626,7 +643,7 @@ impl App {
         }
         let changed = match &self.status {
             None => true,
-            Some(old) => old.song.as_ref().map(|s| &s.id) != st.song.as_ref().map(|s| &s.id) || old.queued != st.queued || old.shuffle != st.shuffle || old.repeat != st.repeat,
+            Some(old) => old.song.as_ref().map(|s| &s.id) != st.song.as_ref().map(|s| &s.id) || old.queued != st.queued || old.shuffle != st.shuffle || old.repeat != st.repeat || old.autoplay != st.autoplay,
         };
         self.queue_dirty |= changed;
         self.status = Some(st);
@@ -639,6 +656,7 @@ impl App {
         let screen_row = old_pos.saturating_sub(self.offset);
         self.upnext_head.title = format!("\u{25b8} Up Next \u{b7} {}", crate::fmt::plural(q.up_next.len(), "song"));
         self.history_head.title = format!("\u{27f2} History \u{b7} {}", crate::fmt::plural(q.history.len(), "song"));
+        self.autoplay_head.title = "\u{221e} AutoPlay \u{b7} similar music will keep playing".to_string();
         self.station_head.title = q.station.as_ref().map(|n| format!("{n} \u{2014} songs are picked as you listen")).unwrap_or_default();
         self.queue = q;
         self.have_queue = true;
@@ -986,6 +1004,7 @@ impl App {
                     self.set_message(format!("Repeat: {}", repeat_name(st.repeat)), now);
                 }
             }
+            KeyCode::Char('A') => self.toggle_autoplay(be, now),
             KeyCode::Char('f') => self.act(be, Request::Seek { to: SeekTo::Relative(SEEK_SECONDS) }, now),
             KeyCode::Char('b') => self.act(be, Request::Seek { to: SeekTo::Relative(-SEEK_SECONDS) }, now),
             KeyCode::Left if matches!(self.screen, Screen::Queue | Screen::Search | Screen::Lyrics) => self.act(be, Request::Seek { to: SeekTo::Relative(-SEEK_SECONDS) }, now),
@@ -1079,7 +1098,7 @@ impl App {
     fn activate(&mut self, be: &mut dyn Backend, now: Instant) {
         match self.selected_number() {
             Some(Some(n)) => {
-                let start = self.queue.up_next.len() + self.queue.next_lap.len() + self.queue.station_played.len();
+                let start = self.entries_before_history();
                 let req = if n > start { Request::History { index: n - start - 1 } } else { Request::Jump { index: n - 1 } };
                 self.act(be, req, now);
             },
@@ -1090,7 +1109,38 @@ impl App {
 
     /// Why entry `n` (past Up Next) can't be removed or moved.
     fn uneditable(&self, n: usize) -> &'static str {
-        if n > self.queue.up_next.len() + self.queue.next_lap.len() + self.queue.station_played.len() { "History songs can't be edited" } else if n > self.queue.up_next.len() + self.queue.next_lap.len() { "Songs the station played can't be edited" } else { "The next lap can't be edited" }
+        let (up, lap, auto) = (self.queue.up_next.len(), self.queue.next_lap.len(), self.queue.autoplay.len());
+        if n > self.entries_before_history() {
+            "History songs can't be edited"
+        } else if n > up + lap + auto {
+            "Songs the station played can't be edited"
+        } else if n > up + lap {
+            "AutoPlay songs can't be edited (A turns AutoPlay off)"
+        } else {
+            "The next lap can't be edited"
+        }
+    }
+
+    /// How many entries `Jump` knows before the History ones: Up Next, the next lap, AutoPlay's
+    /// suggestions and the songs a station played (the numbers the rows carry).
+    fn entries_before_history(&self) -> usize {
+        let q = &self.queue;
+        q.up_next.len() + q.next_lap.len() + q.autoplay.len() + q.station_played.len()
+    }
+
+    /// The `A` key: AutoPlay on or off. The answer is the queue, with the new state.
+    fn toggle_autoplay(&mut self, be: &mut dyn Backend, now: Instant) {
+        if let Some(Reply::Queue(q)) = self.send(be, Request::Autoplay { on: None }, now) {
+            self.poll_soon(now);
+            self.set_message(
+                match q.autoplay_on {
+                    Some(true) => "AutoPlay: on \u{221e}",
+                    Some(false) => "AutoPlay: off",
+                    None => "AutoPlay isn't offered here",
+                },
+                now,
+            );
+        }
     }
 
     fn remove_selected(&mut self, be: &mut dyn Backend, now: Instant) {

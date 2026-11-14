@@ -615,6 +615,19 @@ fn every_placeholder() {
 }
 
 #[test]
+fn autoplay_shows_on_off_or_nothing() {
+    let mut st = playing();
+    assert_eq!(Format::parse("[{autoplay}]").0.render(&st), "[]", "an app that doesn't say");
+    st.autoplay = Some(true);
+    assert_eq!(Format::parse("[{autoplay}]").0.render(&st), "[on]");
+    st.autoplay = Some(false);
+    assert_eq!(Format::parse("{autoplay:2}").0.render(&st), "o…");
+    assert_eq!(Format::parse("{autoplay}").0.render(&st), "off");
+    // Through the file: the placeholder is known, so no warning.
+    assert!(Config::parse("[format]\nstatus_format = \"{title} {autoplay}\"\n").warnings.is_empty());
+}
+
+#[test]
 fn state_and_icon_follow_the_player() {
     let mut st = playing();
     for (state, word, icon) in [(PlayState::Paused, "paused", "‖"), (PlayState::Loading, "loading", "…"), (PlayState::Stopped, "stopped", "■")] {

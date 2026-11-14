@@ -153,6 +153,7 @@ impl State {
                 .and_then(|s| s.artwork.as_ref())
                 .and_then(crate::art::cached_file)
                 .map(|p| p.to_string_lossy().into_owned()),
+            autoplay: self.autoplay_offered().then_some(self.settings.autoplay),
         }
     }
 

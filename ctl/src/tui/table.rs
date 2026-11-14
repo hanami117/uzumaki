@@ -93,12 +93,16 @@ pub enum RowKind {
     Station,
     /// A song the station already played (dim; Enter plays it on its own).
     Played,
+    /// The "∞ AutoPlay" header above the suggestions (`song.title` is its text).
+    AutoPlay,
+    /// A song AutoPlay suggests after Up Next (dim; Enter plays it, but it can't be moved or removed).
+    Suggested,
 }
 
 impl RowKind {
     /// A line the cursor skips (it is not a song).
     pub fn is_divider(self) -> bool {
-        matches!(self, RowKind::Repeat | RowKind::Station | RowKind::History | RowKind::UpNext)
+        matches!(self, RowKind::Repeat | RowKind::Station | RowKind::History | RowKind::UpNext | RowKind::AutoPlay)
     }
 }
 
@@ -210,7 +214,7 @@ fn row_line(row: &Row, cols: &[(Col, usize)], mark: Option<Mark>, glyph: &str) -
         let indent: usize = cols.iter().take_while(|(c, _)| *c != Col::Title).map(|(_, w)| w + GAP).sum();
         let text = match row.kind {
             RowKind::Station => format!("◉ {}", row.song.title),
-            RowKind::History | RowKind::UpNext => row.song.title.clone(),
+            RowKind::History | RowKind::UpNext | RowKind::AutoPlay => row.song.title.clone(),
             _ => "↻ Repeat".to_string(),
         };
         return Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(text, dim())]);
@@ -234,7 +238,7 @@ fn row_line(row: &Row, cols: &[(Col, usize)], mark: Option<Mark>, glyph: &str) -
         if row.playing {
             style = coral().add_modifier(Modifier::BOLD);
         }
-        if !row.song.playable || matches!(row.kind, RowKind::NextLap | RowKind::Played | RowKind::Past(_)) {
+        if !row.song.playable || matches!(row.kind, RowKind::NextLap | RowKind::Played | RowKind::Suggested | RowKind::Past(_)) {
             style = style.add_modifier(Modifier::DIM);
         }
         if let Some(m) = mark {

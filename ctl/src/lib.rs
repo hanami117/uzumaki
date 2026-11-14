@@ -164,6 +164,10 @@ pub enum Request {
     Shuffle { on: Option<bool> },
     /// `None` cycles Off → All → One → Off, like the player bar. Replies `Status`.
     Repeat { mode: Option<RepeatMode> },
+    /// Turns AutoPlay (∞) on or off; `None` toggles. An error where AutoPlay isn't offered (local
+    /// only mode, a station playing). An older app doesn't know it ("bad request"). Replies `Queue`,
+    /// whose `autoplay_on` is the new state.
+    Autoplay { on: Option<bool> },
     /// The library's playlists in sidebar order: those pinned in the app first (`CollectionInfo::pinned`,
     /// newer apps), then Favourite Songs, then the rest.
     /// Replies `Collections`.
@@ -191,7 +195,7 @@ pub enum Request {
     /// Now playing and Up Next. Replies `Queue`.
     Queue,
     /// Plays entry `index` (0-based) of `Queue::up_next`, then of `Queue::next_lap`, then of
-    /// `Queue::station_played`, now. Replies `Status`.
+    /// `Queue::autoplay`, then of `Queue::station_played`, now. Replies `Status`.
     Jump { index: usize },
     /// Replay chronological session history entry (0-based). Replies Status.
     History { index: usize },
@@ -366,6 +370,10 @@ pub struct Status {
     /// `uzu` always runs where the app does (over ssh only the terminal is elsewhere).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover: Option<String>,
+    /// The AutoPlay setting (∞), as in `Queue::autoplay_on`: `None` from an older app, in local
+    /// only mode and while a station plays (AutoPlay doesn't apply there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autoplay: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
@@ -613,6 +621,25 @@ mod tests {
             queued: usize,
         }
         assert_eq!(serde_json::from_str::<OldQueue>(&json).unwrap().queued, 0);
+    }
+
+    /// The autoplay command and `Status::autoplay` are additions: an old app's status has none, a
+    /// request round-trips, and the field is not sent when unknown.
+    #[test]
+    fn autoplay_command_and_status_field() {
+        for on in [None, Some(true), Some(false)] {
+            let text = serde_json::to_string(&Request::Autoplay { on }).unwrap();
+            assert_eq!(serde_json::from_str::<Request>(&text).unwrap(), Request::Autoplay { on });
+        }
+        assert_eq!(serde_json::to_string(&Request::Autoplay { on: None }).unwrap(), r#"{"cmd":"autoplay","on":null}"#);
+        let old = r#"{"reply":"status","state":"playing","song":null,"position":1.0,"duration":2.0,"volume":0.5,"shuffle":false,"repeat":"off","source":"","index":null,"count":0,"queued":0,"connected":true,"signed_in":false,"error":null}"#;
+        let Reply::Status(st) = serde_json::from_str::<Reply>(old).unwrap() else { panic!("not a status") };
+        assert_eq!(st.autoplay, None);
+        assert!(!serde_json::to_string(&Reply::Status(st.clone())).unwrap().contains("autoplay"));
+        let with = Reply::Status(Status { autoplay: Some(true), ..st });
+        let text = serde_json::to_string(&with).unwrap();
+        assert!(text.contains(r#""autoplay":true"#), "{text}");
+        assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), with);
     }
 
     fn temp_socket(name: &str) -> PathBuf {

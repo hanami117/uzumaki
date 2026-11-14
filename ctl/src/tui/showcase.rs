@@ -265,6 +265,9 @@ fn settings_text(app: &App, width: usize) -> String {
     if repeat == RepeatMode::Off && !shuffle {
         parts.truncate(1);
     }
+    if app.autoplay() == Some(true) {
+        parts.push("autoplay \u{221e}".to_string());
+    }
     while !parts.is_empty() && text_width(&parts.join(" · ")) > width {
         parts.pop();
     }

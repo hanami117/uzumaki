@@ -16,6 +16,7 @@
 //! | `source`    | the list playback started from          |
 //! | `index` `count` | place of the song in that list, and its size |
 //! | `queued`    | songs added with Play Next / Add to Queue |
+//! | `autoplay`  | `on`/`off` (AutoPlay, ∞); empty when it is not offered |
 
 use uzumaki_ctl::{PlayState, Status};
 
@@ -26,7 +27,7 @@ use super::{did_you_mean, list_of};
 /// Used by `uzu status --line` when the file has no `status_format`.
 pub const DEFAULT: &str = "{artist} — {title}";
 
-pub const FIELDS: &[&str] = &["artist", "title", "album", "elapsed", "duration", "remaining", "percent", "state", "icon", "volume", "shuffle", "repeat", "source", "index", "count", "queued"];
+pub const FIELDS: &[&str] = &["artist", "title", "album", "elapsed", "duration", "remaining", "percent", "state", "icon", "volume", "shuffle", "repeat", "source", "index", "count", "queued", "autoplay"];
 
 #[derive(Clone, Debug, PartialEq)]
 enum Part {
@@ -163,6 +164,7 @@ fn value(name: &str, st: &Status) -> String {
         "index" => st.index.map(|i| (i + 1).to_string()).unwrap_or_default(),
         "count" => if st.count > 0 { st.count.to_string() } else { String::new() },
         "queued" => st.queued.to_string(),
+        "autoplay" => st.autoplay.map(|on| if on { "on" } else { "off" }).unwrap_or_default().into(),
         _ => String::new(),
     }
 }

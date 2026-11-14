@@ -23,6 +23,8 @@ pub enum Command {
     Vol(Option<VolumeTo>),
     Shuffle(Option<bool>),
     Repeat(Option<RepeatMode>),
+    /// `None` toggles.
+    Autoplay(Option<bool>),
     Playlists,
     Playlist(String),
     Albums(String),
@@ -170,7 +172,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             [] => Command::Toggle,
             [what] if what == "shuffle" => Command::Shuffle(None),
             [what] if what == "repeat" => Command::Repeat(None),
-            [what, ..] => return Err(format!("'toggle' is play/pause; it can also take 'shuffle' or 'repeat' (got '{what}')")),
+            [what] if what == "autoplay" => Command::Autoplay(None),
+            [what, ..] => return Err(format!("'toggle' is play/pause; it can also take 'shuffle', 'repeat' or 'autoplay' (got '{what}')")),
         },
         "next" => none(name, p).map(|_| Command::Next)?,
         "prev" => none(name, p).map(|_| Command::Prev)?,
@@ -188,6 +191,13 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             [a] if a == "all" => Some(RepeatMode::All),
             [a] if a == "one" => Some(RepeatMode::One),
             _ => return Err("'repeat' takes off, all or one".into()),
+        }),
+        "autoplay" => Command::Autoplay(match p {
+            [] => None,
+            [a] if a == "toggle" => None,
+            [a] if a == "on" => Some(true),
+            [a] if a == "off" => Some(false),
+            _ => return Err("'autoplay' takes on, off or toggle".into()),
         }),
         "playlists" => none(name, p).map(|_| Command::Playlists)?,
         "playlist" => Command::Playlist(target(name, p, "a playlist (number or name)")?),
@@ -261,6 +271,7 @@ In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (
   vol [<level>]               60  +5  -5
   shuffle [on|off]            no argument: turn it on/off (also: toggle shuffle)
   repeat [off|all|one]        no argument: off -> all -> one (also: toggle repeat)
+  autoplay [on|off|toggle]    AutoPlay (∞): similar songs after the queue; prints the new state
   playlists                   playlist <playlist>
   albums [<filter>]           album <album>
   history <n>                 replay a History entry (oldest first)
@@ -315,6 +326,11 @@ mod tests {
         assert_eq!(p("shuffle"), Ok(Command::Shuffle(None)));
         assert_eq!(p("toggle"), Ok(Command::Toggle));
         assert_eq!(p("toggle shuffle"), Ok(Command::Shuffle(None)));
+        assert_eq!(p("autoplay"), Ok(Command::Autoplay(None)));
+        assert_eq!(p("autoplay toggle"), Ok(Command::Autoplay(None)));
+        assert_eq!(p("toggle autoplay"), Ok(Command::Autoplay(None)));
+        assert_eq!(p("autoplay on"), Ok(Command::Autoplay(Some(true))));
+        assert_eq!(p("autoplay off"), Ok(Command::Autoplay(Some(false))));
         assert_eq!(p("toggle repeat"), Ok(Command::Repeat(None)));
         assert!(p("toggle volume").is_err());
         assert_eq!(p("repeat one"), Ok(Command::Repeat(Some(RepeatMode::One))));
@@ -339,7 +355,7 @@ mod tests {
 
     #[test]
     fn usage_errors() {
-        for bad in ["frobnicate", "seek", "seek x", "play -a", "play -p", "play album", "play x 0", "jump", "move", "move 1", "move 1 2 3", "move a 1", "move 0 1", "del", "del x", "del 0", "jump 0", "pick", "pick a", "shuffle maybe", "repeat twice", "next now", "queue -b"] {
+        for bad in ["frobnicate", "seek", "seek x", "play -a", "play -p", "play album", "play x 0", "jump", "move", "move 1", "move 1 2 3", "move a 1", "move 0 1", "del", "del x", "del 0", "jump 0", "pick", "pick a", "shuffle maybe", "repeat twice", "autoplay maybe", "autoplay on off", "next now", "queue -b"] {
             assert!(p(bad).is_err(), "{bad}");
         }
     }

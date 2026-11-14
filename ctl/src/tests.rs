@@ -442,3 +442,74 @@ fn quit_with_nothing_running_says_so() {
     assert!(!crate::quit(&path, Duration::from_millis(100), &mut out).unwrap());
     assert_eq!(String::from_utf8(out).unwrap(), "Uzumaki isn't running.\n");
 }
+
+// ------------------------------------------------------------------------------------ autoplay
+
+/// An app with AutoPlay: the setting starts on and the answer to `Autoplay` is the new queue.
+fn autoplay_app(offered: bool) -> impl Fn(Request) -> Reply + Send + Sync + 'static {
+    let on = Mutex::new(true);
+    move |req| match req {
+        Request::Autoplay { on: want } => {
+            let mut on = on.lock().unwrap();
+            *on = want.unwrap_or(!*on);
+            Reply::Queue(Queue { autoplay_on: offered.then_some(*on), ..Default::default() })
+        }
+        _ => Reply::Error { message: "not in the fake".into() },
+    }
+}
+
+#[test]
+fn autoplay_prints_the_new_state() {
+    let path = socket("autoplay");
+    let _server = serve(&path, autoplay_app(true)).unwrap();
+    // No argument toggles (the fake starts with AutoPlay on), like `uzu shuffle`.
+    assert_eq!(drive(&path, "autoplay").1, "autoplay: off\n");
+    assert_eq!(drive(&path, "autoplay").1, "autoplay: on\n");
+    assert_eq!(drive(&path, "autoplay toggle").1, "autoplay: off\n");
+    assert_eq!(drive(&path, "toggle autoplay").1, "autoplay: on\n");
+    assert_eq!(drive(&path, "autoplay off").1, "autoplay: off\n");
+    assert_eq!(drive(&path, "autoplay off").1, "autoplay: off\n", "setting it again keeps it");
+    assert_eq!(drive(&path, "autoplay on").1, "autoplay: on\n");
+    // -q: the same, silently.
+    assert_eq!(drive(&path, "-q autoplay off").1, "");
+    assert_eq!(drive(&path, "autoplay").1, "autoplay: on\n");
+}
+
+#[test]
+fn autoplay_says_why_it_cannot() {
+    // Local files or a station: the app answers with an error (an old reading of the queue too).
+    let path = socket("autoplay-error");
+    let _server = serve(&path, |_| Reply::Error { message: "AutoPlay isn't offered here (local files only, or a station is playing)".into() }).unwrap();
+    let fail = drive(&path, "autoplay").0.unwrap_err();
+    assert_eq!((fail.code, fail.msg.as_str()), (1, "uzu: AutoPlay isn't offered here (local files only, or a station is playing)"));
+    // A queue without the state says the same, and prints nothing.
+    let path = socket("autoplay-none");
+    let _server = serve(&path, autoplay_app(false)).unwrap();
+    let (r, out) = drive(&path, "autoplay on");
+    assert_eq!(out, "");
+    assert!(r.unwrap_err().msg.contains("isn't offered here"));
+    // An app from before AutoPlay doesn't know the command.
+    let path = socket("autoplay-old");
+    let _server = serve(&path, |_| Reply::Error { message: "bad request: unknown variant `autoplay`".into() }).unwrap();
+    let fail = drive(&path, "autoplay").0.unwrap_err();
+    assert_eq!(fail.msg, "uzu: this Uzumaki is too old for AutoPlay (update it)");
+}
+
+#[test]
+fn autoplay_sends_the_asked_state() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let path = socket("autoplay-sent");
+    let _server = serve(&path, {
+        let inner = autoplay_app(true);
+        let log = log.clone();
+        move |req| {
+            log.lock().unwrap().push(req.clone());
+            inner(req)
+        }
+    })
+    .unwrap();
+    for line in ["autoplay", "autoplay on", "autoplay off", "toggle autoplay"] {
+        drive(&path, line).0.unwrap();
+    }
+    assert_eq!(*log.lock().unwrap(), [Request::Autoplay { on: None }, Request::Autoplay { on: Some(true) }, Request::Autoplay { on: Some(false) }, Request::Autoplay { on: None }]);
+}
