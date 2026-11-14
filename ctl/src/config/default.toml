@@ -1,1 +1,82 @@
-# uzu.toml (filled in at the last stage)
+# uzu.toml: settings for `uzu`, the command line and the terminal player of Uzumaki.
+#
+# Put this file at ~/.config/uzumaki/uzu.toml (or $XDG_CONFIG_HOME/uzumaki/uzu.toml).
+# Every setting below is commented out and shows its default value.
+# To change one, remove the "# " in front of it and edit the value.
+# You do not need this file. Without it, uzu uses the values shown here.
+#
+# `uzu config` checks the file and lists what is wrong, with the line number.
+# A mistake never stops uzu: the bad line is skipped and the rest still works.
+# uzu reads this file when it starts. It never writes to it.
+#
+# This file is only for uzu. The app's own shortcuts are in Settings -> Keyboard.
+# Full guide: docs/UZU-CONFIG.md
+
+# ---------------------------------------------------------------------- [keys]
+# The keys of the terminal player. Each line is: action = key or list of keys.
+# A list REPLACES the default keys of that action. Keys you do not mention keep theirs.
+#   - Several keys:   next = ["n", "ctrl+n"]
+#   - Turn one off:   quit = []
+#   - Add to default: down = ["j", "down", "ctrl+n"]
+# A key is one character ("n", "N", "?") or a name: space, enter, esc, tab, backspace,
+# delete, insert, up, down, left, right, home, end, pageup, pagedown, f1 to f12.
+# Put ctrl+, alt+ or shift+ in front: "ctrl+n", "alt+x". Letters are case sensitive.
+# Ctrl+C always quits. While you type (a filter, a search) every key is text.
+[keys]
+@KEYS@
+
+# --------------------------------------------------------------------- [theme]
+# Colours of the terminal player. A colour is "#rrggbb", a name (red, green, yellow,
+# blue, magenta, cyan, gray, white, dark-gray, light-red, light-green, ...), a number
+# from 0 to 255, or "none" (the terminal's own text colour).
+# palette: "default" (coral and ANSI colours), "terminal" (only the terminal's own 16
+# colours) or "mono" (no colour at all). The colours below are put on top of it.
+# NO_COLOR in the environment turns all colour off, unless respect_no_color is false.
+[theme]
+# palette = "default"
+# accent = "#ff7a8a"       # the playing song, the current tab, key names, sung lyrics
+# number = "green"         # the # column
+# album = "cyan"           # the Album column
+# time = "magenta"         # the Time column
+# paused = "yellow"        # the word "Paused"
+# respect_no_color = true
+
+# --------------------------------------------------------------------- [format]
+# One line of text for a status bar. Run it with: uzu status --line
+# {artist} {title} {album} {elapsed} {duration} {remaining} {percent} {state} {icon}
+# {volume} {shuffle} {repeat} {source} {index} {count} {queued}
+# {title:20} cuts the title to 20 columns. {{ and }} are a brace.
+# status_idle is printed when nothing plays (empty: the bar module disappears).
+[format]
+# status_format = "{artist} — {title}"
+# status_idle = ""
+
+# --------------------------------------------------------------------- [layout]
+# start_screen: "queue", "playlists", "search", "albums" or "lyrics" (or 1 to 5).
+# start_view: the queue's view: "normal", "showcase" or "solo". UZUMAKI_VIEW wins.
+# lyrics: where solo puts the lyrics: "auto", "beside" the cover or "under" it.
+# The *_width numbers (1 to 20) are shares of the width in the song table.
+# show_artist and show_album can hide those columns.
+[layout]
+# start_screen = "queue"
+# start_view = "normal"
+# lyrics = "auto"
+# artist_width = 3
+# title_width = 5
+# album_width = 3
+# show_artist = true
+# show_album = true
+
+# ------------------------------------------------------------------- [defaults]
+# sort_*: how a list starts, until you pick a sort with the "," key. Playlists: "name",
+# "song count". Albums: "name", "artist", "year". Songs and search: "title", "artist",
+# "album", "duration". Add "desc" for the other way ("year desc"). "original" keeps the
+# order from Uzumaki. uzu never saves these to uzu.json; your own picks go there.
+# notifications: the short messages in the status line ("Paused", "Cover: on").
+# Errors from Uzumaki and problems in this file always show.
+[defaults]
+# sort_playlists = "original"
+# sort_albums = "original"
+# sort_songs = "original"
+# sort_search = "original"
+# notifications = true

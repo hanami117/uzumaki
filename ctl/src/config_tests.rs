@@ -715,3 +715,98 @@ fn bad_default_sorts_list_what_the_view_can_sort_by() {
     assert!(w[4].contains("'notifications' needs true or false"), "{}", w[4]);
     assert_eq!(cfg.sorts.get(View::Albums), None);
 }
+
+// ------------------------------------------------------------------ the default file, the docs
+
+const DOCS: &str = include_str!("../../docs/UZU-CONFIG.md");
+const README: &str = include_str!("../../README.md");
+
+/// Takes the "# " off every commented setting (`# name = value`), leaving the prose comments.
+fn uncomment(text: &str) -> String {
+    text.lines()
+        .map(|l| match l.strip_prefix("# ") {
+            Some(rest) if rest.split_once(" = ").is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c == '_')) => rest,
+            _ => l,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn the_default_file_is_all_comments_and_changes_nothing() {
+    let text = config::default_file();
+    let cfg = Config::parse(&text);
+    assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    assert!(cfg.keys.is_default());
+    assert_eq!(cfg.theme, Theme::default());
+    assert_eq!(cfg.layout, LayoutCfg::default());
+    assert_eq!(cfg.status_format, None);
+    assert!(toml::parse(&text).entries.is_empty(), "every setting is commented out");
+}
+
+#[test]
+fn the_default_file_with_every_setting_switched_on_is_valid_and_is_the_defaults() {
+    let text = uncomment(&config::default_file());
+    let doc = toml::parse(&text);
+    assert!(doc.problems.is_empty(), "{:?}", doc.problems);
+    let cfg = Config::parse(&text);
+    assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    // One entry per action, and one per documented setting (theme 7, format 2, layout 8, defaults 5).
+    assert_eq!(doc.entries.iter().filter(|e| e.section == "keys").count(), ACTIONS.len());
+    assert_eq!(doc.entries.iter().filter(|e| e.section != "keys").count(), 7 + 2 + 8 + 5, "{:?}", doc.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>());
+    assert_eq!(cfg.theme, Theme::default());
+    assert_eq!(cfg.layout, LayoutCfg::default());
+    assert_eq!(cfg.line_format(), format::DEFAULT);
+    assert!(cfg.notifications);
+    // The keys are the defaults, so every key does what it did.
+    for a in ACTIONS {
+        for k in a.keys {
+            let c = chord(k);
+            assert_eq!(press(&cfg.keys, c.code, KeyModifiers::NONE), Some((chord(a.keys[0]).code, KeyModifiers::NONE)), "{} {k}", a.name);
+        }
+    }
+}
+
+#[test]
+fn the_default_file_lists_every_key_every_section_and_every_name() {
+    let text = config::default_file();
+    for a in ACTIONS {
+        assert!(text.contains(&format!("# {} = ", a.name)), "{}", a.name);
+    }
+    for s in config::SECTIONS {
+        assert!(text.contains(&format!("\n[{s}]\n")), "[{s}]");
+    }
+    for name in format::FIELDS {
+        assert!(text.contains(&format!("{{{name}}}")), "{{{name}}}");
+    }
+}
+
+#[test]
+fn the_docs_cover_every_action_name_and_the_sample_has_no_warnings() {
+    for a in ACTIONS {
+        assert!(DOCS.contains(&format!("| `{}`", a.name)), "docs/UZU-CONFIG.md misses the action {}", a.name);
+    }
+    for name in format::FIELDS {
+        assert!(DOCS.contains(&format!("`{{{name}}}`")), "docs miss {{{name}}}");
+    }
+    for s in config::SECTIONS {
+        assert!(DOCS.contains(&format!("## [{s}]")), "docs miss [{s}]");
+    }
+    // The sample config at the end of the guide is a real one.
+    let tail = DOCS.split("## A themed example").nth(1).expect("the guide has a themed example");
+    let sample = tail.split("```toml\n").nth(1).and_then(|t| t.split("```").next()).expect("a toml block");
+    let cfg = Config::parse(sample);
+    assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    assert_eq!(cfg.theme.accent, Some(Color::Rgb(0x88, 0xc0, 0xd0)));
+    assert!(!cfg.keys.is_default());
+    assert_eq!(cfg.layout.start_screen, 1);
+    assert_eq!(cfg.layout.lyrics, Placement::Under);
+    assert_eq!(cfg.line_format(), "{icon} {artist} — {title:30} [{elapsed}/{duration}]");
+    assert!(DOCS.contains("uzu config --default") && DOCS.contains("uzu status --line"));
+}
+
+#[test]
+fn the_readme_and_the_help_point_to_the_config() {
+    assert!(README.contains("docs/UZU-CONFIG.md") && README.contains("uzu.toml"));
+    assert!(crate::cli::HELP.contains("config [--default|--path]") && crate::cli::HELP.contains("status --line"));
+}

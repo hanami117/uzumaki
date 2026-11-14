@@ -224,6 +224,10 @@ uzu start | show | quit  # start hidden, show the window, quit
 A lone number, as in `uzu play 3`, picks from the last list that `uzu` printed. `uzu help` lists everything.
 Playlists and albums work offline from the disk cache.
 
+You can change the keys, the colours, the layout and a one-line status for a bar (`uzu status --line`)
+with an optional file, `~/.config/uzumaki/uzu.toml`. `uzu config --default` prints a commented one to start
+from. See [docs/UZU-CONFIG.md](docs/UZU-CONFIG.md).
+
 ## How it works
 
 Apple Music audio is protected with Widevine DRM. Uzumaki doesn't get around that. It plays music the same

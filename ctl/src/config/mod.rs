@@ -15,8 +15,22 @@ pub mod keys;
 pub mod theme;
 pub mod toml;
 
-/// The commented file `uzu config --default` prints.
-pub const DEFAULT_FILE: &str = include_str!("default.toml");
+const DEFAULT_TEMPLATE: &str = include_str!("default.toml");
+
+/// The commented file `uzu config --default` prints: every setting, commented out, at its
+/// default. The `[keys]` lines come from the action table, so they can't drift from the code.
+pub fn default_file() -> String {
+    let width = keys::ACTIONS.iter().map(|a| a.name.len() + 4 + a.keys.iter().map(|k| k.len() + 4).sum::<usize>()).max().unwrap_or(0);
+    let lines: Vec<String> = keys::ACTIONS
+        .iter()
+        .map(|a| {
+            let list = a.keys.iter().map(|k| format!("\"{k}\"")).collect::<Vec<_>>().join(", ");
+            let left = if a.keys.len() == 1 { format!("# {} = {list}", a.name) } else { format!("# {} = [{list}]", a.name) };
+            format!("{left:<w$}  # {}", a.about, w = width.clamp(0, 28))
+        })
+        .collect();
+    DEFAULT_TEMPLATE.replace("@KEYS@", &lines.join("\n"))
+}
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -204,12 +218,11 @@ impl Config {
                 w.add(e.line, format!("'{}' is already set on line {first}; this line wins", e.key));
             }
             seen.push((&e.section, &e.key, e.line));
-            let known = known_keys(&e.section);
-            if let Some(known) = known {
-                if !known.contains(&e.key.as_str()) {
-                    w.add(e.line, unknown_key(&e.section, &e.key, &known));
-                    continue;
-                }
+            if let Some(known) = known_keys(&e.section)
+                && !known.contains(&e.key.as_str())
+            {
+                w.add(e.line, unknown_key(&e.section, &e.key, &known));
+                continue;
             }
             self.take(e, w, theme);
         }
@@ -256,12 +269,11 @@ impl Config {
         match e.key.as_str() {
             "start_screen" => {
                 // A screen's number works too.
-                let by_number = matches!(&e.value, Value::Int(n) if (1..=5).contains(n));
-                if let Value::Int(n) = &e.value {
-                    if by_number {
-                        l.start_screen = *n as usize - 1;
-                        return;
-                    }
+                if let Value::Int(n) = &e.value
+                    && (1..=5).contains(n)
+                {
+                    l.start_screen = *n as usize - 1;
+                    return;
                 }
                 if let Some(i) = want_choice(e, w, SCREEN_NAMES) {
                     l.start_screen = i;
@@ -442,8 +454,8 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     for (i, row) in d.iter_mut().enumerate() {
         row[0] = i;
     }
-    for j in 0..=b.len() {
-        d[0][j] = j;
+    for (j, v) in d[0].iter_mut().enumerate() {
+        *v = j;
     }
     for i in 1..=a.len() {
         for j in 1..=b.len() {

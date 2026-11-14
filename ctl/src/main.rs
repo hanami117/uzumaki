@@ -121,7 +121,7 @@ fn execute(inv: &Invocation) -> Result<(), Fail> {
         // A status bar polls this: with no app running it shows its idle text, it doesn't start one.
         Err(_) if matches!(inv.cmd, Command::Line { .. }) => {
             let idle = if let Command::Line { idle, .. } = &inv.cmd { idle.clone().unwrap_or_default() } else { String::new() };
-            writeln!(out, "{idle}").map_err(|e| Fail::err(e))
+            writeln!(out, "{idle}").map_err(Fail::err)
         }
         Err(_) => start_then_run(inv, &env, &mut out),
     };
@@ -144,7 +144,7 @@ fn show_config(show: cli::ConfigShow) -> Result<(), Fail> {
     };
     match show {
         cli::ConfigShow::Path => println!("{}", path.display()),
-        cli::ConfigShow::Default => print!("{}", config::DEFAULT_FILE),
+        cli::ConfigShow::Default => print!("{}", config::default_file()),
         cli::ConfigShow::Check => {
             let cfg = config::Config::load_from(&path);
             println!("{}", path.display());

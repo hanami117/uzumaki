@@ -201,7 +201,7 @@ pub fn parse_key(text: &str) -> Result<Chord, String> {
             } else {
                 let mut names: Vec<&str> = NAMES.iter().map(|(n, _)| *n).collect();
                 names.extend(ALIASES.iter().map(|(a, _)| *a));
-                let hint = match did_you_mean(&lower, &names) {
+                let hint = match did_you_mean(lower, &names) {
                     Some(n) => format!("did you mean '{n}'?"),
                     None => format!("a key is one character, or a name like {}, with ctrl+ or alt+ in front", list_of(&["space", "enter", "esc", "tab", "up", "pageup"], "'", "'")),
                 };
@@ -424,10 +424,10 @@ fn specs_of(e: &Entry, w: &mut Warnings) -> Option<Vec<String>> {
 
 fn unknown_action(e: &Entry, names: &[&str]) -> String {
     // `n = "next"`: the way round people write it in other programs.
-    if let Value::Str(v) = &e.value {
-        if names.contains(&v.as_str()) {
-            return format!("write it as {v} = \"{}\" (the action first, then its keys)", e.key);
-        }
+    if let Value::Str(v) = &e.value
+        && names.contains(&v.as_str())
+    {
+        return format!("write it as {v} = \"{}\" (the action first, then its keys)", e.key);
     }
     match did_you_mean(&e.key, names) {
         Some(n) => format!("unknown action '{}' in [keys]; did you mean '{n}'?", e.key),

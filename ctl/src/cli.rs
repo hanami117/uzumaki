@@ -115,10 +115,10 @@ fn status(params: &[String]) -> Result<Command, String> {
             return Err(format!("'status' takes --line or --format <text> (got '{p}')"));
         }
     }
-    if let Some(text) = &format {
-        if let Some(problem) = crate::config::format::Format::parse(text).1.first() {
-            return Err(format!("{problem}"));
-        }
+    if let Some(text) = &format
+        && let Some(problem) = crate::config::format::Format::parse(text).1.first()
+    {
+        return Err(problem.clone());
     }
     Ok(if line || format.is_some() { Command::Line { format, idle: None } } else { Command::Status })
 }

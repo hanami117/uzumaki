@@ -493,10 +493,8 @@ impl App {
     /// Where the screens start, as `[layout]` says: the screen and, on the queue, its view.
     /// `UZUMAKI_VIEW` (`env_view`) still beats the file.
     pub fn start(&mut self, be: &mut dyn Backend, env_view: bool, now: Instant) {
-        if !env_view {
-            if let Some(view) = &self.config.layout.start_view {
-                self.layout = Layout::parse(Some(view));
-            }
+        if !env_view && let Some(view) = &self.config.layout.start_view {
+            self.layout = Layout::parse(Some(view));
         }
         let screen = Screen::ALL[self.config.layout.start_screen.min(Screen::ALL.len() - 1)];
         if screen != Screen::Queue {
