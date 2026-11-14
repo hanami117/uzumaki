@@ -120,7 +120,7 @@ RAOP library with AirPlay 2 pairing added later. We should use a maintained send
 
 | Option | Lang | License | AirPlay 2 | Maturity | Verdict |
 |---|---|---|---|---|---|
-| **`music-assistant/airplay-cli` (`cliairplay`)** | C/C++ | GPL-3.0 (bundles OpenSSL 1.1.1u static; some libraop files have no explicit license) | Yes: native (transient / pair-verify, PTP or NTP, realtime or buffered), RAOP-compat, RAOP | Active (2026-11-13), used by every Music Assistant user, HomePod mini OS 27.2 verified in its DESIGN.md | **Chosen.** Helper process. |
+| **`music-assistant/airplay-cli` (`cliairplay`)** | C/C++ | GPL-3.0 (bundles OpenSSL static, 3.5.4 at v0.5.10 on macOS arm64, not 1.1.1 as first noted; some libraop files have no explicit license) | Yes: native (transient / pair-verify, PTP or NTP, realtime or buffered), RAOP-compat, RAOP | Active (2026-11-13), used by every Music Assistant user, HomePod mini OS 27.2 verified in its DESIGN.md | **Chosen.** Helper process. |
 | OwnTone `outputs/airplay.c` | C | GPL-2.0 | Yes | Mature, but part of a server (event loop, its own player) | Reference only. Hard to take out. |
 | `philippe44/libraop` | C | MIT | No (AirPlay 1) | Mature | Would miss the TCL TV and future AirPlay 2-only devices. |
 | `cidermill-airplay` crate | Rust | GPL-3.0-or-later | Yes (claims) | 0.1.5, two weeks old, 213 downloads | Watch it. Could replace the helper later. |
@@ -134,8 +134,8 @@ Why a helper and not a library: the AirPlay 2 handshake (SRP, HomeKit TLV8, ChaC
 with each HomePod OS. Music Assistant fixes it for many users. A helper process also keeps a C crash out of the app.
 We pin a tag, build it in CI for Linux x86_64/arm64 and macOS arm64/x86_64, and ship it next to the bridge.
 
-Before shipping, check `cliairplay`'s licensing note: GPL-3.0 + static OpenSSL 1.1.1 is the classic GPL/OpenSSL
-clash, and the 1.1.1 line is out of support. If needed, build it against OpenSSL 3 (Apache-2.0, GPL-3 compatible).
+Licensing note: libraop's prebuilt OpenSSL at v0.5.10 is already 3.x (Apache-2.0, GPL-3 compatible), so there is no
+GPL/OpenSSL 1.1.1 clash. The macOS build links Homebrew's openssl@3 statically (3.5.9), falling back to the prebuilt one.
 
 ## 6. Recommended architecture
 
@@ -213,8 +213,8 @@ media receiver plays the URL (Cider's way, but with Google's default receiver, s
 - **Helper upkeep:** `cliairplay` is young as a unified binary (it replaced cliraop/cliap2 in 2026). Pin a tag and
   update it on purpose. HomePod OS updates sometimes break third-party senders (Roon, OwnTone, Music Assistant all
   had such breaks).
-- **Licensing:** GPL-3.0 helper is fine for us. The bundled OpenSSL 1.1.1 and the unlicensed libraop files need a
-  look before we ship.
+- **Licensing:** GPL-3.0 helper is fine for us. The unlicensed libraop files need a
+  look before we ship (OpenSSL is 3.x, Apache-2.0).
 - **Firewall:** AirPlay needs inbound UDP for timing/control (NTP, and PTP on 319/320). macOS asks once. On Linux
   `ufw`/`firewalld` may block it, so document the ports. If PTP ports are taken, `cliairplay` falls back to NTP.
 - **macOS capture under VMP:** expected fine (software audio decode), but proven only by the stage 1 spike.

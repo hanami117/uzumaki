@@ -2,7 +2,7 @@
 # Builds cliairplay (Music Assistant's AirPlay sender, GPL-3.0, github.com/music-assistant/airplay-cli)
 # at a pinned tag into target/cliairplay/cliairplay, where the AirPlay spike finds it.
 #
-#   scripts/airplay-spike/build-cliairplay.sh
+#   scripts/airplay/build-cliairplay.sh
 #
 # macOS (arm64 or x86_64): needs the Xcode command line tools (clang, make, git).
 # Linux (x86_64 or aarch64): needs gcc, g++, make, git (Arch: `pacman -S base-devel git`;
@@ -11,9 +11,10 @@
 #   with privilege: `sudo setcap cap_net_bind_service=+ep target/cliairplay/cliairplay`, or the
 #   helper falls back to NTP timing on its own. Open UDP 319/320 and the helper's ports in ufw/firewalld.
 #
-# The build links libraop's prebuilt static OpenSSL 1.1.1 / codec / mDNS archives (from its git
-# submodule), as upstream's CI does. Fine for a spike; shipping needs the OpenSSL 3 rebuild noted in
-# docs/research/airplay-sender.md.
+# The build links libraop's prebuilt static codec / mDNS archives (from its git submodule), as
+# upstream's CI does. Its prebuilt OpenSSL is already 3.x (3.5.4 at v0.5.10). On macOS, when Homebrew's
+# openssl@3 is installed, the helper links that one statically instead (newer patch level, no runtime
+# dependency on /opt/homebrew: only libc++ and libSystem remain). Otherwise the prebuilt one is used.
 set -euo pipefail
 
 TAG=v0.5.10
@@ -38,7 +39,17 @@ arch=$(uname -m)
 [ "$host" = macos ] && [ "$arch" != arm64 ] && arch=x86_64
 jobs=$( (sysctl -n hw.ncpu 2>/dev/null || nproc) | head -1)
 
-make -C "$src" STATIC=1 -j"$jobs" > "$out/build.log" 2>&1 || { tail -30 "$out/build.log"; echo "build failed (full log: $out/build.log)" >&2; exit 1; }
+extra=()
+if [ "$host" = macos ] && command -v brew >/dev/null 2>&1 && ossl=$(brew --prefix openssl@3 2>/dev/null) && [ -f "$ossl/lib/libcrypto.a" ]; then
+  # cliairplay's Makefile wants one libopenssl.a and an include/ next to it.
+  mkdir -p "$out/ossl3"
+  ln -sfn "$ossl/include" "$out/ossl3/include"
+  libtool -static -o "$out/ossl3/libopenssl.a" "$ossl/lib/libssl.a" "$ossl/lib/libcrypto.a" 2>/dev/null
+  extra=(OPENSSL="$out/ossl3")
+  make -C "$src" clean >/dev/null 2>&1 || true
+fi
+
+make -C "$src" STATIC=1 ${extra[@]+"${extra[@]}"} -j"$jobs" > "$out/build.log" 2>&1 || { tail -30 "$out/build.log"; echo "build failed (full log: $out/build.log)" >&2; exit 1; }
 cp "$src/bin/cliairplay-$host-$arch" "$out/cliairplay"
 "$out/cliairplay" --check
 echo "built $out/cliairplay ($TAG)"

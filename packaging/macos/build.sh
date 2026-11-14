@@ -102,8 +102,8 @@ cat >"$app/Contents/Resources/CLIAIRPLAY_LICENSE.txt" <<'LIC'
 cliairplay (Resources/cliairplay) is Music Assistant's AirPlay sender,
 https://github.com/music-assistant/airplay-cli (tag v0.5.10), licensed GPL-3.0.
 It is a separate program that Uzumaki starts; its source is at that address.
-It is statically linked with libraop's prebuilt OpenSSL 1.1.1 (OpenSSL licence / SSLeay licence),
-and with codec and mDNS libraries under their own licences (see the source tree).
+It is statically linked with OpenSSL 3.x (Apache-2.0), and with codec and mDNS libraries
+under their own licences (see the source tree).
 Uzumaki itself is GPL-3.0-or-later (LICENSE).
 LIC
 # ditto keeps the framework symlinks and Electron's own signatures as they are.
