@@ -8,7 +8,7 @@ pub use super::settings_search::Row;
 use super::widgets::{chip, slider, small_button};
 use crate::appearance::{BgSource, Effect, NpBg, ShowOn, opacity_range};
 use crate::backdrop::{Request, Slot};
-use crate::settings::{AppIcon, MusicSource, PlayerStyle, StartPage, Theme};
+use crate::settings::{AnimatedArtwork, AppIcon, MusicSource, PlayerStyle, StartPage, Theme};
 use crate::state::{CacheKind, State};
 use crate::theme::*;
 
@@ -523,24 +523,24 @@ fn row_el(r: &Rx, id: Row) -> El {
                 ),
             )
         }
-        Row::AnimatedArtwork => setting(
-            narrow,
-            "Animated artwork",
-            Some("Apple's video loop of the album plays in the Now Playing cover, when it has one. A still cover with Reduce Motion.".into()),
-            switch("settings/motion", "Animated artwork", s.settings.animated_artwork, true, |s, on| s.set_animated_artwork(on)),
-        ),
-        Row::AlbumPageMotion => setting(
-            narrow,
-            "Also on album pages",
-            Some(super::settings_search::ALBUM_PAGE_MOTION.into()),
-            switch(
-                "settings/motion-album",
-                "Also on album pages",
-                s.settings.animated_artwork && s.settings.album_page_motion,
-                s.settings.animated_artwork,
-                |s, on| s.set_album_page_motion(on),
-            ),
-        ),
+        Row::AnimatedArtwork => {
+            let seg = |key: &'static str, v: AnimatedArtwork| {
+                segment(key, v.label(), s.settings.animated_artwork == v).on_press(move |s: &mut State| s.set_animated_artwork(v))
+            };
+            setting(
+                narrow,
+                "Animated artwork",
+                Some(super::settings_search::ANIMATED_ARTWORK.into()),
+                segmented(
+                    "settings/motion",
+                    vec![
+                        seg("settings/motion/always", AnimatedArtwork::Always),
+                        seg("settings/motion/now-playing", AnimatedArtwork::NowPlaying),
+                        seg("settings/motion/off", AnimatedArtwork::Off),
+                    ],
+                ),
+            )
+        }
         Row::NpCoverEffect => block(
             if r.search { "Now Playing cover effect" } else { "Cover effect" },
             ap.np_effect.description(),
@@ -854,6 +854,7 @@ fn appearance(r: &Rx) -> Vec<El> {
             Row::AppIcon,
             Row::Player,
             Row::StartupAnimation,
+            Row::AnimatedArtwork,
             Row::Background,
             Row::Picture,
             Row::Effect,
@@ -868,7 +869,7 @@ fn appearance(r: &Rx) -> Vec<El> {
     }
     v.push(divider());
     v.push(text("Now Playing").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
-    v.extend(rows(r, &[Row::NpBackground, Row::NpCoverEffect, Row::AnimatedArtwork, Row::AlbumPageMotion]));
+    v.extend(rows(r, &[Row::NpBackground, Row::NpCoverEffect]));
     v.push(divider());
     v.extend(item(r, Row::Sidebar));
     v

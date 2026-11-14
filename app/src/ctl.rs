@@ -267,7 +267,7 @@ impl Ctl {
 
     fn fetch(&self, kind: Kind, id: &str) -> Result<Collection, String> {
         let req = match kind {
-            Kind::Album => api::album(id),
+            Kind::Album => api::album_with(id, false), // the command line has no use for the loop
             Kind::Playlist => api::playlist(id),
         };
         let v = self.api(req)?;

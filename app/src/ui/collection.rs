@@ -275,7 +275,7 @@ mod tests {
         }
         let mut s = State::offline();
         (crate::scenes::SCENES.iter().find(|(n, _)| *n == "album-motion").unwrap().1)(&mut s);
-        s.settings.album_page_motion = false;
+        s.settings.animated_artwork = crate::settings::AnimatedArtwork::NowPlaying;
         let mut rt = rune::Runtime::new(s, crate::ui::view, (1360.0, 860.0), rune::Env { system_dark: true, scale: 1.0 });
         let step = |rt: &mut rune::Runtime<State>| {
             rt.update_if(|s, tx| crate::ui::poll(s, 0.0, tx));
@@ -284,11 +284,11 @@ mod tests {
         for _ in 0..30 {
             step(&mut rt);
         }
-        assert!(rt.presented("coll-motion").is_none(), "album pages off: the still only");
+        assert!(rt.presented("coll-motion").is_none(), "Now Playing only: the still on album pages");
         let cover = rt.presented("coll-art").unwrap().0;
         let info = rt.presented("coll-info").unwrap().0;
 
-        rt.update(|s, _| s.set_album_page_motion(true));
+        rt.update(|s, _| s.set_animated_artwork(crate::settings::AnimatedArtwork::Always));
         let mut seen = Vec::new();
         for _ in 0..60 {
             step(&mut rt);

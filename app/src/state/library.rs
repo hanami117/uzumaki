@@ -337,7 +337,12 @@ impl State {
         }
         let reply_id = id.to_string();
         if kind == CollectionKind::Album && !id.starts_with("l.") {
-            // Catalog albums come with their motion art (`extend=editorialVideo`).
+            // Catalog albums come with their motion art (`extend=editorialVideo`), unless
+            // Animated artwork is Off: then the request is the plain one, and nothing about
+            // the album's loop is recorded (switching it on later asks for it).
+            if !self.settings.animated_artwork.in_now_playing() {
+                return self.request(api::album_with(id, false), first_page, move |r| Msg::Collection { id: reply_id, result: r.and_then(|x| x) });
+            }
             let parse = |v: &Value| (first_page(v), crate::motion::MotionArt::from_reply(v));
             return self.request(api::album(id), parse, move |r| match r {
                 Ok((result, motion)) => Msg::AlbumPage { id: reply_id, motion, result },

@@ -658,7 +658,7 @@ mod tests {
         }
         let mut s = State::offline();
         super::scene_np_motion(&mut s, false);
-        s.settings.animated_artwork = false;
+        s.settings.animated_artwork = crate::settings::AnimatedArtwork::Off;
         let mut rt = Runtime::new(s, crate::ui::view, (1360.0, 860.0), Env { system_dark: true, scale: 1.0 });
         let step = |rt: &mut Runtime<State>| {
             rt.update_if(|s, tx| crate::ui::poll(s, 0.0, tx));
@@ -670,7 +670,7 @@ mod tests {
         assert!(rt.presented("np-motion").is_none(), "setting off: the still only");
         let cover = rt.presented("np-cover").unwrap().0;
 
-        rt.update(|s, _| s.set_animated_artwork(true));
+        rt.update(|s, _| s.set_animated_artwork(crate::settings::AnimatedArtwork::Always));
         let mut seen = Vec::new();
         for _ in 0..60 {
             step(&mut rt);

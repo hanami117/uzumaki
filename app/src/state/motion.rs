@@ -13,6 +13,7 @@ use std::sync::Arc;
 use super::{Load, Msg, State};
 use crate::bridge::PlayState;
 use crate::models::{api, Song};
+use crate::settings::AnimatedArtwork;
 use crate::models::CollectionKind;
 use crate::motion::{self, Clip, Event, Facts, MotionArt, PageFacts, Playback, Want};
 use super::Route;
@@ -247,7 +248,7 @@ impl State {
 
     fn motion_facts(&self) -> Facts {
         Facts {
-            enabled: self.settings.animated_artwork,
+            enabled: self.settings.animated_artwork.in_now_playing(),
             reduced_motion: self.motion.reduced_motion,
             now_playing: self.ui.now_playing,
             // Closing to the tray also closes Now Playing (`hide_on_close`); this catches the rest.
@@ -312,8 +313,7 @@ impl State {
 
     fn page_facts(&self) -> PageFacts {
         PageFacts {
-            enabled: self.settings.animated_artwork,
-            album_pages: self.settings.album_page_motion,
+            enabled: self.settings.animated_artwork.on_album_pages(),
             reduced_motion: self.motion.reduced_motion,
             local_only: self.local_only(),
             album_page: matches!(&self.route, Route::Collection { kind: CollectionKind::Album, .. }),
@@ -436,7 +436,7 @@ impl State {
     /// setting or Reduce Motion, and for local files (`album_of`).
     fn prefetch_motion(&mut self) {
         let playing = matches!(self.playback.state, PlayState::Playing);
-        if !playing || !self.settings.animated_artwork || self.motion.reduced_motion {
+        if !playing || !self.settings.animated_artwork.in_now_playing() || self.motion.reduced_motion {
             return;
         }
         self.resolve_motion_album();
@@ -535,26 +535,20 @@ impl State {
         }
     }
 
-    /// Settings → Appearance → Animated artwork.
-    pub fn set_animated_artwork(&mut self, on: bool) {
-        if self.settings.animated_artwork != on {
-            self.settings.animated_artwork = on;
-            self.save_settings();
-            if !on {
-                self.motion.stop();
-                self.motion.stop_page();
-            }
+    /// Settings → Appearance → Animated artwork. A loop where the choice no longer lets it play
+    /// stops at once (the player and decoder go, the still cover shows); where it still may, it
+    /// plays on. Choosing a place back starts its loop the normal way, from `poll`.
+    pub fn set_animated_artwork(&mut self, mode: AnimatedArtwork) {
+        if self.settings.animated_artwork == mode {
+            return;
         }
-    }
-
-    /// Settings → Appearance → Animated artwork → Also on album pages.
-    pub fn set_album_page_motion(&mut self, on: bool) {
-        if self.settings.album_page_motion != on {
-            self.settings.album_page_motion = on;
-            self.save_settings();
-            if !on {
-                self.motion.stop_page();
-            }
+        self.settings.animated_artwork = mode;
+        self.save_settings();
+        if !mode.in_now_playing() {
+            self.motion.stop();
+        }
+        if !mode.on_album_pages() {
+            self.motion.stop_page();
         }
     }
 
@@ -667,7 +661,7 @@ mod tests {
     fn nothing_is_asked_when_it_could_not_play() {
         type Case = (&'static str, fn(&mut State));
         let cases: [Case; 5] = [
-            ("setting off", |s| s.settings.animated_artwork = false),
+            ("setting off", |s| s.settings.animated_artwork = AnimatedArtwork::Off),
             ("reduce motion", |s| s.motion.reduced_motion = true),
             ("now playing closed, song paused", |s| {
                 s.ui.now_playing = false;
@@ -795,7 +789,7 @@ mod tests {
         let mut s = ready();
         s.poll_motion();
         crate::ui::close_now_playing(&mut s);
-        s.set_animated_artwork(false);
+        s.set_animated_artwork(AnimatedArtwork::Off);
         assert!(!s.motion.parked());
     }
 
@@ -811,9 +805,9 @@ mod tests {
     fn the_setting_and_reduce_motion_stop_a_running_clip() {
         let mut s = ready();
         s.poll_motion();
-        s.set_animated_artwork(false);
+        s.set_animated_artwork(AnimatedArtwork::Off);
         assert!(s.motion.playback.is_none());
-        s.set_animated_artwork(true);
+        s.set_animated_artwork(AnimatedArtwork::Always);
         s.poll_motion();
         assert!(s.motion.playback.is_some());
         s.motion.reduced_motion = true;
@@ -911,7 +905,7 @@ mod tests {
     fn nothing_is_prefetched_against_the_rules() {
         type Case = (&'static str, fn(&mut State));
         let cases: [Case; 6] = [
-            ("setting off", |s| s.settings.animated_artwork = false),
+            ("setting off", |s| s.settings.animated_artwork = AnimatedArtwork::Off),
             ("reduce motion", |s| s.motion.reduced_motion = true),
             ("local file", |s| s.playback.song = Some(song("file:///m/a.flac", Some("123")))),
             ("paused", |s| s.playback.state = PlayState::Paused),
@@ -1058,8 +1052,8 @@ mod tests {
     fn the_album_page_clip_follows_the_rules() {
         type Case = (&'static str, fn(&mut State));
         let off: [Case; 7] = [
-            ("setting off", |s| s.settings.animated_artwork = false),
-            ("album pages off", |s| s.settings.album_page_motion = false),
+            ("setting off", |s| s.settings.animated_artwork = AnimatedArtwork::Off),
+            ("Now Playing only", |s| s.settings.animated_artwork = AnimatedArtwork::NowPlaying),
             ("reduce motion", |s| s.motion.reduced_motion = true),
             ("local only mode", |s| s.settings.music_source = crate::settings::MusicSource::LocalOnly),
             ("Now Playing open", |s| s.ui.now_playing = true),
@@ -1291,5 +1285,108 @@ mod tests {
         assert_eq!(api::album("42").1["extend"], "editorialVideo");
         assert!(api::album("l.x").1.get("extend").is_none());
         assert_eq!(api::album_motion("42").1["fields[albums]"], "editorialVideo");
+        assert!(api::album_with("42", false).1.get("extend").is_none(), "the plain request, for Off");
+        assert_eq!(api::album_with("42", false).1["include"], "artists", "the page itself is the same");
+    }
+
+    // ---- Settings → Appearance → Animated artwork: Always, Now Playing only, Off ----
+
+    #[test]
+    fn the_setting_stops_a_loop_only_where_it_no_longer_belongs() {
+        // Now Playing's loop: kept with Now Playing only, gone with Off.
+        let mut s = ready();
+        s.poll_motion();
+        assert!(s.motion.playback.is_some());
+        s.set_animated_artwork(AnimatedArtwork::NowPlaying);
+        assert!(!s.poll_motion() && s.motion.playback.is_some(), "Now Playing only: it plays on, untouched");
+        s.set_animated_artwork(AnimatedArtwork::Off);
+        assert!(s.motion.playback.is_none(), "Off: stopped at once, no frame needed");
+        let asked = s.sent.borrow().len();
+        s.poll_motion();
+        assert!(s.motion.playback.is_none() && s.sent.borrow().len() == asked, "and nothing restarts or is asked");
+        s.set_animated_artwork(AnimatedArtwork::NowPlaying);
+        s.poll_motion();
+        assert!(s.motion.playback.is_some(), "back on: started the normal way");
+
+        // The album page's loop: gone with Now Playing only and with Off, back with Always.
+        for stop_with in [AnimatedArtwork::NowPlaying, AnimatedArtwork::Off] {
+            let mut s = page_ready();
+            s.poll_page_motion();
+            assert!(s.motion.page.is_some());
+            s.set_animated_artwork(stop_with);
+            assert!(s.motion.page.is_none(), "{stop_with:?}: the still cover at once");
+            let asked = s.sent.borrow().len();
+            assert!(!s.poll_page_motion() && s.sent.borrow().len() == asked, "{stop_with:?}: nothing restarts or is asked");
+            s.set_animated_artwork(AnimatedArtwork::Always);
+            s.poll_page_motion();
+            assert!(s.motion.page.is_some(), "{stop_with:?}: back on with Always, started by poll");
+        }
+
+        // Always to Off with both open stops both (the page's slot is its own).
+        let mut s = ready();
+        s.poll_motion();
+        s.motion.page = Some(Playback::start("594061854".into(), 99, &Clip { path: "/nonexistent/clip.mp4".into(), width: 768, height: 768, fps: 23.976 }, Box::new(|_, _| {}), true));
+        s.set_animated_artwork(AnimatedArtwork::Off);
+        assert!(s.motion.playback.is_none() && s.motion.page.is_none());
+    }
+
+    #[test]
+    fn the_setting_is_saved_and_a_repeat_changes_nothing() {
+        let mut s = ready();
+        s.poll_motion();
+        s.set_animated_artwork(AnimatedArtwork::Always);
+        assert!(s.motion.playback.is_some(), "the same choice again: untouched");
+        s.set_animated_artwork(AnimatedArtwork::NowPlaying);
+        assert_eq!(s.settings.animated_artwork, AnimatedArtwork::NowPlaying);
+    }
+
+    #[test]
+    fn off_asks_for_no_motion_art_and_downloads_no_clip() {
+        // Playing, Now Playing open or closed: no lookups, no prefetch, no download.
+        for open in [true, false] {
+            let mut s = playing();
+            s.ui.now_playing = open;
+            s.settings.animated_artwork = AnimatedArtwork::Off;
+            s.poll_motion();
+            assert!(s.sent.borrow().is_empty() && s.motion.albums.is_empty(), "now_playing {open}");
+            // A late reply (asked before the switch) starts no download.
+            s.apply_msg(Msg::Motion { album: "594061854".into(), result: Ok(Some(art())) });
+            assert!(s.motion.clips.is_empty(), "now_playing {open}");
+        }
+        // An album page, catalog or library: no motion lookup either.
+        let mut s = on_page("594061854");
+        s.settings.animated_artwork = AnimatedArtwork::Off;
+        s.poll_page_motion();
+        assert!(s.sent.borrow().is_empty() && s.motion.albums.is_empty());
+    }
+
+    #[test]
+    fn an_album_page_is_requested_without_motion_art_when_off() {
+        for (mode, extended) in [
+            (AnimatedArtwork::Always, true),
+            (AnimatedArtwork::NowPlaying, true), // Now Playing uses it: saves its own request
+            (AnimatedArtwork::Off, false),
+        ] {
+            let mut s = State::offline();
+            s.settings.animated_artwork = mode;
+            s.fetch_collection(CollectionKind::Album, "594061854");
+            let sent = s.sent.borrow();
+            assert_eq!(sent.len(), 1, "{mode:?}");
+            assert!(sent[0].starts_with("/v1/catalog/{{storefrontId}}/albums/594061854 "), "{mode:?}");
+            assert_eq!(sent[0].contains("editorialVideo"), extended, "{mode:?}: {}", sent[0]);
+        }
+    }
+
+    #[test]
+    fn an_album_page_loaded_with_off_is_not_marked_as_having_no_loop() {
+        // Off sends no extension, so its reply is a plain `Collection` and `motion.albums` stays
+        // empty: switching on later asks Apple instead of believing "no motion art".
+        let mut s = playing();
+        s.settings.animated_artwork = AnimatedArtwork::Off;
+        s.apply_msg(Msg::Collection { id: "594061854".into(), result: Ok((collection("594061854", Vec::new()), None)) });
+        assert!(s.motion.albums.is_empty());
+        s.set_animated_artwork(AnimatedArtwork::Always);
+        s.poll_motion();
+        assert_eq!(motion_asks(&s), 1, "asked now");
     }
 }

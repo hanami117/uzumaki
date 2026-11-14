@@ -432,13 +432,23 @@ pub mod api {
         )
     }
 
+    /// An album with its motion art (`extend=editorialVideo`), for the app's album pages.
     pub fn album(id: &str) -> (String, Value) {
+        album_with(id, true)
+    }
+
+    /// An album; a catalog one carries its motion art only when `motion` (Animated artwork on).
+    pub fn album_with(id: &str, motion: bool) -> (String, Value) {
         if id.starts_with("l.") {
             (format!("/v1/me/library/albums/{id}"), json!({"include": "tracks,artists"}))
         } else {
             // Catalog albums list their artists' ids anyway, but their names only with
             // `include=artists` (checked live 2026-11-09); the tracks still come.
-            (format!("/v1/catalog/{{{{storefrontId}}}}/albums/{id}"), json!({"include": "artists", "extend": "editorialVideo"}))
+            let mut params = json!({"include": "artists"});
+            if motion {
+                params["extend"] = json!("editorialVideo");
+            }
+            (format!("/v1/catalog/{{{{storefrontId}}}}/albums/{id}"), params)
         }
     }
 

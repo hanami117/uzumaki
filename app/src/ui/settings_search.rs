@@ -25,6 +25,7 @@ pub enum Row {
     AppIcon,
     Player,
     StartupAnimation,
+    AnimatedArtwork,
     Background,
     Picture,
     Effect,
@@ -34,8 +35,6 @@ pub enum Row {
     Fade,
     NpBackground,
     NpCoverEffect,
-    AnimatedArtwork,
-    AlbumPageMotion,
     Sidebar,
     OpenOn,
     Tray,
@@ -81,7 +80,6 @@ impl Row {
             Row::NpBackground => "np-background",
             Row::NpCoverEffect => "np-cover-effect",
             Row::AnimatedArtwork => "animated-artwork",
-            Row::AlbumPageMotion => "album-page-motion",
             Row::Sidebar => "sidebar",
             Row::OpenOn => "open-on",
             Row::Tray => "tray",
@@ -173,6 +171,7 @@ const SPECS: &[Spec] = &[
     only(On::Mac, Row::AppIcon, Tab::Appearance, "App icon", "In the Dock and the Finder.", "icon logo dark light coral launcher"),
     spec(Row::Player, Tab::Appearance, "Player", "The bar at the bottom: full width, or a floating capsule.", "player bar docked floating controls"),
     spec(Row::StartupAnimation, Tab::Appearance, "Startup animation", "The Uzumaki swirl twists open when the app starts. The first library sync always shows it.", "intro splash launch swirl motion"),
+    spec(Row::AnimatedArtwork, Tab::Appearance, "Animated artwork", ANIMATED_ARTWORK, "motion video moving cover album art loop now playing album page always off still"),
     spec(Row::Background, Tab::Appearance, "Background", "A picture behind the content area.", "wallpaper backdrop image cover"),
     spec(Row::Picture, Tab::Appearance, "Picture", "Choose a background picture.", "wallpaper image photo file background"),
     spec(Row::Effect, Tab::Appearance, "Effect", "Background effect.", "dither ascii halftone blur scanlines background"),
@@ -181,8 +180,6 @@ const SPECS: &[Spec] = &[
     spec(Row::ListStrength, Tab::Appearance, "Song list strength", "Album and playlist pages, Songs and Local Files.", "background opacity strength transparency"),
     spec(Row::Fade, Tab::Appearance, "Fade toward the bottom", "Keeps long lists on the plain background.", "background gradient"),
     spec(Row::NpBackground, Tab::Appearance, "Now Playing background", "Colour tints the screen with the cover. Same as app uses the picture above.", "full screen fullscreen tint color"),
-    spec(Row::AnimatedArtwork, Tab::Appearance, "Animated artwork", "Apple's video loop of the album plays in the Now Playing cover, when it has one. A still cover with Reduce Motion.", "motion video moving cover album art loop now playing"),
-    spec(Row::AlbumPageMotion, Tab::Appearance, "Also on album pages", ALBUM_PAGE_MOTION, "animated artwork motion video moving cover album page header loop"),
     spec(Row::NpCoverEffect, Tab::Appearance, "Now Playing cover effect", "The effect on the cover behind Now Playing.", "full screen fullscreen dither blur"),
     spec(Row::Sidebar, Tab::Appearance, "Sidebar", "Turn off what you don't use. Right-click an entry in the sidebar to hide it from there.", "navigation hide show entries menu"),
     spec(Row::OpenOn, Tab::General, "Open on", "Home or the last page.", "startup start page launch home last page"),
@@ -248,8 +245,8 @@ pub fn find(query: &str) -> Vec<usize> {
     find_in(&INDEX, query)
 }
 
-/// Settings → Appearance → Now Playing → Also on album pages: what it does.
-pub const ALBUM_PAGE_MOTION: &str = "The loop also plays in the cover at the top of an album page while you look at it.";
+/// Settings → Appearance → Animated artwork: what it does.
+pub const ANIMATED_ARTWORK: &str = "Apple's video loop of an album, when it has one: in the Now Playing cover and, with Always, at the top of an album page. Off keeps still covers and downloads no video.";
 
 #[cfg(test)]
 mod tests {

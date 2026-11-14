@@ -145,6 +145,56 @@ impl IconVariant {
     }
 }
 
+/// Where Apple's animated artwork (the video loop of an album's cover) plays (Settings → Appearance
+/// → Animated artwork; `motion`). Whatever the choice, Reduce Motion keeps the covers still.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AnimatedArtwork {
+    /// Full-screen Now Playing and the cover at the top of an album page.
+    #[default]
+    Always,
+    /// Full-screen Now Playing only: album pages show the still cover.
+    NowPlaying,
+    /// Still covers everywhere. Nothing about the loops is asked for or downloaded.
+    Off,
+}
+
+impl AnimatedArtwork {
+    pub fn label(self) -> &'static str {
+        match self {
+            AnimatedArtwork::Always => "Always",
+            AnimatedArtwork::NowPlaying => "Now Playing only",
+            AnimatedArtwork::Off => "Off",
+        }
+    }
+
+    /// The loop may play in full-screen Now Playing, so its clips may be asked for and fetched.
+    /// Every place that plays loops includes this one: false means nothing is fetched at all.
+    pub fn in_now_playing(self) -> bool {
+        self != AnimatedArtwork::Off
+    }
+
+    /// The loop may play in an album page's cover.
+    pub fn on_album_pages(self) -> bool {
+        self == AnimatedArtwork::Always
+    }
+}
+
+/// `animated_artwork` was a yes/no switch (with `album_page_motion` beside it) before it became
+/// the three choices: `true` reads as Always, `false` as Off.
+fn animated_artwork_or_legacy<'de, D: serde::Deserializer<'de>>(d: D) -> Result<AnimatedArtwork, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored {
+        Legacy(bool),
+        Choice(AnimatedArtwork),
+    }
+    Ok(match Stored::deserialize(d)? {
+        Stored::Legacy(true) => AnimatedArtwork::Always,
+        Stored::Legacy(false) => AnimatedArtwork::Off,
+        Stored::Choice(c) => c,
+    })
+}
+
 /// The modifier of the number shortcuts (1–9).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NumberMod {
@@ -253,12 +303,11 @@ pub struct Settings {
     /// The swirl that twists open at launch (Settings → Appearance; `ui::intro`). The first
     /// library sync shows its screen either way.
     pub startup_animation: bool,
-    /// Apple's video loop of the album in the full-screen Now Playing cover, when it has one
-    /// (Settings → Appearance; `motion`). Never with Reduce Motion.
-    pub animated_artwork: bool,
-    /// The same loop in place of the cover at the top of an album page (Settings → Appearance,
-    /// under Animated artwork; `motion::want_page`). Only counts while `animated_artwork` is on.
-    pub album_page_motion: bool,
+    /// Apple's video loop of the album in the full-screen Now Playing cover and the cover at the
+    /// top of an album page, when it has one (Settings → Appearance; `motion`). Never with
+    /// Reduce Motion. A file from when this was a switch still loads (`from_json`).
+    #[serde(deserialize_with = "animated_artwork_or_legacy")]
+    pub animated_artwork: AnimatedArtwork,
     /// A desktop notification (title, artist and album, cover) when a new song starts while
     /// the window isn't in front (Settings → General; `notify.rs`). Off by default.
     pub notify_song_change: bool,
@@ -325,8 +374,7 @@ impl Default for Settings {
             app_icon: AppIcon::Dark,
             appearance: Default::default(),
             startup_animation: true,
-            animated_artwork: true,
-            album_page_motion: true,
+            animated_artwork: AnimatedArtwork::Always,
             notify_song_change: false,
             check_updates: true,
             resume_playback: true,
@@ -368,9 +416,14 @@ impl Settings {
     pub fn from_json(bytes: &[u8]) -> Self {
         let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return Self::default() };
         let old = value.as_object().is_some_and(|o| !o.contains_key("onboarded"));
+        // The switch "Also on album pages" (off) beside an on "Animated artwork" is Now Playing only.
+        let page_motion_off = value.get("album_page_motion").and_then(serde_json::Value::as_bool) == Some(false);
         let mut s: Self = serde_json::from_value(value).unwrap_or_default();
         if old && s.onboarded.is_none() {
             s.onboarded = Some(0);
+        }
+        if page_motion_off && s.animated_artwork == AnimatedArtwork::Always {
+            s.animated_artwork = AnimatedArtwork::NowPlaying;
         }
         s
     }
@@ -409,6 +462,46 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn animated_artwork_defaults_to_always_and_gates_each_place() {
+        assert_eq!(Settings::default().animated_artwork, AnimatedArtwork::Always);
+        assert_eq!(AnimatedArtwork::default(), AnimatedArtwork::Always);
+        // (Now Playing, album pages) per choice; Now Playing is also what allows any fetching.
+        for (mode, np, pages) in [
+            (AnimatedArtwork::Always, true, true),
+            (AnimatedArtwork::NowPlaying, true, false),
+            (AnimatedArtwork::Off, false, false),
+        ] {
+            assert_eq!((mode.in_now_playing(), mode.on_album_pages()), (np, pages), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn animated_artwork_loads_from_old_files_and_round_trips() {
+        let load = |json: &str| Settings::from_json(json.as_bytes()).animated_artwork;
+        assert_eq!(load("{}"), AnimatedArtwork::Always, "no key: today's behaviour");
+        assert_eq!(load(r#"{"onboarded": 1}"#), AnimatedArtwork::Always);
+        // The two switches it replaces.
+        assert_eq!(load(r#"{"animated_artwork": true, "album_page_motion": true}"#), AnimatedArtwork::Always);
+        assert_eq!(load(r#"{"animated_artwork": true}"#), AnimatedArtwork::Always);
+        assert_eq!(load(r#"{"animated_artwork": true, "album_page_motion": false}"#), AnimatedArtwork::NowPlaying);
+        assert_eq!(load(r#"{"animated_artwork": false, "album_page_motion": true}"#), AnimatedArtwork::Off);
+        assert_eq!(load(r#"{"animated_artwork": false, "album_page_motion": false}"#), AnimatedArtwork::Off);
+        assert_eq!(load(r#"{"album_page_motion": false}"#), AnimatedArtwork::NowPlaying, "the old default was on");
+        // The new form, and one that doesn't parse falls back with the rest of the file.
+        for mode in [AnimatedArtwork::Always, AnimatedArtwork::NowPlaying, AnimatedArtwork::Off] {
+            let json = serde_json::to_string(&Settings { animated_artwork: mode, ..Settings::default() }).unwrap();
+            assert_eq!(load(&json), mode, "{json}");
+            assert!(!json.contains("album_page_motion"));
+        }
+        assert_eq!(load(r#"{"animated_artwork": "Off", "album_page_motion": false}"#), AnimatedArtwork::Off, "the new key wins");
+        assert_eq!(load(r#"{"animated_artwork": "NowPlaying", "album_page_motion": false}"#), AnimatedArtwork::NowPlaying);
+        assert_eq!(load(r#"{"animated_artwork": "sometimes"}"#), AnimatedArtwork::Always);
+        // And the rest of an old file still loads.
+        let s = Settings::from_json(br#"{"animated_artwork": false, "shuffle": true}"#);
+        assert!(s.shuffle && s.animated_artwork == AnimatedArtwork::Off);
+    }
 
     #[test]
     fn theme_defaults_to_system_and_resolves() {

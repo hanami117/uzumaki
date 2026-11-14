@@ -59,7 +59,7 @@ impl MotionArt {
 /// What decides whether the clip moves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Facts {
-    /// Settings → Appearance → Animated artwork.
+    /// Settings → Appearance → Animated artwork lets Now Playing play (Always, Now Playing only).
     pub enabled: bool,
     /// The OS asks for reduced motion.
     pub reduced_motion: bool,
@@ -96,10 +96,8 @@ pub fn want(f: &Facts) -> Want {
 /// What decides whether an album page's cover moves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PageFacts {
-    /// Settings → Appearance → Animated artwork.
+    /// Settings → Appearance → Animated artwork lets album pages play (Always).
     pub enabled: bool,
-    /// Its "Also on album pages".
-    pub album_pages: bool,
     pub reduced_motion: bool,
     /// Local only mode: no Apple requests at all.
     pub local_only: bool,
@@ -116,7 +114,7 @@ pub struct PageFacts {
 /// The album page's cover. Unlike Now Playing it loops whether or not music plays, as Apple's
 /// does; it holds its frame while it can't be seen, and is gone off the page.
 pub fn want_page(f: &PageFacts) -> Want {
-    if !f.enabled || !f.album_pages || f.reduced_motion || f.local_only || !f.album_page || f.now_playing || f.hidden {
+    if !f.enabled || f.reduced_motion || f.local_only || !f.album_page || f.now_playing || f.hidden {
         Want::Off
     } else if f.covered || f.scrolled_away {
         Want::Paused
@@ -346,10 +344,9 @@ mod tests {
 
     #[test]
     fn an_album_page_plays_while_its_cover_can_be_seen() {
-        let on = PageFacts { enabled: true, album_pages: true, album_page: true, ..PageFacts::default() };
+        let on = PageFacts { enabled: true, album_page: true, ..PageFacts::default() };
         assert_eq!(want_page(&on), Want::Playing, "music paused or stopped: still loops");
         assert_eq!(want_page(&PageFacts { enabled: false, ..on }), Want::Off, "the setting");
-        assert_eq!(want_page(&PageFacts { album_pages: false, ..on }), Want::Off, "Also on album pages");
         assert_eq!(want_page(&PageFacts { reduced_motion: true, ..on }), Want::Off, "Reduce Motion");
         assert_eq!(want_page(&PageFacts { local_only: true, ..on }), Want::Off, "local only mode");
         assert_eq!(want_page(&PageFacts { album_page: false, ..on }), Want::Off, "another page");
