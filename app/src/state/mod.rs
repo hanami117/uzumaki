@@ -581,13 +581,12 @@ pub struct State {
 }
 
 impl State {
-    /// Headless / scene state: no bridge, no downloads.
-    /// The app's handle (None headless and in tests), for the macOS menu bar.
-    #[cfg(target_os = "macos")]
+    /// The app's handle (None headless and in tests), for the macOS menu bar and the page scroll tracker.
     pub fn app_handle(&self) -> Option<&Handle> {
         self.handle.as_ref()
     }
 
+    /// Headless / scene state: no bridge, no downloads.
     pub fn offline() -> Self {
         Self::new(None, None, None)
     }
