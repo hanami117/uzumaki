@@ -19,8 +19,8 @@ pub struct CtxItem {
     act: Option<Act>,
     /// A destructive item: the first click shows this label instead, the second acts.
     confirm: Option<String>,
-    /// A submenu (Share ▸ Copy Link): the item opens it instead of acting.
-    sub: Option<Vec<CtxItem>>,
+    /// Share (macOS): the item opens the Share submenu for this link instead of acting.
+    sub: Option<crate::share::Link>,
 }
 
 pub struct CtxMenu {
@@ -52,17 +52,21 @@ pub fn open_share(s: &mut State) {
     }
 }
 
-/// Share ▸ Copy Link, as in Apple's menus; nothing when the item has no page to link to.
+/// Share, as in Apple Music: on macOS a submenu with Copy Link and the system's sharing services,
+/// elsewhere a plain Copy Link. Nothing when the item has no page to link to.
 pub fn share_item(link: crate::share::Link) -> Option<CtxItem> {
     if link == crate::share::Link::Hidden {
         return None;
     }
-    let copy = it("Copy Link", move |s| s.copy_link(&link));
-    Some(CtxItem { label: "Share".into(), act: Some(Rc::new(|_| {})), confirm: None, sub: Some(vec![copy]) })
+    if !crate::share::submenu() {
+        return Some(it("Copy Link", move |s| s.copy_link(&link)));
+    }
+    Some(CtxItem { label: "Share".into(), act: Some(Rc::new(|_| {})), confirm: None, sub: Some(link) })
 }
 
 pub fn open(s: &mut State, at: [f32; 2], items: Vec<CtxItem>) {
     s.ui.menu = None;
+    crate::share::prepare();
     s.ui.ctx = Some(CtxMenu { at, items, armed: None, open_sub: None });
 }
 
@@ -391,19 +395,14 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
                 .on_secondary_press(|s: &mut State, _p, _tx: &mut Tx| s.ui.ctx = None),
         )
         .child(panel);
-    if let Some((i, off)) = sub_at {
-        // Beside the main panel, or on its left near the right edge; top aligned with its item.
-        let sx = if x + 2.0 * menu::W + 12.0 > win[0] { x - menu::W - 4.0 } else { x + menu::W + 4.0 };
-        let sy = (y + off - 6.0).min(win[1] - 60.0).max(8.0);
-        let mut sub = menu::panel(sx, sy);
-        for (j, item) in m.items[i].sub.iter().flatten().enumerate() {
-            let Some(act) = item.act.clone() else { continue };
-            sub = sub.child(menu::item(format!("ctx-sub-{j}"), &item.label, false).on_press(move |s: &mut State| {
-                s.ui.ctx = None;
-                act(s);
-            }));
-        }
-        layer = layer.child(sub);
+    if let Some((i, off)) = sub_at
+        && let Some(link) = m.items[i].sub.clone()
+    {
+        let at = m.at;
+        layer = layer.child(menu::share_panel(x, y + off, win, Rc::new(move |s: &mut State, via| {
+            s.ui.ctx = None;
+            s.share_link(&link, via, at);
+        })));
     }
     Some(layer)
 }
@@ -419,6 +418,7 @@ mod local_tests {
 
     #[test]
     fn local_albums_artists_and_folders_offer_only_what_works_for_files() {
+        crate::share::set_submenu(Some(true));
         let mut s = State::offline();
         s.settings.music_folders = vec!["/m".into()];
         s.session.authorized = true; // even signed in: these are files
@@ -437,6 +437,7 @@ mod local_tests {
 
     #[test]
     fn a_pin_has_the_menu_of_what_it_pins_plus_its_own_items() {
+        crate::share::set_submenu(Some(true));
         use crate::settings::{Pin, PinKind};
         let mut s = State::offline();
         s.session.authorized = true;
@@ -464,10 +465,18 @@ mod local_tests {
 #[cfg(test)]
 mod share_tests {
     use super::*;
-    use crate::share::{Kind, Link};
+    use crate::share::{Kind, Link, Via};
     use rune::{Env, Runtime};
 
+    /// The Mac's style (a Share submenu) with a sample list of services, on any system.
+    fn mac_style() {
+        crate::share::set_submenu(Some(true));
+        crate::share::set_services(Some(crate::share::sample_services()));
+        crate::share::take_performed();
+    }
+
     fn scene(name: &str) -> State {
+        mac_style();
         let mut s = State::offline();
         (crate::scenes::SCENES.iter().find(|(n, _)| *n == name).unwrap().1)(&mut s);
         s
@@ -509,41 +518,52 @@ mod share_tests {
         rt.use_clipboard(&board);
         rt.poll = Some(crate::ui::poll);
         let share = rt.state.ui.ctx.as_ref().unwrap().items.iter().position(|i| i.sub.is_some()).unwrap();
-        assert!(rt.find("ctx-sub-0").is_none(), "the submenu is closed until Share is reached");
+        assert!(rt.find("share-copy-link").is_none(), "the submenu is closed until Share is reached");
         tap(&mut rt, &format!("ctx-{share}"));
-        tap(&mut rt, "ctx-sub-0");
+        tap(&mut rt, "share-copy-link");
         let s = rt.state;
         assert!(s.ui.ctx.is_none(), "the menu closes");
         assert_eq!(s.toast.as_deref(), Some("Link copied"));
         // `ui::poll` hands the link to Rune's clipboard (the system one in the app).
-        assert_eq!(s.pending_copy, None);
+        assert_eq!(s.pending_share, None);
         assert_eq!(board.text().as_deref().map(String::as_str), Some("https://music.apple.com/it/album/random-access-memories/617154241"));
     }
 
     #[test]
     fn copy_link_asks_for_the_link_before_toasting_on_a_library_album() {
+        mac_style();
         let mut s = State::offline();
         s.copy_link(&Link::Lookup { kind: Kind::Album, id: "l.zzz".into(), title: "Nevermind".into() });
         assert_eq!(s.sent.borrow().len(), 1);
         assert!(s.sent.borrow()[0].starts_with("/v1/me/library/albums/l.zzz/catalog "));
-        assert_eq!(s.pending_copy, None, "nothing is copied before Apple answers");
+        assert_eq!(s.pending_share, None, "nothing is copied before Apple answers");
         s.apply_msg(crate::state::Msg::ShareLink {
             kind: Kind::Album,
             id: "l.zzz".into(),
             title: "Nevermind".into(),
+            via: Via::Copy,
+            at: [0.0, 0.0],
             result: Ok(Some(("1440783617".into(), None))),
         });
-        assert_eq!(s.pending_copy.as_deref(), Some("https://music.apple.com/us/album/nevermind/1440783617"));
+        assert_eq!(s.pending_share.as_ref().map(|p| p.url.as_str()), Some("https://music.apple.com/us/album/nevermind/1440783617"));
         assert_eq!(s.toast.as_deref(), Some("Link copied"));
         // No catalog match: a toast, nothing copied.
         let mut s = State::offline();
-        s.apply_msg(crate::state::Msg::ShareLink { kind: Kind::Artist, id: "r.1".into(), title: "X".into(), result: Ok(None) });
-        assert_eq!(s.pending_copy, None);
+        s.apply_msg(crate::state::Msg::ShareLink {
+            kind: Kind::Artist,
+            id: "r.1".into(),
+            title: "X".into(),
+            via: Via::Copy,
+            at: [0.0, 0.0],
+            result: Ok(None),
+        });
+        assert_eq!(s.pending_share, None);
         assert_eq!(s.toast.as_deref(), Some("Apple Music has no page to link to."));
     }
 
     #[test]
     fn each_kind_of_menu_has_share_where_a_page_exists() {
+        mac_style();
         let mut s = State::offline();
         s.session.storefront = Some("it".into());
         let album = crate::models::Collection { id: "617154241".into(), ..sample(CollectionKind::Album) };
@@ -586,6 +606,7 @@ mod share_tests {
 
     #[test]
     fn stations_apple_made_have_share_the_personal_one_does_not() {
+        mac_style();
         let mut s = State::offline();
         let apple = Station { id: "ra.978194965".into(), name: "Apple Music 1".into(), artwork: None, live: true };
         open_station(&mut s, &apple, [10.0, 10.0]);
@@ -604,7 +625,7 @@ mod share_tests {
         rt.use_clipboard(&board);
         rt.poll = Some(crate::ui::poll);
         tap(&mut rt, "menu-share");
-        tap(&mut rt, "menu-copy-link");
+        tap(&mut rt, "share-copy-link");
         assert!(rt.state.ui.menu.is_none());
         assert_eq!(rt.state.toast.as_deref(), Some("Link copied"));
         assert_eq!(
@@ -627,5 +648,108 @@ mod share_tests {
         song.id = "file:///m/a.flac".into();
         crate::ui::menu::open_song(&mut s, song, crate::ui::menu::MenuContext::NowPlaying, [80.0, 380.0]);
         assert!(run(s).find("menu-share").is_none());
+    }
+
+    #[test]
+    fn a_service_in_the_share_submenu_gets_the_resolved_link_and_nothing_is_copied() {
+        let mut s = scene("recently-added");
+        let c = crate::models::Collection { id: "617154241".into(), title: "Random Access Memories".into(), ..sample(CollectionKind::Album) };
+        s.session.storefront = Some("it".into());
+        open_collection(&mut s, &c, [520.0, 200.0]);
+        let board = rune::clipboard::memory();
+        let mut rt = run(s);
+        rt.use_clipboard(&board);
+        rt.poll = Some(crate::ui::poll);
+        let share = rt.state.ui.ctx.as_ref().unwrap().items.iter().position(|i| i.sub.is_some()).unwrap();
+        tap(&mut rt, &format!("ctx-{share}"));
+        // Copy Link, then the services in the system's order, with their titles.
+        for (i, title) in ["AirDrop", "Mail", "Messages"].iter().enumerate() {
+            assert!(rt.find(&format!("share-service-{i}")).is_some(), "{title} is listed");
+        }
+        tap(&mut rt, "share-service-2");
+        assert!(rt.state.ui.ctx.is_none(), "the menu closes");
+        assert_eq!(
+            crate::share::take_performed(),
+            [(2, "https://music.apple.com/it/album/random-access-memories/617154241".to_string())],
+            "Messages gets the album's page"
+        );
+        assert_eq!(rt.state.toast, None, "no Link copied toast: the service's own window shows");
+        assert_eq!(board.text(), None, "the clipboard is left alone");
+    }
+
+    #[test]
+    fn a_library_album_is_looked_up_before_the_service_gets_its_link() {
+        mac_style();
+        let mut s = State::offline();
+        s.share_link(&Link::Lookup { kind: Kind::Album, id: "l.zzz".into(), title: "Nevermind".into() }, Via::Service(0), [300.0, 200.0]);
+        assert!(s.sent.borrow()[0].starts_with("/v1/me/library/albums/l.zzz/catalog "));
+        assert_eq!(s.pending_share, None, "nothing goes to the service before Apple answers");
+        s.apply_msg(crate::state::Msg::ShareLink {
+            kind: Kind::Album,
+            id: "l.zzz".into(),
+            title: "Nevermind".into(),
+            via: Via::Service(0),
+            at: [300.0, 200.0],
+            result: Ok(Some(("1440783617".into(), Some("https://music.apple.com/it/album/nevermind/1440783617".into())))),
+        });
+        let p = s.pending_share.clone().unwrap();
+        assert_eq!((p.via, p.url.as_str(), p.at), (Via::Service(0), "https://music.apple.com/it/album/nevermind/1440783617", [300.0, 200.0]));
+        assert_eq!(s.toast, None);
+        // `ui::poll` hands it over (recorded in tests, never performed).
+        let mut rt = run(s);
+        rt.poll = Some(crate::ui::poll);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(crate::share::take_performed(), [(0, "https://music.apple.com/it/album/nevermind/1440783617".to_string())]);
+    }
+
+    #[test]
+    fn the_song_menus_share_submenu_hands_the_song_link_to_a_service() {
+        let mut s = scene("share-song-player-bar");
+        s.ui.menu.as_mut().unwrap().share = false;
+        let mut rt = run(s);
+        rt.poll = Some(crate::ui::poll);
+        tap(&mut rt, "menu-share");
+        tap(&mut rt, "share-service-0");
+        assert!(rt.state.ui.menu.is_none());
+        assert_eq!(crate::share::take_performed(), [(0, "https://music.apple.com/it/album/night-bus-hymns/1600000002?i=1600000010".to_string())]);
+    }
+
+    #[test]
+    fn without_a_system_share_menu_copy_link_sits_where_share_was() {
+        crate::share::set_submenu(Some(false));
+        let mut s = State::offline();
+        s.session.storefront = Some("it".into());
+        let album = crate::models::Collection { id: "617154241".into(), ..sample(CollectionKind::Album) };
+        let items = labels_of(collection_items(&s, &album));
+        assert!(items.contains(&"Copy Link".to_string()) && !items.contains(&"Share".to_string()), "{items:?}");
+        let station = Station { id: "ra.978194965".into(), name: "Apple Music 1".into(), artwork: None, live: true };
+        open_station(&mut s, &station, [10.0, 10.0]);
+        assert_eq!(labels(&s).last().map(String::as_str), Some("Copy Link"));
+        // Still hidden where there is no page.
+        let local = crate::models::Collection { id: format!("{}abc", crate::local::view::ALBUM_PREFIX), ..sample(CollectionKind::Album) };
+        assert!(!labels_of(collection_items(&s, &local)).contains(&"Copy Link".to_string()));
+        let favs = crate::models::Collection { id: "p.favs".into(), editable: false, favorites: true, ..sample(CollectionKind::Playlist) };
+        assert!(!labels_of(collection_items(&s, &favs)).iter().any(|l| l == "Copy Link" || l == "Share"), "Favourite Songs");
+        // The song menu: a flat Copy Link that copies.
+        let mut s = scene("share-song-player-bar");
+        crate::share::set_submenu(Some(false));
+        s.ui.menu.as_mut().unwrap().share = false;
+        let board = rune::clipboard::memory();
+        let mut rt = run(s);
+        rt.use_clipboard(&board);
+        rt.poll = Some(crate::ui::poll);
+        assert!(rt.find("menu-share").is_none());
+        tap(&mut rt, "menu-copy-link");
+        assert_eq!(board.text().as_deref().map(String::as_str), Some("https://music.apple.com/it/album/night-bus-hymns/1600000002?i=1600000010"));
+        assert!(crate::share::take_performed().is_empty());
+    }
+
+    #[test]
+    fn the_platform_decides_the_style() {
+        crate::share::set_submenu(None);
+        #[cfg(target_os = "macos")]
+        assert!(crate::share::submenu(), "macOS: a Share submenu with the system's services");
+        #[cfg(not(target_os = "macos"))]
+        assert!(!crate::share::submenu(), "elsewhere: a flat Copy Link");
     }
 }

@@ -41,6 +41,8 @@ mod nowplaying;
 mod scenes;
 mod settings;
 mod share;
+#[cfg(target_os = "macos")]
+mod share_mac;
 mod state;
 mod theme;
 mod tray;
@@ -71,6 +73,11 @@ use crate::state::{Msg, State};
 
 fn setup(s: &mut State, wake: Waker) {
     s.art.attach(ImageCache::new(wake));
+    // The Share submenu's system services, read once a little after start (not in the first frames).
+    #[cfg(target_os = "macos")]
+    if !rune::is_headless() {
+        share_mac::warm();
+    }
 }
 
 /// Closing the window quits, unless close to tray is on (then it only hides; the tray's Quit,
@@ -124,6 +131,24 @@ pub(crate) fn sync_window_bg() {
 }
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn sync_window_bg() {}
+
+/// The window's native content view (UI thread only): where Share's services anchor their sheets.
+#[cfg(target_os = "macos")]
+#[cfg_attr(test, allow(dead_code))]
+pub(crate) fn content_view() -> Option<objc2::rc::Retained<objc2_app_kit::NSView>> {
+    use rune::raw_window_handle::RawWindowHandle;
+    WINDOW.with(|w| {
+        let w = w.borrow();
+        w.as_ref()?
+            .with_raw_handle(|h| {
+                let RawWindowHandle::AppKit(h) = h.as_raw() else { return None };
+                // SAFETY: an NSView, alive for the callback; retaining it keeps it past that.
+                unsafe { objc2::rc::Retained::retain(h.ns_view.as_ptr().cast::<objc2_app_kit::NSView>()) }
+            })
+            .ok()
+            .flatten()
+    })
+}
 
 #[cfg(target_os = "macos")]
 fn paint_window_bg(handle: &rune::WindowHandle) {

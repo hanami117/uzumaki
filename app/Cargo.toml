@@ -29,11 +29,12 @@ libc = "0.2"
 # macOS only, on the objc2 0.6 stack Rune already builds (minimal features: no extra frameworks).
 # Media keys and Control Center (nowplaying.rs): MPRemoteCommandCenter / MPNowPlayingInfoCenter.
 # The menu bar icon (tray_mac.rs): NSStatusItem and NSMenu.
+# Share's system services (share_mac.rs): NSSharingService, icons drawn through NSBitmapImageRep.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSString", "NSDictionary", "NSValue", "NSArray", "NSData", "NSProcessInfo", "NSGeometry", "NSObject"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSString", "NSDictionary", "NSValue", "NSArray", "NSData", "NSProcessInfo", "NSGeometry", "NSObject", "NSURL", "NSEnumerator", "NSError"] }
 objc2-media-player = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSImage", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSMenu", "NSMenuItem"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSImage", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSMenu", "NSMenuItem", "NSSharingService", "NSBitmapImageRep", "NSImageRep", "NSGraphicsContext", "NSGraphics", "NSWindow"] }
 block2 = "0.6"
 dispatch2 = "0.3"
 

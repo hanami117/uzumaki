@@ -98,6 +98,9 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("share-song-player-bar", share_song_player_bar),
     ("share-song-row", share_song_row),
     ("share-library-album", share_library_album),
+    ("share-sample-services", share_sample_services),
+    ("share-flat-album-card", share_flat_album_card),
+    ("share-flat-song-player-bar", share_flat_song_player_bar),
     ("menu-submenu", menu_submenu),
     ("signed-out", signed_out),
     ("starting", starting),
@@ -1310,6 +1313,25 @@ fn share_library_album(s: &mut State) {
     c.id = "l.8f3a1".into();
     crate::ui::scene_menu_collection(s, &c, [520.0, 200.0]);
     share_open(s);
+}
+
+/// The Share submenu with a stand-in list of services (any system; on the Mac the other
+/// `share-*` scenes list the system's own, read headless).
+fn share_sample_services(s: &mut State) {
+    crate::share::set_submenu(Some(true));
+    crate::share::set_services(Some(crate::share::sample_services()));
+    share_album_card(s);
+}
+
+/// Linux: no Share submenu, a flat Copy Link in its place (forced here on any system).
+fn share_flat_album_card(s: &mut State) {
+    crate::share::set_submenu(Some(false));
+    share_album_card(s);
+}
+
+fn share_flat_song_player_bar(s: &mut State) {
+    crate::share::set_submenu(Some(false));
+    share_song_player_bar(s);
 }
 
 fn menu_submenu(s: &mut State) {

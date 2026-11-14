@@ -705,22 +705,32 @@ impl State {
     /// Share → Copy Link: copies the page of an item, asking Apple for the catalog twin of a
     /// library album or artist first.
     pub fn copy_link(&mut self, link: &crate::share::Link) {
+        self.share_link(link, crate::share::Via::Copy, [0.0, 0.0]);
+    }
+
+    /// Share: the page of an item to the clipboard or a system sharing service (macOS), once its
+    /// link is known; a library album or artist asks Apple for its catalog twin first. `at` is
+    /// where the menu was opened (the service's sheet zooms from there).
+    pub fn share_link(&mut self, link: &crate::share::Link, via: crate::share::Via, at: [f32; 2]) {
         use crate::share::Link;
         match link {
-            Link::Url(u) => self.copied(u.clone()),
+            Link::Url(u) => self.shared(u.clone(), via, at),
             Link::Lookup { kind, id, title } => {
                 let Some(path) = crate::share::lookup_path(*kind, id) else { return };
                 let (kind, id, title) = (*kind, id.clone(), title.clone());
-                self.request((path, serde_json::json!({})), crate::share::parse_lookup, move |result| Msg::ShareLink { kind, id, title, result });
+                self.request((path, serde_json::json!({})), crate::share::parse_lookup, move |result| Msg::ShareLink { kind, id, title, via, at, result });
             }
             Link::Hidden => {}
         }
     }
 
-    /// Puts `url` on the clipboard (at the next frame, `ui::poll`) and says so.
-    pub(super) fn copied(&mut self, url: String) {
-        self.pending_copy = Some(url);
-        self.toast = Some("Link copied".into());
+    /// Hands a resolved `url` on at the next frame (`ui::poll`): the clipboard, with a toast, or
+    /// a sharing service, whose own window says the rest.
+    pub(super) fn shared(&mut self, url: String, via: crate::share::Via, at: [f32; 2]) {
+        if via == crate::share::Via::Copy {
+            self.toast = Some("Link copied".into());
+        }
+        self.pending_share = Some(PendingShare { url, via, at });
     }
 
     /// A local song's artist page (local only mode).
