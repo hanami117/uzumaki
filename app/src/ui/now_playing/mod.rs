@@ -644,6 +644,7 @@ mod tests {
     }
 
     /// Keys of every element on screen, leaving ones included.
+    #[cfg(target_os = "macos")]
     fn keyed(rt: &Runtime<State>, key: &str) -> Vec<rune::ElementInfo> {
         rt.elements().into_iter().filter(|e| e.key.as_deref() == Some(key)).collect()
     }

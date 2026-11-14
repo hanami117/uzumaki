@@ -219,14 +219,12 @@ impl Playback {
     /// The first frame is in: the layer fades in over the still, and a Mac clip that waited on
     /// its poster plays (unless held). True when it changed.
     pub fn first_frame(&mut self) -> bool {
-        if std::mem::replace(&mut self.shown, true) {
-            return false;
-        }
+        let was_shown = std::mem::replace(&mut self.shown, true);
         #[cfg(target_os = "macos")]
-        if let Backend::Native(n) = &self.backend {
+        if let (false, Backend::Native(n)) = (was_shown, &self.backend) {
             n.set_paused(self.paused);
         }
-        true
+        !was_shown
     }
 
     /// A Mac clip waiting for its first drawn frame: the polls keep a timer frame coming, so
