@@ -17,7 +17,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use uzumaki_ctl::{LyricLine, LyricsStatus};
 
-use super::table::{bold, coral, dim};
+use super::table::{bold, dim, paint, theme};
 use crate::fmt::text_width;
 
 /// Lyrics redraw at most this often, however short the words.
@@ -230,12 +230,15 @@ pub fn rows(lyrics: &Lyrics, width: usize, cursor: Cursor) -> Vec<Row> {
     for (i, line) in lyrics.lines.iter().enumerate() {
         let current = synced && cursor.0 == Some(i);
         let past = synced && cursor.0.is_some_and(|c| i < c);
+        let other = paint(theme().lyrics_other);
         let (base, sung) = if current {
-            (bold(), coral().add_modifier(Modifier::BOLD))
+            (bold().patch(other), paint(theme().lyrics_current).add_modifier(Modifier::BOLD))
         } else if past {
-            (dim(), dim())
+            // Sung lines are the other lines, dimmed.
+            let gone = if theme().lyrics_other.is_some() { other.add_modifier(Modifier::DIM) } else { dim() };
+            (gone, gone)
         } else {
-            (Style::default(), Style::default())
+            (other, other)
         };
         // Line mode (or no word timing): the line being sung is coral as a whole.
         let timed = lyrics.words() && !line.words.is_empty();

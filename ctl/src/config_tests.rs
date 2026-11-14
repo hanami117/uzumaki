@@ -272,7 +272,8 @@ fn did_you_mean_finds_typos_and_not_other_words() {
 
 // -------------------------------------------------------------------------------------- theme
 
-use crate::config::theme::{CORAL, Theme, parse_colour};
+use crate::config::theme::{self, CORAL, Theme, parse_colour, parse_style};
+use ratatui::style::Modifier;
 use ratatui::style::Color;
 
 #[test]
@@ -313,13 +314,128 @@ fn no_theme_section_is_today_s_colours() {
 fn roles_and_palettes() {
     let cfg = Config::parse("[theme]\naccent = \"#88c0d0\"\nnumber = 208\nalbum = \"none\"\ntime = \"light-yellow\"\npaused = \"red\"\n");
     assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
-    assert_eq!(cfg.theme, Theme { accent: Some(Color::Rgb(0x88, 0xc0, 0xd0)), number: Some(Color::Indexed(208)), album: None, time: Some(Color::LightYellow), paused: Some(Color::Red) });
+    let accent = Some(Color::Rgb(0x88, 0xc0, 0xd0));
+    // What was the accent before it had its own key follows it.
+    assert_eq!(cfg.theme, Theme { accent, playing: accent, progress: accent, lyrics_current: accent, warning: accent, number: Some(Color::Indexed(208)), album: None, time: Some(Color::LightYellow), paused: Some(Color::Red), ..Theme::default() });
     // The palette is the base whatever the order of the lines; roles go on top.
     let cfg = Config::parse("[theme]\naccent = \"blue\"\npalette = \"mono\"\n");
-    assert_eq!(cfg.theme, Theme { accent: Some(Color::Blue), ..Theme::mono() });
+    let blue = Some(Color::Blue);
+    assert_eq!(cfg.theme, Theme { accent: blue, playing: blue, progress: blue, lyrics_current: blue, warning: blue, ..Theme::mono() });
     let cfg = Config::parse("[theme]\npalette = \"terminal\"\n");
     assert_eq!(cfg.theme.accent, Some(Color::Red));
     assert!(cfg.warnings.is_empty());
+}
+
+/// Every colour key, so a role added to the theme without a test fails here.
+fn all_roles(t: &Theme) -> Vec<(&'static str, Option<Color>)> {
+    theme::COLOURS.iter().map(|r| (r.name, t.get(r.name))).collect()
+}
+
+#[test]
+fn the_new_roles_parse_one_by_one() {
+    for (i, r) in theme::COLOURS.iter().enumerate() {
+        let cfg = Config::parse(&format!("[theme]\n{} = \"#0a0b0c\"\n", r.name));
+        assert!(cfg.warnings.is_empty(), "{}: {:?}", r.name, lines(&cfg));
+        assert_eq!(cfg.theme.get(r.name), Some(Color::Rgb(10, 11, 12)), "{}", r.name);
+        // Only that role (and what follows it) changed.
+        let changed: Vec<_> = all_roles(&cfg.theme).into_iter().zip(all_roles(&Theme::default())).filter(|(a, b)| a != b).map(|(a, _)| a.0).collect();
+        assert!(changed.contains(&r.name), "{} did not change ({i})", r.name);
+        assert!(changed.len() <= 5, "{}: {changed:?}", r.name);
+    }
+}
+
+#[test]
+fn every_palette_defines_every_role() {
+    // The default file shows each role's default; the default palette is exactly that.
+    for r in theme::COLOURS {
+        assert_eq!(parse_colour(r.default).unwrap(), Theme::default().get(r.name), "{}", r.name);
+    }
+    for r in theme::STYLES {
+        assert_eq!(parse_style(r.default).unwrap(), Theme::default().get_style(r.name), "{}", r.name);
+    }
+    // Mono has no colour anywhere; terminal has only the 16 colours of the terminal's theme.
+    assert!(all_roles(&Theme::mono()).iter().all(|(_, c)| c.is_none()));
+    for (name, c) in all_roles(&Theme::palette("terminal").unwrap()) {
+        assert!(!matches!(c, Some(Color::Rgb(..) | Color::Indexed(_))), "{name}: {c:?}");
+    }
+    assert_eq!(Theme::palette("terminal").unwrap().playing, Some(Color::Red));
+    // Not one role is lost by a palette: the three differ only in what they colour.
+    assert_eq!(all_roles(&Theme::default()).len(), theme::COLOURS.len());
+}
+
+#[test]
+fn followers_follow_the_accent_and_the_focused_border_follows_the_border() {
+    let cfg = Config::parse("[theme]\naccent = \"blue\"\n");
+    for role in theme::FOLLOW_ACCENT {
+        assert_eq!(cfg.theme.get(role), Some(Color::Blue), "{role}");
+    }
+    assert_eq!(cfg.theme.border_focused, None);
+    // A role set in the file does not follow, whatever the order of the lines.
+    let cfg = Config::parse("[theme]\nplaying = \"green\"\naccent = \"blue\"\nprogress = \"none\"\n");
+    assert_eq!((cfg.theme.playing, cfg.theme.progress, cfg.theme.warning), (Some(Color::Green), None, Some(Color::Blue)));
+    let cfg = Config::parse("[theme]\nborder = \"dark-gray\"\n");
+    assert_eq!((cfg.theme.border, cfg.theme.border_focused), (Some(Color::DarkGray), Some(Color::DarkGray)));
+    let cfg = Config::parse("[theme]\nborder = \"dark-gray\"\nborder_focused = \"cyan\"\n");
+    assert_eq!((cfg.theme.border, cfg.theme.border_focused), (Some(Color::DarkGray), Some(Color::Cyan)));
+}
+
+#[test]
+fn selection_styles_parse_and_bad_ones_warn() {
+    assert_eq!(parse_style("reversed|bold"), Ok(Some(Modifier::REVERSED | Modifier::BOLD)));
+    assert_eq!(parse_style(" Underline + italic "), Ok(Some(Modifier::UNDERLINED | Modifier::ITALIC)));
+    assert_eq!(parse_style("none"), Ok(Some(Modifier::empty())));
+    assert_eq!(parse_style("auto"), Ok(None));
+    assert!(parse_style("bold|blink").unwrap_err().contains("'blink' is not a style"));
+    assert!(parse_style("revesed").unwrap_err().contains("did you mean 'reversed'?"));
+    let cfg = Config::parse("[theme]\nselection_style = \"bold|underline\"\nselection_inactive_style = \"none\"\n");
+    assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    assert_eq!(cfg.theme.selection_style, Some(Modifier::BOLD | Modifier::UNDERLINED));
+    assert_eq!(cfg.theme.selection_inactive_style, Some(Modifier::empty()));
+    let cfg = Config::parse("[theme]\nselection_style = \"bold|zig\"\nselection_inactive_style = 3\nselection_bg = \"#gg0000\"\n");
+    let w = lines(&cfg);
+    assert_eq!(w.len(), 3, "{w:?}");
+    assert!(w[0].contains("'zig' is not a style"), "{}", w[0]);
+    assert!(w[1].contains("'selection_inactive_style' needs text"), "{}", w[1]);
+    assert!(w[2].contains("not a colour"), "{}", w[2]);
+    assert_eq!(cfg.theme, Theme::default());
+}
+
+#[test]
+fn a_typo_in_a_new_key_gets_a_hint() {
+    let cfg = Config::parse("[theme]\nselection_bgg = \"red\"\nlyric_current = \"red\"\n");
+    assert!(lines(&cfg)[0].contains("did you mean 'selection_bg'?"), "{:?}", lines(&cfg));
+    assert!(lines(&cfg)[1].contains("did you mean 'lyrics_current'?"), "{:?}", lines(&cfg));
+}
+
+#[test]
+fn no_color_keeps_the_selection_style() {
+    let cfg = Config::parse("[theme]\nselection_bg = \"red\"\nselection_style = \"bold\"\n").with_no_color(true);
+    assert_eq!(cfg.theme, Theme { selection_style: Some(Modifier::BOLD), ..Theme::mono() });
+}
+
+#[test]
+fn the_theme_samples_in_the_docs_are_real() {
+    let section = DOCS.split("## [theme]").nth(1).and_then(|t| t.split("## [format]").next()).expect("the theme section");
+    let blocks: Vec<&str> = section.split("```toml\n").skip(1).filter_map(|t| t.split("```").next()).collect();
+    assert!(blocks.len() >= 2, "a short example and a full theme");
+    for b in &blocks {
+        let cfg = Config::parse(b);
+        assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    }
+    // The Catppuccin sample sets every colour of the table.
+    let full = Config::parse(blocks.last().unwrap()).theme;
+    assert_eq!(full.selection_bg, Some(Color::Rgb(0x45, 0x47, 0x5a)));
+    assert_eq!(full.error, Some(Color::Rgb(0xf3, 0x8b, 0xa8)));
+    assert_eq!(full.border_focused, Some(Color::Rgb(0xcb, 0xa6, 0xf7)));
+}
+
+#[test]
+fn the_default_file_and_the_docs_list_every_colour_and_style() {
+    let text = config::default_file();
+    for r in theme::COLOURS.iter().chain(theme::STYLES) {
+        assert!(text.contains(&format!("# {} ", r.name)) && text.contains(&format!("= \"{}\"", r.default)), "default file misses {}", r.name);
+        assert!(DOCS.contains(&format!("| `{}`", r.name)), "docs/UZU-CONFIG.md misses {}", r.name);
+    }
 }
 
 #[test]
@@ -840,9 +956,9 @@ fn the_default_file_with_every_setting_switched_on_is_valid_and_is_the_defaults(
     assert!(doc.problems.is_empty(), "{:?}", doc.problems);
     let cfg = Config::parse(&text);
     assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
-    // One entry per action, and one per documented setting (theme 7, format 2, layout 8, defaults 5).
+    // One entry per action, and one per documented setting (theme 2 + every colour and style, format 2, layout 8, defaults 5).
     assert_eq!(doc.entries.iter().filter(|e| e.section == "keys").count(), ACTIONS.len());
-    assert_eq!(doc.entries.iter().filter(|e| e.section != "keys").count(), 7 + 2 + 8 + 5, "{:?}", doc.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>());
+    assert_eq!(doc.entries.iter().filter(|e| e.section != "keys").count(), 2 + theme::COLOURS.len() + theme::STYLES.len() + 2 + 8 + 5, "{:?}", doc.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>());
     assert_eq!(cfg.theme, Theme::default());
     assert_eq!(cfg.layout, LayoutCfg::default());
     assert_eq!(cfg.line_format(), format::DEFAULT);

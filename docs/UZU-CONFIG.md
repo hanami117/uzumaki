@@ -157,29 +157,115 @@ change `lyrics`, the old `l` stops switching panes there too. The arrow keys sti
 [theme]
 palette = "default"
 accent = "#ff7a8a"
-number = "green"
-album = "cyan"
-time = "magenta"
-paused = "yellow"
+selection_bg = "#434c5e"
+selection_fg = "#eceff4"
 respect_no_color = true
 ```
 
 - `palette` is `"default"` (coral and the ANSI colours), `"terminal"` (only the 16 colours of
-  your terminal theme) or `"mono"` (no colour).
-- The five colours are put on top of the palette. Order in the file does not matter.
+  your terminal theme, no fixed RGB) or `"mono"` (no colour). Each palette sets every colour
+  in the table below.
+- The colours you write are put on top of the palette. Order in the file does not matter.
 - A colour is `"#rrggbb"` or `"#rgb"`, a name, a number from 0 to 255, or `"none"`.
-  `"none"` is the terminal's own text colour.
+  `"none"` is the terminal's own text colour (see the table for `muted` and the selection).
 - The names are `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `gray`,
   `white`, `dark-gray`, `light-red`, `light-green`, `light-yellow`, `light-blue`,
   `light-magenta`, `light-cyan` and `coral`.
 - If `NO_COLOR` is set, `uzu` uses no colour. Set `respect_no_color = false` to ignore it.
+  A `selection_style` still counts, because bold or underline is not a colour.
 
-What each colour paints: `accent` is the playing song, the current tab, the key names in the
-help and the sung lyrics. `number` is the `#` column. `album` is the Album column.
-`time` is the Time column. `paused` is the word "Paused".
+### Every colour and what it paints
+
+Without a file, `uzu` looks as it always did: the defaults below are that look.
+
+| Key                     | Default     | What it paints                                                      |
+|-------------------------|-------------|---------------------------------------------------------------------|
+| `accent`                | `#ff7a8a`   | the current tab, the key names in the help, the `>` of the search   |
+| `playing`               | `#ff7a8a`   | the playing song: its row (in bold), its title in the player, the word Playing |
+| `number`                | `green`     | the `#` column                                                      |
+| `album`                 | `cyan`      | the Album column (and the Artist column of the album list)          |
+| `time`                  | `magenta`   | the Time column                                                     |
+| `paused`                | `yellow`    | the word Paused                                                     |
+| `title`                 | `none`      | the song title in the player and the panel titles (Now Playing, Up Next), on top of bold |
+| `header`                | `none`      | the column headers of the tables and the list panes, on top of bold |
+| `muted`                 | `none`      | secondary text: hints, the album line, songs that cannot play, the history, empty-list notes. `none` is the terminal's dim look; a colour is used instead of dim |
+| `border`                | `none`      | the frame, the rules, the scrollbars, the divider between panes     |
+| `border_focused`        | `none`      | the border of the box that has the keys: the help and the sort menu |
+| `selection_fg`          | `none`      | the text of the cursor row, in the pane that has the focus          |
+| `selection_bg`          | `none`      | the background of that row                                          |
+| `selection_inactive_fg` | `none`      | the text of the cursor row in the pane without the focus (Playlists and Albums have two panes) |
+| `selection_inactive_bg` | `none`      | the background of that row                                          |
+| `progress`              | `#ff7a8a`   | the finished part of the progress bar, while playing                |
+| `progress_bg`           | `none`      | the rest of the bar (its track)                                     |
+| `lyrics_current`        | `#ff7a8a`   | the words being sung                                                |
+| `lyrics_other`          | `none`      | the other lyrics lines. The lines already sung are also dimmed      |
+| `status_fg`             | `none`      | the text of the line under the tabs: what you type, the messages, the screen's line |
+| `status_bg`             | `none`      | the background of that whole line                                   |
+| `warning`               | `#ff7a8a`   | "Uzumaki went away, retrying…" and the problems found in this file  |
+| `error`                 | `none`      | an error from Uzumaki, in the status line                           |
+
+The `terminal` palette uses `red` where the table says `#ff7a8a`. The `mono` palette has no colour.
+
+Some keys follow another one, so a file written before they existed looks the same:
+
+- `playing`, `progress`, `lyrics_current` and `warning` follow `accent` when you do not set them.
+  `accent = "blue"` alone makes all of them blue, as it always did.
+- `border_focused` follows `border` when you do not set it.
+
+`error` is plain by default, like before. If you want errors to stand out, set it
+(`error = "red"`). Uzumaki has no multi-select, so there is no colour for marked rows.
+
+### The look of the cursor row
+
+Without any selection colour, the cursor row is reversed in the pane that has the focus and
+underlined in the other one. That is the old look. When you set `selection_fg` or
+`selection_bg`, the colours are the mark and nothing is reversed. The same goes for the
+`selection_inactive_*` colours and the other pane. You can still choose the look:
+
+```toml
+[theme]
+selection_style = "reversed|bold"
+selection_inactive_style = "underline"
+```
+
+| Key                        | Default | What it sets                                |
+|----------------------------|---------|---------------------------------------------|
+| `selection_style`          | `auto`  | the look of the cursor row in the pane that has the focus |
+| `selection_inactive_style` | `auto`  | the look of the cursor row in the other pane |
+
+The words are `reversed`, `bold`, `underline`, `italic`, `dim` and `strikethrough`. Join them
+with `|`. `none` is no look at all, and `auto` is the rule above. With a `selection_bg` the whole
+row is coloured, not only the text.
 
 The theme is for the terminal player. The plain text from commands like `uzu status` does
 not use it.
+
+### A theme to copy: Catppuccin Mocha
+
+```toml
+[theme]
+accent         = "#f5c2e7"
+playing        = "#a6e3a1"
+number         = "#6c7086"
+album          = "#89b4fa"
+time           = "#fab387"
+paused         = "#f9e2af"
+title          = "#cdd6f4"
+header         = "#b4befe"
+muted          = "#7f849c"
+border         = "#45475a"
+border_focused = "#cba6f7"
+selection_fg   = "#cdd6f4"
+selection_bg   = "#45475a"
+selection_inactive_bg = "#313244"
+progress       = "#f5c2e7"
+progress_bg    = "#45475a"
+lyrics_current = "#f5e0dc"
+lyrics_other   = "#9399b2"
+status_fg      = "#bac2de"
+warning        = "#f9e2af"
+error          = "#f38ba8"
+```
 
 ## [format]: a line for a status bar
 
@@ -302,7 +388,7 @@ notifications = true
 ## A themed example
 
 ```toml
-# ~/.config/uzumaki/uzu.toml: a cool blue theme, vim-like keys, a bar line.
+# ~/.config/uzumaki/uzu.toml: the Nord theme, vim-like keys, a bar line.
 
 [theme]
 accent = "#88c0d0"
@@ -310,6 +396,23 @@ number = "#81a1c1"
 album  = "#8fbcbb"
 time   = "#b48ead"
 paused = "#ebcb8b"
+playing        = "#a3be8c"
+header         = "#81a1c1"
+muted          = "#616e88"
+border         = "#4c566a"
+border_focused = "#88c0d0"
+selection_fg   = "#eceff4"
+selection_bg   = "#434c5e"
+selection_inactive_bg = "#3b4252"
+selection_style = "bold"
+progress       = "#88c0d0"
+progress_bg    = "#4c566a"
+lyrics_current = "#eceff4"
+lyrics_other   = "#81a1c1"
+status_fg      = "#d8dee9"
+status_bg      = "#3b4252"
+warning        = "#ebcb8b"
+error          = "#bf616a"
 
 [keys]
 next         = ["n", "ctrl+n"]

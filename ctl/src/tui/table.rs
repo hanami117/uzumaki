@@ -48,13 +48,58 @@ pub fn coral() -> Style {
     paint(theme().accent)
 }
 
+/// Secondary text: the terminal's dim look, or the `muted` colour.
 pub fn dim() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
+    fade(Style::default())
 }
 
-/// Borders, rules and tracks: the plain foreground, so they show on light themes too.
+/// `style` made secondary: dim, or recoloured `muted`.
+pub fn fade(style: Style) -> Style {
+    match theme().muted {
+        Some(c) => style.fg(c),
+        None => style.add_modifier(Modifier::DIM),
+    }
+}
+
+/// Borders, rules and tracks: the plain foreground (unless `border` says otherwise), so they
+/// show on light themes too.
 pub fn frame() -> Style {
-    Style::default()
+    paint(theme().border)
+}
+
+/// The border of a box that has the keys (the help, the sort menu).
+pub fn frame_focused() -> Style {
+    paint(theme().border_focused)
+}
+
+/// The playing song's colour.
+pub fn playing() -> Style {
+    paint(theme().playing)
+}
+
+/// Column headers and pane heads.
+pub fn heading() -> Style {
+    bold().patch(paint(theme().header))
+}
+
+/// Song titles in the player and the panel titles.
+pub fn title() -> Style {
+    bold().patch(paint(theme().title))
+}
+
+/// The line under the tabs: `status_fg` on `status_bg`.
+pub fn status() -> Style {
+    let t = theme();
+    let s = paint(t.status_fg);
+    t.status_bg.map_or(s, |c| s.bg(c))
+}
+
+pub fn warning() -> Style {
+    paint(theme().warning)
+}
+
+pub fn error() -> Style {
+    paint(theme().error)
 }
 
 pub fn bold() -> Style {
@@ -114,9 +159,43 @@ pub enum Mark {
 }
 
 impl Mark {
-    pub fn style(self) -> Modifier {
-        if self == Mark::Focus { Modifier::REVERSED } else { Modifier::UNDERLINED }
+    /// The colours and the look of the cursor row. Without a colour set it is reversed (focused)
+    /// or underlined (not), as it always was; with one, the colour is the mark.
+    fn look(self) -> (Option<Color>, Option<Color>, Modifier) {
+        let t = theme();
+        match self {
+            Mark::Focus => (t.selection_fg, t.selection_bg, t.selection_style.unwrap_or(if t.selection_fg.is_some() || t.selection_bg.is_some() { Modifier::empty() } else { Modifier::REVERSED })),
+            Mark::Dim => (
+                t.selection_inactive_fg,
+                t.selection_inactive_bg,
+                t.selection_inactive_style.unwrap_or(if t.selection_inactive_fg.is_some() || t.selection_inactive_bg.is_some() { Modifier::empty() } else { Modifier::UNDERLINED }),
+            ),
+        }
     }
+
+    /// `style` as the cursor row shows it.
+    pub fn apply(self, style: Style) -> Style {
+        let (fg, bg, modifier) = self.look();
+        let mut style = style.add_modifier(modifier);
+        if let Some(c) = fg {
+            style = style.fg(c);
+        }
+        if let Some(c) = bg {
+            style = style.bg(c);
+        }
+        style
+    }
+
+    /// The space between two cells of the cursor row: it only takes the background, so the row
+    /// is one block.
+    pub fn gap(self) -> Style {
+        self.look().1.map_or_else(Style::default, |c| Style::default().bg(c))
+    }
+}
+
+/// The gap between two cells, in the cursor row's background when `mark` is its row.
+pub fn gap(width: usize, mark: Option<Mark>) -> Span<'static> {
+    Span::styled(" ".repeat(width), mark.map_or_else(Style::default, Mark::gap))
 }
 
 pub struct Table<'a, 'r> {
@@ -222,7 +301,7 @@ fn row_line(row: &Row, cols: &[(Col, usize)], mark: Option<Mark>, glyph: &str) -
     let mut spans = Vec::new();
     for (i, &(col, w)) in cols.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::raw(" ".repeat(GAP)));
+            spans.push(gap(GAP, mark));
         }
         let text = match col {
             Col::Artist => row.song.artist.clone(),
@@ -236,13 +315,13 @@ fn row_line(row: &Row, cols: &[(Col, usize)], mark: Option<Mark>, glyph: &str) -
         };
         let mut style = cell_style(col);
         if row.playing {
-            style = coral().add_modifier(Modifier::BOLD);
+            style = playing().add_modifier(Modifier::BOLD);
         }
         if !row.song.playable || matches!(row.kind, RowKind::NextLap | RowKind::Played | RowKind::Suggested | RowKind::Past(_)) {
-            style = style.add_modifier(Modifier::DIM);
+            style = fade(style);
         }
         if let Some(m) = mark {
-            style = style.add_modifier(m.style());
+            style = m.apply(style);
         }
         spans.push(Span::styled(cell(col, w, &text), style));
     }
@@ -261,7 +340,7 @@ pub fn draw(f: &mut Frame, area: Rect, t: &Table) {
         .enumerate()
         .flat_map(|(i, &(c, w))| {
             let sep = if i > 0 { Some(Span::raw(" ".repeat(GAP))) } else { None };
-            sep.into_iter().chain([Span::styled(cell(c, w, header_text(c)), bold())])
+            sep.into_iter().chain([Span::styled(cell(c, w, header_text(c)), heading())])
         })
         .collect();
     f.render_widget(Paragraph::new(Line::from(head)), Rect { height: 1, ..area });
