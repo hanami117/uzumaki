@@ -255,8 +255,9 @@ fn transport(s: &State) -> El {
 const TIME_W: f32 = 44.0;
 const TIME_GAP: f32 = 10.0;
 
-/// The stacked button row's widest: past a phone's width the cells would drift apart.
-const BUTTONS_MAX_W: f32 = 400.0;
+/// One cell of the stacked button row: fixed, so two buttons (Linux, no Words) sit close to the
+/// middle instead of drifting to the edges, and four fill about a phone's width.
+const BUTTON_CELL_W: f32 = 76.0;
 
 /// The volume slider (with the wheel on its whole row).
 fn volume(s: &State) -> El {
@@ -305,10 +306,10 @@ fn secondary_buttons(s: &State) -> Vec<El> {
 /// lined up with the scrubber's left end, then the buttons at an even spacing.
 fn bottom_rows(s: &State, stacked: bool) -> El {
     if stacked {
-        let cells = secondary_buttons(s).into_iter().map(|b| row().grow(1.0).justify_center().child(b));
+        let cells = secondary_buttons(s).into_iter().map(|b| row().w(BUTTON_CELL_W).justify_center().child(b));
         return col().w_full().gap(14.0)
             .child(volume_row(s))
-            .child(row().w_full().justify_center().child(row().key("np-buttons").w_full().max_w(BUTTONS_MAX_W).center_y().children(cells)));
+            .child(row().w_full().justify_center().child(row().key("np-buttons").center_y().children(cells)));
     }
     row().w_full().center_y()
         .child(wheel_volume(
