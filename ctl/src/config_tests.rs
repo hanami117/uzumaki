@@ -193,3 +193,81 @@ fn did_you_mean_finds_typos_and_not_other_words() {
     assert_eq!(did_you_mean("seek-forward", &["seek_forward"]), Some("seek_forward"));
     assert_eq!(config::edit_distance("kitten", "sitting"), 3);
 }
+
+// -------------------------------------------------------------------------------------- theme
+
+use crate::config::theme::{CORAL, Theme, parse_colour};
+use ratatui::style::Color;
+
+#[test]
+fn colours_in_every_form() {
+    assert_eq!(parse_colour("#ff7a8a"), Ok(Some(Color::Rgb(255, 122, 138))));
+    assert_eq!(parse_colour("#F7A"), Ok(Some(Color::Rgb(255, 119, 170))));
+    assert_eq!(parse_colour("Red"), Ok(Some(Color::Red)));
+    assert_eq!(parse_colour("light-blue"), Ok(Some(Color::LightBlue)));
+    assert_eq!(parse_colour("light blue"), Ok(Some(Color::LightBlue)));
+    assert_eq!(parse_colour("bright-green"), Ok(Some(Color::LightGreen)));
+    assert_eq!(parse_colour("grey"), Ok(Some(Color::Gray)));
+    assert_eq!(parse_colour("dark_gray"), Ok(Some(Color::DarkGray)));
+    assert_eq!(parse_colour("coral"), Ok(Some(CORAL)));
+    assert_eq!(parse_colour("208"), Ok(Some(Color::Indexed(208))));
+    assert_eq!(parse_colour("none"), Ok(None));
+    assert_eq!(parse_colour("default"), Ok(None));
+}
+
+#[test]
+fn bad_colours_explain_themselves() {
+    assert!(parse_colour("#12").unwrap_err().contains("#rrggbb or #rgb"));
+    assert!(parse_colour("#gggggg").unwrap_err().contains("#rrggbb"));
+    assert!(parse_colour("rd").unwrap_err().contains("did you mean 'red'?"), "{:?}", parse_colour("rd"));
+    assert!(parse_colour("lightblu").unwrap_err().contains("light-blue"));
+    assert!(parse_colour("banana").unwrap_err().contains("use #rrggbb"));
+    assert!(parse_colour("300").is_err());
+}
+
+#[test]
+fn no_theme_section_is_today_s_colours() {
+    let t = Config::parse("").theme;
+    assert_eq!(t, Theme::default());
+    assert_eq!(t.accent, Some(Color::Rgb(255, 122, 138)));
+    assert_eq!((t.number, t.album, t.time, t.paused), (Some(Color::Green), Some(Color::Cyan), Some(Color::Magenta), Some(Color::Yellow)));
+}
+
+#[test]
+fn roles_and_palettes() {
+    let cfg = Config::parse("[theme]\naccent = \"#88c0d0\"\nnumber = 208\nalbum = \"none\"\ntime = \"light-yellow\"\npaused = \"red\"\n");
+    assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    assert_eq!(cfg.theme, Theme { accent: Some(Color::Rgb(0x88, 0xc0, 0xd0)), number: Some(Color::Indexed(208)), album: None, time: Some(Color::LightYellow), paused: Some(Color::Red) });
+    // The palette is the base whatever the order of the lines; roles go on top.
+    let cfg = Config::parse("[theme]\naccent = \"blue\"\npalette = \"mono\"\n");
+    assert_eq!(cfg.theme, Theme { accent: Some(Color::Blue), ..Theme::mono() });
+    let cfg = Config::parse("[theme]\npalette = \"terminal\"\n");
+    assert_eq!(cfg.theme.accent, Some(Color::Red));
+    assert!(cfg.warnings.is_empty());
+}
+
+#[test]
+fn a_bad_colour_keeps_the_old_one_and_warns() {
+    let cfg = Config::parse("[theme]\naccent = \"rd\"\nnumber = true\ntime = 999\npalette = \"monoo\"\n");
+    assert_eq!(cfg.theme, Theme::default());
+    let w = lines(&cfg);
+    assert_eq!(w.len(), 4, "{w:?}");
+    assert!(w[0].starts_with("line 2: 'rd' is not a colour; did you mean 'red'?"), "{}", w[0]);
+    assert!(w[1].contains("'number' needs a colour in quotes (got true or false)"), "{}", w[1]);
+    assert!(w[2].contains("0 to 255"), "{}", w[2]);
+    assert!(w[3].contains("unknown palette 'monoo'; did you mean 'mono'?"), "{}", w[3]);
+}
+
+#[test]
+fn no_color_turns_the_colours_off_unless_the_file_says_otherwise() {
+    let cfg = Config::parse("[theme]\naccent = \"red\"\n").with_no_color(true);
+    assert_eq!(cfg.theme, Theme::mono());
+    let cfg = Config::parse("[theme]\naccent = \"red\"\n").with_no_color(false);
+    assert_eq!(cfg.theme.accent, Some(Color::Red));
+    let cfg = Config::parse("[theme]\naccent = \"red\"\nrespect_no_color = false\n").with_no_color(true);
+    assert_eq!(cfg.theme.accent, Some(Color::Red));
+    let cfg = Config::parse("[theme]\nrespect_no_color = \"no\"\n");
+    assert!(lines(&cfg)[0].contains("'respect_no_color' needs true or false"), "{:?}", lines(&cfg));
+    // With no config at all, NO_COLOR still counts.
+    assert_eq!(Config::default().with_no_color(true).theme, Theme::mono());
+}

@@ -9,7 +9,7 @@ use std::time::Instant;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph};
 use ratatui_image::Image;
@@ -19,7 +19,7 @@ use super::app::{App, COMPACT_BELOW, Screen, chrome_top};
 use super::cover;
 use super::showcase::{self, Layout};
 use super::sort::{Key, View};
-use super::table::{self, Mark, Row, Table, bold, coral, dim, frame};
+use super::table::{self, Mark, Row, Table, bold, coral, dim, frame, paint, theme};
 use super::{browse, lyrics, search};
 use crate::fmt::{fmt_time, pad_right, plural, repeat_name, text_width, truncate};
 
@@ -53,7 +53,7 @@ pub fn state_glyph(state: Option<PlayState>) -> &'static str {
 pub(super) fn state_word(state: PlayState) -> (&'static str, &'static str, Style) {
     match state {
         PlayState::Playing => ("▶", "Playing", coral()),
-        PlayState::Paused => ("‖", "Paused", Style::default().fg(Color::Yellow)),
+        PlayState::Paused => ("‖", "Paused", paint(theme().paused)),
         PlayState::Loading => ("…", "Loading", dim()),
         PlayState::Stopped => ("■", "Stopped", dim()),
     }
@@ -529,6 +529,7 @@ fn overlays(f: &mut Frame, app: &App) {
 }
 
 pub fn draw(f: &mut Frame, app: &App, now: Instant) {
+    table::set_theme(app.config.theme);
     let area = f.area();
     let (w, h) = (area.width, area.height);
     // The screenshot views (`F`), on the queue screen; the showcase needs room, else this one.

@@ -3204,3 +3204,76 @@ fn no_problems_means_no_message() {
     app.resize(20);
     assert!(lines(&draw(&app, now, 140, 20))[8].starts_with("│ Playing from: Anima"));
 }
+
+/// The foreground colours used on a frame, as a set.
+fn colours(buf: &Buffer) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for y in 0..buf.area.height {
+        for x in 0..buf.area.width {
+            if let Color::Reset = buf[(x, y)].fg {
+                continue;
+            }
+            out.insert(format!("{:?}", buf[(x, y)].fg));
+        }
+    }
+    out
+}
+
+#[test]
+fn the_default_theme_uses_coral_green_cyan_and_magenta() {
+    let now = Instant::now();
+    let mut app = fixture(now);
+    app.resize(20);
+    let got = colours(&draw(&app, now, 140, 20));
+    assert_eq!(got, ["Cyan", "Green", "Magenta", "Rgb(255, 122, 138)"].map(String::from).into_iter().collect());
+}
+
+#[test]
+fn a_theme_in_the_file_recolours_the_roles() {
+    let now = Instant::now();
+    let mut app = with_config("[theme]\naccent = \"#112233\"\nnumber = \"red\"\nalbum = \"blue\"\ntime = 99\n", now);
+    app.resize(20);
+    let buf = draw(&app, now, 140, 20);
+    assert_eq!(colours(&buf), ["Blue", "Indexed(99)", "Red", "Rgb(17, 34, 51)"].map(String::from).into_iter().collect());
+    // The playing row's title carries the accent, the # column the number colour.
+    let text = lines(&buf);
+    let row = text.iter().position(|l| l.contains("Instant Crush") && l.contains('▶')).unwrap();
+    let x = text[row].find("Instant Crush").map(|b| text[row][..b].chars().count()).unwrap();
+    assert_eq!(buf[(x as u16, row as u16)].fg, Color::Rgb(17, 34, 51));
+}
+
+#[test]
+fn mono_and_no_color_draw_no_colour_at_all() {
+    let now = Instant::now();
+    for app in [with_config("[theme]\npalette = \"mono\"\n", now), {
+        let mut a = fixture(now);
+        a.set_config(Config::parse("").with_no_color(true), now);
+        a
+    }] {
+        let mut app = app;
+        app.resize(20);
+        let buf = draw(&app, now, 140, 20);
+        assert!(colours(&buf).is_empty(), "{:?}", colours(&buf));
+        // Bold and the selection still show: it is colour that goes, not emphasis.
+        let bold = (0..20u16).any(|y| (0..140u16).any(|x| buf[(x, y)].modifier.contains(Modifier::BOLD)));
+        assert!(bold);
+    }
+}
+
+#[test]
+fn the_paused_state_and_every_screen_follow_the_theme() {
+    let now = Instant::now();
+    let mut app = with_config("[theme]\npaused = \"light-red\"\naccent = \"green\"\n", now);
+    app.set_status(Status { state: PlayState::Paused, song: app.queue.current.clone(), position: 72.0, duration: 239.0, volume: 0.82, connected: true, ..Default::default() }, now);
+    app.resize(20);
+    let buf = draw(&app, now, 140, 20);
+    assert!(colours(&buf).contains("LightRed"), "{:?}", colours(&buf));
+    // The accent also colours the tabs and the help's key names.
+    app.help = true;
+    let buf = draw(&app, now, 140, 24);
+    assert!(colours(&buf).contains("Green") && !colours(&buf).contains("Rgb(255, 122, 138)"), "{:?}", colours(&buf));
+    // One theme per frame: a frame with the default theme on the same thread is coral again.
+    let mut plain = fixture(now);
+    plain.resize(20);
+    assert!(colours(&draw(&plain, now, 140, 20)).contains("Rgb(255, 122, 138)"));
+}

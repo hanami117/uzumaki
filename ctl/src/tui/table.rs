@@ -10,14 +10,37 @@ use uzumaki_ctl::SongInfo;
 
 use crate::fmt::{fmt_time, pad_left, pad_right, truncate};
 
-pub const CORAL: Color = Color::Rgb(255, 122, 138);
+#[cfg(test)]
+pub use crate::config::theme::CORAL;
+use crate::config::theme::Theme;
+use std::cell::Cell;
+
+thread_local! {
+    /// The colours drawing uses: `view::draw` sets them from the config at the start of each
+    /// frame (drawing is one thread; a test's frames are its own thread's).
+    static THEME: Cell<Theme> = Cell::new(Theme::default());
+}
+
+pub fn set_theme(theme: Theme) {
+    THEME.with(|t| t.set(theme));
+}
+
+pub fn theme() -> Theme {
+    THEME.with(Cell::get)
+}
+
+/// A foreground colour for a role; no colour is the terminal's own foreground.
+pub fn paint(colour: Option<Color>) -> Style {
+    colour.map_or_else(Style::default, |c| Style::default().fg(c))
+}
 pub const GAP: usize = 2;
 /// Narrower than this and the Album column goes; narrower than `MIN_ARTIST_WIDTH`, Artist too.
 const MIN_ALBUM_WIDTH: usize = 90;
 const MIN_ARTIST_WIDTH: usize = 50;
 
+/// The accent (coral unless `[theme]` says otherwise).
 pub fn coral() -> Style {
-    Style::default().fg(CORAL)
+    paint(theme().accent)
 }
 
 pub fn dim() -> Style {
@@ -156,9 +179,9 @@ fn cell(col: Col, w: usize, text: &str) -> String {
 
 fn cell_style(col: Col) -> Style {
     match col {
-        Col::Num => Style::default().fg(Color::Green),
-        Col::Album => Style::default().fg(Color::Cyan),
-        Col::Time => Style::default().fg(Color::Magenta),
+        Col::Num => paint(theme().number),
+        Col::Album => paint(theme().album),
+        Col::Time => paint(theme().time),
         _ => Style::default(),
     }
 }

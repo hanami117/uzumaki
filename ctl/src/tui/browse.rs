@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use uzumaki_ctl::{CollectionInfo, Kind, Request, SongInfo};
@@ -16,7 +16,7 @@ use uzumaki_ctl::{CollectionInfo, Kind, Request, SongInfo};
 use super::app::Out;
 use super::jobs::{Job, Jobs};
 use super::sort::{self, Sort};
-use super::table::{self, GAP, Mark, Row, Table, bold, dim, frame};
+use super::table::{self, GAP, Mark, Row, Table, bold, dim, frame, paint, theme};
 use crate::fmt::{pad_left, pad_right, plural, text_width, truncate};
 
 /// How long the left selection must rest before its songs are fetched.
@@ -371,7 +371,7 @@ const PIN_TAG: &str = " pinned";
 
 fn left_line(c: &CollectionInfo, n: usize, w: &[usize; 3], mark: Option<Mark>) -> Line<'static> {
     let [num_w, title_w, extra_w] = *w;
-    let extra_style = if c.kind == Kind::Album { Style::default().fg(Color::Cyan) } else { dim() };
+    let extra_style = if c.kind == Kind::Album { paint(theme().album) } else { dim() };
     let title_style = if c.favorites { bold() } else { Style::default() };
     let tag = c.pinned.is_some() && title_w >= PIN_TAG.len() + 4;
     let title = truncate(&c.title, if tag { title_w - PIN_TAG.len() } else { title_w });
@@ -382,7 +382,7 @@ fn left_line(c: &CollectionInfo, n: usize, w: &[usize; 3], mark: Option<Mark>) -
         vec![(pad_right(&title, title_w), title_style)]
     };
     let parts = [
-        vec![(pad_left(&n.to_string(), num_w), Style::default().fg(Color::Green))],
+        vec![(pad_left(&n.to_string(), num_w), paint(theme().number))],
         title_parts,
         vec![(pad_right(&truncate(&extra_text(c), extra_w), extra_w), extra_style)],
     ];

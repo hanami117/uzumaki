@@ -10,6 +10,7 @@
 //!
 //! The reading of the file's text is in `toml`; each section has its own module.
 
+pub mod theme;
 pub mod toml;
 
 /// The commented file `uzu config --default` prints.
@@ -18,6 +19,8 @@ pub const DEFAULT_FILE: &str = include_str!("default.toml");
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use ratatui::style::Color;
+use theme::Theme;
 use toml::{Document, Entry, Value};
 
 /// The sections the file may have.
@@ -44,13 +47,16 @@ impl fmt::Display for Warning {
 }
 
 /// What the file says. `Config::default()` is what no file means.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// Where the file is (or would be).
     pub path: Option<PathBuf>,
     /// The file exists.
     pub found: bool,
     pub warnings: Vec<Warning>,
+    pub theme: Theme,
+    /// `[theme] respect_no_color`: `NO_COLOR` turns the colours off.
+    pub respect_no_color: bool,
 }
 
 /// `$XDG_CONFIG_HOME/uzumaki/uzu.toml`, else `~/.config/uzumaki/uzu.toml`: next to the app's
@@ -64,6 +70,12 @@ pub fn default_path() -> Option<PathBuf> {
 pub fn path_in(xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> Option<PathBuf> {
     let base = xdg.map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| home.map(|h| PathBuf::from(h).join(".config")))?;
     Some(base.join("uzumaki").join("uzu.toml"))
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config { path: None, found: false, warnings: Vec::new(), theme: Theme::default(), respect_no_color: true }
+    }
 }
 
 impl Config {
@@ -89,7 +101,15 @@ impl Config {
             Err(e) => Config { warnings: vec![Warning::new(0, format!("can't read the file: {e}"))], ..Config::default() },
         };
         config.path = Some(path.to_path_buf());
-        config
+        config.with_no_color(std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()))
+    }
+
+    /// `NO_COLOR` set: no colours, unless the file says `respect_no_color = false`.
+    pub fn with_no_color(mut self, no_color: bool) -> Self {
+        if no_color && self.respect_no_color {
+            self.theme = Theme::mono();
+        }
+        self
     }
 
     /// Reads the text of a file. Never fails: problems end up in `warnings`.
@@ -102,13 +122,15 @@ impl Config {
         }
         check_layout_of_file(&doc, &mut w);
         let mut config = Config::default();
-        config.apply(&doc, &mut w);
+        let mut theme = ThemeSpec::default();
+        config.apply(&doc, &mut w, &mut theme);
+        config.theme = theme.resolve(&mut w);
         config.warnings = w.list;
         config.warnings.sort_by_key(|w| w.line);
         config
     }
 
-    fn apply(&mut self, doc: &Document, w: &mut Warnings) {
+    fn apply(&mut self, doc: &Document, w: &mut Warnings, theme: &mut ThemeSpec) {
         let mut seen: Vec<(&str, &str, usize)> = Vec::new();
         for e in &doc.entries {
             if !SECTIONS.contains(&e.section.as_str()) {
@@ -125,12 +147,22 @@ impl Config {
                     continue;
                 }
             }
-            self.take(e, w);
+            self.take(e, w, theme);
         }
     }
 
     /// One accepted key of a known section.
-    fn take(&mut self, _e: &Entry, _w: &mut Warnings) {}
+    fn take(&mut self, e: &Entry, w: &mut Warnings, theme: &mut ThemeSpec) {
+        if e.section == "theme" {
+            if e.key == "respect_no_color" {
+                if let Some(b) = want_bool(e, w) {
+                    self.respect_no_color = b;
+                }
+            } else {
+                theme.take(e, w);
+            }
+        }
+    }
 
     /// The line the interactive screens show: the first warning, and how many more there are.
     pub fn status_line(&self) -> Option<String> {
@@ -277,5 +309,53 @@ pub fn want_int(e: &Entry, w: &mut Warnings) -> Option<i64> {
             w.add(e.line, format!("'{}' needs a whole number (got {})", e.key, other.kind()));
             None
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------- [theme]
+
+/// What `[theme]` said, resolved once the whole section is read (the palette first, then the
+/// roles, whatever order the lines are in).
+#[derive(Default)]
+struct ThemeSpec {
+    palette: Option<(usize, String)>,
+    roles: Vec<(&'static str, Option<Color>)>,
+}
+
+impl ThemeSpec {
+    fn take(&mut self, e: &Entry, w: &mut Warnings) {
+        if e.key == "palette" {
+            if let Some(name) = want_str(e, w) {
+                self.palette = Some((e.line, name.to_string()));
+            }
+            return;
+        }
+        let Some(role) = theme::ROLES.iter().find(|r| **r == e.key) else { return };
+        let colour = match &e.value {
+            Value::Str(text) => theme::parse_colour(text),
+            Value::Int(n) => u8::try_from(*n).map(|n| Some(Color::Indexed(n))).map_err(|_| format!("{n} is not a colour; numbers go from 0 to 255")),
+            other => Err(format!("'{}' needs a colour in quotes (got {})", e.key, other.kind())),
+        };
+        match colour {
+            Ok(c) => self.roles.push((role, c)),
+            Err(message) => w.add(e.line, message),
+        }
+    }
+
+    fn resolve(self, w: &mut Warnings) -> Theme {
+        let mut theme = Theme::default();
+        if let Some((line, name)) = &self.palette {
+            match Theme::palette(&name.to_lowercase()) {
+                Some(t) => theme = t,
+                None => {
+                    let hint = did_you_mean(name, theme::PALETTES).map(|p| format!("did you mean '{p}'?")).unwrap_or_else(|| format!("the palettes are {}", list_of(theme::PALETTES, "'", "'")));
+                    w.add(*line, format!("unknown palette '{name}'; {hint}"));
+                }
+            }
+        }
+        for (role, colour) in self.roles {
+            theme.set(role, colour);
+        }
+        theme
     }
 }
