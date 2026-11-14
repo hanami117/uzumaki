@@ -1,5 +1,6 @@
 //! The view: sidebar | content | player bar, plus session banners and global keys.
 
+mod airplay;
 mod artist;
 mod artist_link;
 mod artists;
@@ -136,6 +137,8 @@ pub struct UiState {
     pub kbd: keys::KbdFocus,
     /// The focused text field's caret blink (`caret.rs`).
     caret: caret::Blink,
+    /// The AirPlay picker (`airplay.rs`).
+    pub airplay: airplay::Picker,
 }
 
 impl UiState {
@@ -147,11 +150,16 @@ impl UiState {
         self.menu = None;
         self.ctx = None;
         self.volume_open = false;
+        self.airplay.open = false; // `airplay::poll` then stops looking for speakers
         self.lib_show_all = false;
         self.near.clear();
     }
 }
 
+pub use airplay::{scene as scene_airplay, this_computer};
+/// A menu's width and an item's height (window points), for anchoring the native share picker.
+pub(crate) const MENU_W: f32 = menu::W;
+pub(crate) const MENU_ITEM_H: f32 = menu::ITEM_H;
 pub use new_playlist::{open as new_playlist_open, open_edit as edit_playlist_open};
 pub use now_playing::{close as close_now_playing, open as open_now_playing};
 pub use now_playing::{scene_clip, scene_np_cover_only, scene_np_motion, scene_np_interlude, scene_np_intro, scene_np_lines_only, scene_np_unsynced, scene_np_words};
@@ -178,6 +186,7 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
         match p.via {
             crate::share::Via::Copy => tx.copy(p.url),
             crate::share::Via::Service(i) => crate::share::perform(i, &p.url, p.at),
+            crate::share::Via::Picker => crate::share::perform_picker(&p.url, p.at),
         }
     }
     let a = dnd::poll(s, t, landed, tx);
@@ -189,9 +198,10 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
     let g = player_bar::poll(s, t, tx);
     let h = onboarding::poll(s, t, tx);
     let i = settings::poll(s, t, tx);
+    let l = airplay::poll(s);
     let j = caret::poll(s, t, tx);
     let k = collection::poll(s, tx);
-    a || b || c || d || e || f || g || h || i || j || k
+    a || b || c || d || e || f || g || h || i || j || k || l
 }
 
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {
@@ -320,6 +330,8 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     if s.ui.now_playing {
         root = root.children(crate::theme::dark_scope(|| now_playing::overlay(s, cx)));
     }
+    // The AirPlay picker, above the button it was opened from (the bar's, or Now Playing's: dark).
+    root = root.children(if s.ui.now_playing { crate::theme::dark_scope(|| airplay::overlay(s, cx, win)) } else { airplay::overlay(s, cx, win) });
     // Why a narrow window shook something; it floats over the page and Now Playing.
     root = root.children(narrow::hints(s, win[0], chrome_top, reduced));
     if s.ui.dnd.active {
@@ -512,6 +524,8 @@ fn escape(s: &mut State) -> bool {
         s.ui.menu = None;
     } else if s.ui.ctx.is_some() {
         s.ui.ctx = None;
+    } else if s.ui.airplay.open {
+        airplay::close(s);
     } else if s.ui.volume_open {
         s.ui.volume_open = false;
     } else if lists::filter_active(s) {

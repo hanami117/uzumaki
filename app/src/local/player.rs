@@ -17,6 +17,10 @@
 //!   whether MPRIS follows the bridge or this player.
 //! - `UZUMAKI_MUTE=1` (the agents' test switch, as for the bridge; the old `CADENCE_MUTE=1`
 //!   still works) forces volume 0.
+//! - AirPlay: the decoder is wrapped in a `tap::Tap` that copies the audio to the speaker
+//!   session and silences this computer while a speaker takes it
+//!   (the volume setting stays as it is). The thread tells the session whether a song is loaded,
+//!   so one speaker session follows the hand-overs between this player and the bridge.
 
 use std::fs::File;
 use std::io::BufReader;
@@ -28,6 +32,7 @@ use std::time::{Duration, Instant};
 
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 
+use super::tap::{CastSink, Gain, Tap};
 use crate::bridge::{Event, PlayState};
 use crate::models::Song;
 
@@ -141,6 +146,9 @@ struct Engine<O: Output, E: Fn(u64, Event)> {
     session: Option<Session>,
     volume: f64,
     mute: bool,
+    /// AirPlay: where the tapped audio goes, and the app's volume for the copy.
+    tap: Option<Arc<dyn CastSink>>,
+    tap_gain: Gain,
 }
 
 /// Opens `path` for rodio: byte length and extension hint help seeking and m4a.
@@ -156,7 +164,12 @@ fn open_decoder(path: &Path) -> Result<Decoder<BufReader<File>>, String> {
 
 impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
     fn new(output: O, emit: E, mute: bool) -> Self {
-        Self { output, emit, session: None, volume: 1.0, mute }
+        Self { output, emit, session: None, volume: 1.0, mute, tap: None, tap_gain: Gain::new(1.0) }
+    }
+
+    fn with_tap(mut self, tap: Option<Arc<dyn CastSink>>) -> Self {
+        self.tap = tap;
+        self
     }
 
     fn gain(&self) -> f32 {
@@ -164,6 +177,14 @@ impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
     }
 
     fn handle(&mut self, cmd: Cmd) {
+        self.handle_cmd(cmd);
+        self.tap_gain.set(self.volume as f32);
+        if let Some(t) = &self.tap {
+            t.set_active(self.session.is_some());
+        }
+    }
+
+    fn handle_cmd(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Play { generation, song, path, start_at, volume } => self.play(generation, song, &path, start_at, volume),
             Cmd::Pause => {
@@ -233,7 +254,13 @@ impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
         sink.set_volume(self.gain());
         // Seek the decoder itself: `Sink::try_seek` waits for the audio thread.
         let offset = if start_at > 0.0 && decoder.try_seek(Duration::from_secs_f64(start_at)).is_ok() { start_at } else { 0.0 };
-        sink.append(decoder);
+        match &self.tap {
+            Some(t) => {
+                self.tap_gain.set(self.volume as f32);
+                sink.append(Tap::new(decoder, t.clone(), self.tap_gain.clone()));
+            }
+            None => sink.append(decoder),
+        }
         sink.play();
         Ok(Session { generation, sink, duration, ended: false, offset })
     }
@@ -291,7 +318,9 @@ impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
 /// The player thread.
 fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(u64, Event)) {
     let mute = ["UZUMAKI_MUTE", "CADENCE_MUTE"].iter().any(|k| std::env::var(k).is_ok_and(|v| v == "1"));
-    Engine::new(DeviceOutput::default(), on_event, mute).run(rx);
+    // AirPlay: the way to the speaker (None in tests; it carries nothing until one is connected).
+    let tap = crate::airplay::local_feed().map(|f| Arc::new(f) as Arc<dyn CastSink>);
+    Engine::new(DeviceOutput::default(), on_event, mute).with_tap(tap).run(rx);
 }
 
 #[cfg(test)]
@@ -567,6 +596,150 @@ mod tests {
             drop(l);
             assert!(e.session.is_none());
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `secs` of a 1 kHz sine at half scale, 16-bit stereo 48 kHz WAV (not 44.1 k: the tap resamples).
+    fn sine_wav(secs: u32) -> Vec<u8> {
+        let frames = 48000 * secs;
+        let data = frames * 4;
+        let mut v = b"RIFF".to_vec();
+        v.extend((36 + data).to_le_bytes());
+        v.extend(b"WAVEfmt ");
+        v.extend(16u32.to_le_bytes());
+        v.extend(1u16.to_le_bytes());
+        v.extend(2u16.to_le_bytes());
+        v.extend(48000u32.to_le_bytes());
+        v.extend((48000u32 * 4).to_le_bytes());
+        v.extend(4u16.to_le_bytes());
+        v.extend(16u16.to_le_bytes());
+        v.extend(b"data");
+        v.extend(data.to_le_bytes());
+        for i in 0..frames {
+            let s = (16384.0 * (2.0 * std::f64::consts::PI * 1000.0 * i as f64 / 48000.0).sin()) as i16;
+            v.extend(s.to_le_bytes());
+            v.extend(s.to_le_bytes());
+        }
+        v
+    }
+
+    #[test]
+    fn airplay_tap_follows_the_song_and_mutes_without_touching_the_volume() {
+        use crate::local::tap::tests::Recorder;
+        let dir = tmp_dir("tap");
+        let path = dir.join("a.wav");
+        std::fs::write(&path, sine_wav(1)).unwrap();
+        let out = FakeOutput::default();
+        let rec = Recorder::casting();
+        let log: Log = Arc::default();
+        let l = log.clone();
+        let mut e = Engine::new(out.clone(), move |g, ev| l.lock().unwrap().push((g, ev)), false).with_tap(Some(rec.clone()));
+        assert!(!rec.active.load(Ordering::SeqCst));
+        e.handle(play_cmd(1, "A", 0.0, &path, 0.0));
+        assert!(rec.active.load(Ordering::SeqCst), "a loaded song feeds the speaker");
+        // The user's volume stays on the sink (and in the engine); only the samples go quiet.
+        assert!((e.session.as_ref().unwrap().sink.volume() - 0.5).abs() < 1e-6);
+        let device: Vec<f32> = out.queues.lock().unwrap()[0].by_ref().take(48000).collect();
+        assert!(device.iter().all(|&s| s == 0.0), "this computer is silent while casting");
+        let got = rec.samples();
+        assert!(got.len() >= 8192 * 2, "{} samples copied", got.len());
+        // Half scale × the app's volume 0.5 → RMS ≈ 0.25/√2.
+        let rms = (got.iter().map(|&v| (v as f64 / 32768.0).powi(2)).sum::<f64>() / got.len() as f64).sqrt();
+        assert!((rms - 0.25 / 2f64.sqrt()).abs() < 0.01, "rms {rms}");
+        e.handle(Cmd::Pause);
+        assert!(rec.active.load(Ordering::SeqCst), "paused still owns the speaker (silence)");
+        e.handle(Cmd::Stop);
+        assert!(!rec.active.load(Ordering::SeqCst), "stopped: the bridge feeds the speaker again");
+        assert_eq!(e.volume, 0.5);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn without_a_tap_the_sink_gets_the_plain_decoder() {
+        let dir = tmp_dir("notap");
+        let path = dir.join("a.wav");
+        std::fs::write(&path, sine_wav(1)).unwrap();
+        let out = FakeOutput::default();
+        let (mut e, _log) = engine(out.clone());
+        e.mute = false;
+        e.handle(play_cmd(1, "A", 0.0, &path, 0.0));
+        let device: Vec<f32> = out.queues.lock().unwrap()[0].by_ref().take(9600).collect();
+        assert!(device.iter().any(|&s| s.abs() > 0.2), "plays here as before (half scale × volume 0.5)");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The headless AirPlay dry run for local files: the real controller, the stand-in helper
+    /// (`scripts/airplay/fake-cliairplay.py`, measures what reaches its stdin) and a fake
+    /// sound card pulled at real time. No device is opened, nothing is sent on the network.
+    #[test]
+    #[ignore = "dry run with python3, ~6 s: cargo test -p uzumaki airplay_dry_run -- --ignored --nocapture"]
+    fn airplay_dry_run_local_file_reaches_the_helper_and_this_computer_stays_silent() {
+        use std::os::unix::fs::PermissionsExt;
+        use uzumaki_airplay::discover::{Device, Service};
+        use uzumaki_airplay::{Cast, Config, Connect, Controller, Event};
+        let dir = tmp_dir("airplay-dry");
+        let journal = dir.join("journal.txt");
+        let path = dir.join("sine.wav");
+        std::fs::write(&path, sine_wav(5)).unwrap();
+        let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/airplay/fake-cliairplay.py");
+        let helper = dir.join("cliairplay");
+        std::fs::write(&helper, format!("#!/bin/sh\nFAKE_AIRPLAY_JOURNAL='{}' exec python3 '{}' \"$@\"\n", journal.display(), fake.display())).unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let speaker = Device {
+            name: "Bedroom".into(),
+            ip: "127.0.0.1".parse().unwrap(),
+            hostname: "localhost.".into(),
+            airplay: Some(Service { instance: "Bedroom".into(), port: 7000, txt: vec![("features".into(), "0x200,0x0".into())] }),
+            raop: None,
+        };
+        let playing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let on = playing.clone();
+        let ctl = Controller::new(Config { helper: Some(helper), dir: dir.join("run"), fake: vec![speaker], ..Config::from_env(1) }, move |e| {
+            if matches!(e, Event::State(Cast::On { .. })) {
+                on.store(true, Ordering::SeqCst);
+            }
+        });
+        ctl.connect_named("Bedroom", Connect { volume: 30, password: None, auth: None });
+        let t = Instant::now();
+        while !playing.load(Ordering::SeqCst) {
+            assert!(t.elapsed() < Duration::from_secs(10), "the stand-in never played");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let out = FakeOutput::default();
+        let log: Log = Arc::default();
+        let l = log.clone();
+        let feed: Arc<dyn CastSink> = Arc::new(ctl.local_feed());
+        let mut e = Engine::new(out.clone(), move |g, ev| l.lock().unwrap().push((g, ev)), false).with_tap(Some(feed));
+        e.handle(play_cmd(1, "Sine", 0.0, &path, 0.0));
+        // The sound card: 10 ms of 48 kHz stereo every 10 ms, for 4 s.
+        let mut queue = out.queues.lock().unwrap().remove(0);
+        let card = std::thread::spawn(move || {
+            let (mut n, mut peak) = (0usize, 0f32);
+            let start = Instant::now();
+            for tick in 1..=400u32 {
+                for s in queue.by_ref().take(960) {
+                    n += 1;
+                    peak = peak.max(s.abs());
+                }
+                if let Some(d) = (start + Duration::from_millis(10 * u64::from(tick))).checked_duration_since(Instant::now()) {
+                    std::thread::sleep(d);
+                }
+            }
+            (n, peak)
+        });
+        let (pulled, peak) = card.join().unwrap();
+        e.handle(Cmd::Stop);
+        std::thread::sleep(Duration::from_millis(300));
+        ctl.shutdown();
+        let lines = std::fs::read_to_string(&journal).unwrap_or_default();
+        let levels: Vec<&str> = lines.lines().filter(|l| l.starts_with("fake speaker")).collect();
+        eprintln!("this computer: {pulled} samples, peak {peak}\nstand-in speaker:\n{}", levels.join("\n"));
+        let rms: Vec<f64> = levels.iter().filter_map(|l| l.split("rms ").nth(1)?.split(' ').next()?.parse().ok()).collect();
+        assert!(pulled >= 380 * 960, "the fake card ran ({pulled})");
+        assert_eq!(peak, 0.0, "no sound out of this computer while casting");
+        assert!(rms.len() >= 2, "the helper got audio: {lines}");
+        // Half scale × volume 0.5 = 0.25 peak → RMS ≈ 0.177 for full seconds of the sine.
+        assert!(rms.iter().any(|&r| r > 0.15), "RMS > 0 at the helper: {rms:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

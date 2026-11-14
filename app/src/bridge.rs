@@ -263,6 +263,8 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
         if running_from_appimage() {
             cmd.arg("--no-sandbox");
         }
+        // AirPlay: where the PCM socket will be while a speaker is connected.
+        cmd.envs(crate::airplay::bridge_env());
         Self::spawn_command(cmd, log_path, sink)
     }
 
@@ -434,6 +436,11 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
     pub fn set_storefront(&self, id: &str, on_reply: impl FnOnce(Result<Value, String>) -> Option<M> + Send + 'static) {
         self.call(set_storefront_cmd(id), on_reply);
     }
+    /// AirPlay: capture the player's output for the app's PCM socket (true) or stop (false).
+    pub fn airplay(&self, on: bool) {
+        self.send(json!({"cmd": "airplay", "on": on}));
+    }
+
     pub fn show_window(&self, visible: bool) {
         self.send(json!({"cmd": if visible { "show" } else { "hide" }}));
     }

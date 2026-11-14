@@ -329,6 +329,9 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
 
     // Elsewhere.
     let mut share: Option<(f32, String)> = None;
+    // The native picker's anchor (the Share item's top left), known once the panel is placed.
+    let picker_at = std::rc::Rc::new(std::cell::Cell::new([0.0f32; 2]));
+    let mut picker_rel: Option<f32> = None;
     if let Some(song) = &one {
         if let Some(path) = song.local_path() {
             let path = path.to_path_buf();
@@ -344,7 +347,22 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
                     s.toast = Some("Couldn't open the link.".into());
                 }
             })));
-            if crate::share::submenu() {
+            crate::share::prepare();
+            if crate::share::fallback() {
+                // The system lists no services (or the API stopped working): Copy Link here, and
+                // Share opens the native picker at its item.
+                let copy = u2.clone();
+                p.add(closes(item("menu-copy-link".into(), "Copy Link", false).on_press(move |s: &mut State| {
+                    s.ui.menu = None;
+                    s.copy_link(&crate::share::Link::Url(copy.clone()));
+                })));
+                picker_rel = Some(p.next_y());
+                let (cell, url) = (picker_at.clone(), u2.clone());
+                p.add(closes(item("menu-share".into(), "Share", false).on_press(move |s: &mut State| {
+                    s.ui.menu = None;
+                    s.share_link(&crate::share::Link::Url(url.clone()), crate::share::Via::Picker, cell.get());
+                })));
+            } else if crate::share::submenu() {
                 // Share ▸ Copy Link and the system's services, as in Apple Music; the submenu
                 // opens like Add to Playlist's.
                 share = Some((p.next_y(), u2));
@@ -376,6 +394,9 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
     let h = 12.0 + p.items as f32 * ITEM_H + p.seps as f32 * 9.0;
     let y = place_y(m.at[1], h, win[1]);
     let main = p.el.absolute(x, y);
+    if let Some(rel) = picker_rel {
+        picker_at.set([x, y + rel]);
+    }
 
     let mut layer = el().key("menu-layer").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
         .child(

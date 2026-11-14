@@ -369,6 +369,7 @@ function createWindow(show) {
     sendSignInCss(); // sign-in redirects load the page again
     // The account's storefront setter (signin.js), for the page bridge's `setStorefront`.
     win.webContents.executeJavaScript(`window.__uzumakiApplyStorefront = ${signin.applyStorefront};`).catch(() => {});
+    if (capturing) airplayToPage(); // a new document needs its capture graph again
   });
   win.loadURL(START_URL);
 }
@@ -390,6 +391,105 @@ function preconnect(why) {
     log(`preconnect failed: ${err?.message ?? err}`);
   }
 }
+
+// ---- AirPlay (bridge/airplay.js). Nothing here runs, and the page gets no capture graph, until
+// the app sends `{cmd: 'airplay', on: true}`: it does when a speaker is connected, and `on: false`
+// when the audio goes back to this computer. While on, the preload taps MusicKit's <audio> and
+// sends PCM chunks here; they go to the app's PCM socket (UZUMAKI_AIRPLAY_PCM_SOCKET). While that
+// socket is connected the local output is muted in the page's graph (UZUMAKI_AIRPLAY_LOCAL=1 keeps
+// it on); MusicKit's volume is never touched. The log gets the level now and then, never the audio.
+let airplay = null; // bridge/airplay.js, loaded at the first cast
+const AIRPLAY_KEEP_LOCAL = process.env.UZUMAKI_AIRPLAY_LOCAL === '1';
+const AIRPLAY_VERBOSE = !!process.env.UZUMAKI_AIRPLAY_DEBUG;
+let capturing = false; // the app wants the capture
+let pcmLink = null;
+let casting = false; // the PCM socket is connected
+let meterTimer = null;
+const meter = { chunks: 0, frames: 0, sum: 0, n: 0, peak: 0, status: null, silent: false, lastLog: 0 };
+
+function airplayToPage() {
+  if (!airplay || !win || win.isDestroyed()) return;
+  win.webContents.send('uzumaki:airplay', {
+    source: airplay.workletSource(),
+    capture: capturing,
+    localMuted: casting && !AIRPLAY_KEEP_LOCAL,
+    previewCors: process.env.UZUMAKI_AIRPLAY_PREVIEW_CORS === '1', // tests: measurable signed-out previews
+  });
+}
+
+function airplaySet(on) {
+  on = !!on;
+  if (on === capturing) return;
+  capturing = on;
+  if (!on) {
+    pcmLink?.close();
+    pcmLink = null;
+    casting = false;
+    clearInterval(meterTimer);
+    meterTimer = null;
+    log('airplay: capture off, local output on');
+    return airplayToPage();
+  }
+  airplay ??= require('./airplay.js');
+  const path = airplay.socketPath();
+  log(`airplay: capture on (${airplay.SAMPLE_RATE} Hz s16le stereo, ${airplay.CHUNK_FRAMES}-frame chunks); ` +
+    (path ? `PCM socket ${path}` : 'no PCM socket (UZUMAKI_AIRPLAY_PCM_SOCKET unset): level log only'));
+  if (path) {
+    pcmLink = new airplay.PcmLink(path, {
+      log,
+      retryMs: 250,
+      onState: (connected) => {
+        casting = connected;
+        log(`airplay: ${connected ? 'sending to the speaker: local output muted in the page graph' : 'not sending: local output back on'}` +
+          (connected && AIRPLAY_KEEP_LOCAL ? ' (kept on: UZUMAKI_AIRPLAY_LOCAL=1)' : ''));
+        airplayToPage();
+      },
+    });
+  }
+  Object.assign(meter, { chunks: 0, frames: 0, sum: 0, n: 0, peak: 0, silent: false, lastLog: 0 });
+  // The level, for the log: when sound starts or stops, then every 30 s (every second with
+  // UZUMAKI_AIRPLAY_DEBUG).
+  meterTimer = setInterval(() => {
+    const now = Date.now();
+    if (meter.chunks === 0) return;
+    const rms = meter.n ? Math.sqrt(meter.sum / meter.n) : 0;
+    const silent = rms === 0;
+    if (AIRPLAY_VERBOSE || silent !== meter.silent || now - meter.lastLog >= 30000) {
+      const st = meter.status || {};
+      log(airplay.levelLine({
+        chunks: meter.chunks, frames: meter.frames, rms, peak: meter.peak,
+        sending: !!(pcmLink && pcmLink.connected), localMuted: casting && !AIRPLAY_KEEP_LOCAL,
+        ctxState: st.ctxState ?? '?', elements: st.elements ?? '?', elementVolume: st.elementVolume ?? '?', path: st.path ?? '?',
+      }) + (silent ? ' [silent]' : ''));
+      meter.silent = silent;
+      meter.lastLog = now;
+    }
+    Object.assign(meter, { chunks: 0, frames: 0, sum: 0, n: 0, peak: 0 });
+  }, 1000);
+  meterTimer.unref();
+  airplayToPage();
+}
+
+ipcMain.on('uzumaki:pcm', (e, data) => {
+  if (!capturing || !win || e.sender !== win.webContents || !data || !data.byteLength) return;
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const samples = bytes.byteOffset % 2 === 0
+    ? new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 1)
+    : new Int16Array(bytes.slice().buffer);
+  const l = airplay.level(samples);
+  meter.chunks++;
+  meter.frames += samples.length >> 1;
+  meter.sum += l.rms * l.rms * samples.length;
+  meter.n += samples.length;
+  meter.peak = Math.max(meter.peak, l.peak);
+  pcmLink?.write(bytes);
+});
+
+ipcMain.on('uzumaki:airplay-status', (e, st) => {
+  if (!airplay || !win || e.sender !== win.webContents || !st) return;
+  if (st.note) return log(`airplay capture: ${String(st.note).slice(0, 300)}`);
+  meter.status = st;
+});
 
 // Everything the page bridge sends (replies + events) goes straight to stdout.
 ipcMain.on('cadence:out', (e, msg) => {
@@ -446,6 +546,7 @@ function shutdown() {
   try {
     win?.webContents.setAudioMuted(true);
   } catch {}
+  pcmLink?.close();
   setTimeout(() => app.exit(0), 2000).unref();
   app.quit();
 }
@@ -505,6 +606,9 @@ function handle(msg) {
       return reply(true, { result: null });
     case 'reload':
       win.webContents.reload();
+      return reply(true, { result: null });
+    case 'airplay':
+      airplaySet(msg.on);
       return reply(true, { result: null });
     case 'quit':
       reply(true, { result: null });

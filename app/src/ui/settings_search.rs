@@ -19,6 +19,8 @@ pub enum Row {
     Resume,
     /// AutoPlay (Settings → Playback; Apple Music only), the ∞ in Up Next.
     AutoPlay,
+    /// Reconnect to last AirPlay device (Settings → Playback; also in local only mode).
+    AirPlay,
     Theme,
     AppIcon,
     Player,
@@ -64,6 +66,7 @@ impl Row {
             Row::Lyrics => "lyrics",
             Row::Resume => "resume",
             Row::AutoPlay => "autoplay",
+            Row::AirPlay => "airplay",
             Row::Theme => "theme",
             Row::AppIcon => "app-icon",
             Row::Player => "player",
@@ -164,6 +167,7 @@ const SPECS: &[Spec] = &[
     spec(Row::Lyrics, Tab::Playback, "Lyrics highlight", "Word by word when Apple has word timing, otherwise whole lines.", "karaoke words lines sync"),
     spec(Row::AutoPlay, Tab::Playback, "AutoPlay", "When the queue ends, similar music keeps playing. Also the \u{221e} button in Up Next.", "auto play infinite endless continue similar songs radio station suggestions queue end infinity"),
     spec(Row::Resume, Tab::Playback, "Resume where you left off", "At start, the last song comes back paused where you stopped, with its queue. Nothing plays until you press Play.", "restore continue last song position queue startup launch remember session"),
+    spec(Row::AirPlay, Tab::Playback, "Reconnect to last AirPlay device", "At start, the sound goes back to the AirPlay speaker you used last, if it is on. Off: Uzumaki always starts on this computer.", "airplay speaker homepod apple tv output cast wireless reconnect startup launch remember"),
     spec(Row::Theme, Tab::Appearance, "Theme", "System follows your computer's light or dark appearance.", "dark mode light mode colour color appearance night"),
     only(On::Linux, Row::AppIcon, Tab::Appearance, "App icon", "In the dock, taskbar and menu. The tray icon changes at the next start.", "icon logo dark light coral launcher"),
     only(On::Mac, Row::AppIcon, Tab::Appearance, "App icon", "In the Dock and the Finder.", "icon logo dark light coral launcher"),

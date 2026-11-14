@@ -233,6 +233,8 @@ pub enum Via {
     Copy,
     /// The system sharing service at this index of `services()` (macOS).
     Service(usize),
+    /// The native NSSharingServicePicker (macOS), when the system's list is empty or can't be read.
+    Picker,
 }
 
 /// A system sharing service as the Share submenu lists it.
@@ -256,6 +258,13 @@ thread_local! {
 /// Share is a submenu with the system services (macOS), else a flat Copy Link.
 pub fn submenu() -> bool {
     STYLE.with(|s| s.get()).unwrap_or(cfg!(target_os = "macos"))
+}
+
+/// Share is the system's own picker instead of a submenu (macOS): the list of services is empty
+/// (or the deprecated API stopped working), so the menus have Copy Link and a Share item that
+/// opens `NSSharingServicePicker` at the item. Call `prepare` first (the menus do when built).
+pub fn fallback() -> bool {
+    submenu() && services().is_empty()
 }
 
 /// Scenes and tests: forces the submenu (true) or the flat item (false) on any system.
@@ -313,6 +322,19 @@ pub fn perform(index: usize, url: &str, at: [f32; 2]) {
     }
     #[cfg(not(any(test, target_os = "macos")))]
     let _ = (index, url, at);
+}
+
+/// Opens the native picker for `url` at `at`, the top left of the Share item (window points).
+pub fn perform_picker(url: &str, at: [f32; 2]) {
+    #[cfg(test)]
+    PERFORMED.with(|p| p.borrow_mut().push((usize::MAX, format!("{url} @ {at:?}"))));
+    #[cfg(all(target_os = "macos", not(test)))]
+    {
+        let url = url.to_string();
+        dispatch2::DispatchQueue::main().exec_async(move || crate::share_mac::picker(&url, at));
+    }
+    #[cfg(not(any(test, target_os = "macos")))]
+    let _ = (url, at);
 }
 
 /// Tests: the (service, url) pairs handed over so far, emptied.

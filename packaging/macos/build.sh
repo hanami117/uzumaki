@@ -61,6 +61,12 @@ done
 say "Building Uzumaki $version (build $build, release)"
 cargo build --release --locked -p uzumaki -p uzumaki-ctl
 bin=${CARGO_TARGET_DIR:-target}/release
+# The AirPlay helper (cliairplay, GPL-3.0): reuse the one built before, else build it (pinned tag).
+helper=target/cliairplay/cliairplay
+if [[ ! -x $helper ]]; then
+    say "Building cliairplay"
+    scripts/airplay/build-cliairplay.sh || die "cliairplay did not build"
+fi
 
 [[ -x $dist/Electron.app/Contents/MacOS/Electron ]] ||
     die "castLabs Electron is missing: cd bridge && npm ci && node node_modules/electron/install.js"
@@ -87,9 +93,19 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/bridge/node_modules/elec
 cp "$bin/uzumaki" "$bin/uzu" "$app/Contents/MacOS/"
 # The bridge needs only its own files and Electron (main.js loads nothing from npm). bridge.rs
 # finds it in Contents/Resources/bridge.
-cp bridge/main.js bridge/preload.js bridge/signin.js bridge/package.json "$app/Contents/Resources/bridge/"
+cp bridge/main.js bridge/preload.js bridge/signin.js bridge/airplay.js bridge/package.json "$app/Contents/Resources/bridge/"
 # The licence and the notices travel with the app (GPL-3.0-or-later; Rune, its fonts, Electron).
 cp LICENSE THIRD_PARTY_NOTICES.md "$app/Contents/Resources/"
+# The AirPlay helper (airplay/src/helper.rs finds it in Contents/Resources) and its licence note.
+cp "$helper" "$app/Contents/Resources/cliairplay"
+cat >"$app/Contents/Resources/CLIAIRPLAY_LICENSE.txt" <<'LIC'
+cliairplay (Resources/cliairplay) is Music Assistant's AirPlay sender,
+https://github.com/music-assistant/airplay-cli (tag v0.5.10), licensed GPL-3.0.
+It is a separate program that Uzumaki starts; its source is at that address.
+It is statically linked with libraop's prebuilt OpenSSL 1.1.1 (OpenSSL licence / SSLeay licence),
+and with codec and mDNS libraries under their own licences (see the source tree).
+Uzumaki itself is GPL-3.0-or-later (LICENSE).
+LIC
 # ditto keeps the framework symlinks and Electron's own signatures as they are.
 ditto "$dist/Electron.app" "$app/Contents/Resources/bridge/node_modules/electron/dist/Electron.app"
 
@@ -144,6 +160,7 @@ printf 'APPL????' >"$app/Contents/PkgInfo"
 # change its identity, and macOS would ask again for the keychain item that holds the login).
 say "Signing (ad hoc)"
 codesign --force --sign - "$app/Contents/MacOS/uzu"
+codesign --force --sign - "$app/Contents/Resources/cliairplay"
 codesign --force --sign - "$app"
 codesign --verify --strict "$app" || die "the bundle's signature doesn't verify"
 if [[ -x $evs ]]; then

@@ -216,6 +216,7 @@ impl State {
         }
         self.resume = None;
         self.pending_play = None; // a newer click than the album or playlist still loading
+        self.airplay_song_change();
         self.playback.song = Some(song.clone());
         self.playback.state = PlayState::Loading;
         self.starting = Some(crate::clock::now());
@@ -485,6 +486,7 @@ impl State {
         if self.resume.is_some() {
             return; // a resumed song is paused until Play
         }
+        self.airplay_flush(); // the speaker goes quiet now, not after what it had queued
         if self.playback.local {
             #[cfg(test)]
             self.local_sent.borrow_mut().push("pause".into());
@@ -518,6 +520,7 @@ impl State {
                 self.begin_current(song);
             }
         } else if let Some(b) = &self.bridge {
+            self.airplay_flush();
             b.next();
         }
     }
@@ -537,6 +540,7 @@ impl State {
         }
         if self.queue.pos > self.queue.base && !self.playback.local {
             if let Some(b) = &self.bridge {
+                self.airplay_flush();
                 b.previous();
             }
         } else if let Some(song) = self.queue.step_back() {
@@ -864,6 +868,7 @@ impl State {
         self.playback.position_at = Some(crate::clock::now());
         self.playback.slew = 0.0;
         self.playback.seek_target = Some((target, crate::clock::now()));
+        self.airplay_flush(); // the seek is heard at once
         if self.playback.local {
             #[cfg(test)]
             self.local_sent.borrow_mut().push(format!("seek {target}"));

@@ -154,7 +154,23 @@ impl State {
                 .and_then(crate::art::cached_file)
                 .map(|p| p.to_string_lossy().into_owned()),
             autoplay: self.autoplay_offered().then_some(self.settings.autoplay),
+            airplay: self.ctl_airplay_now(),
         }
+    }
+
+    fn ctl_airplay_now(&self) -> Option<ctl::AirPlayNow> {
+        use uzumaki_airplay::Cast;
+        match &self.airplay.cast {
+            Cast::Off => None,
+            Cast::Connecting { name, .. } => Some(ctl::AirPlayNow { name: name.clone(), connecting: true }),
+            Cast::On { name, .. } => Some(ctl::AirPlayNow { name: name.clone(), connecting: false }),
+        }
+    }
+
+    /// `uzu airplay`: the speakers found and the one in use.
+    pub fn ctl_airplay(&self) -> ctl::Reply {
+        let devices = self.airplay.devices.iter().map(|o| ctl::AirPlayDevice { name: o.name.clone(), kind: o.kind.label().to_string(), pair: o.pair }).collect();
+        ctl::Reply::AirPlay { current: self.ctl_airplay_now(), devices }
     }
 
     pub fn ctl_queue(&self) -> ctl::Queue {

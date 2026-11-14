@@ -7,6 +7,7 @@
 //! `cargo run -p uzumaki -- --snap /tmp/x.png --scene album --size 1360x860 --scale 1`
 //! (`--list-scenes` lists them).
 
+mod airplay;
 mod appearance;
 mod artist;
 #[cfg(any(target_os = "linux", test))]
@@ -38,11 +39,14 @@ mod mpris;
 mod notify;
 #[cfg(target_os = "macos")]
 mod nowplaying;
+#[cfg(target_os = "macos")]
+mod raster_mac;
 mod scenes;
 mod settings;
 mod share;
 #[cfg(target_os = "macos")]
 mod share_mac;
+mod symbols;
 mod state;
 mod theme;
 mod tray;
@@ -72,6 +76,7 @@ use crate::local::LocalPlayer;
 use crate::state::{Msg, State};
 
 fn setup(s: &mut State, wake: Waker) {
+    symbols::warm();
     s.art.attach(ImageCache::new(wake));
     // The Share submenu's system services, read once a little after start (not in the first frames).
     #[cfg(target_os = "macos")]
@@ -283,6 +288,12 @@ fn main() {
             handle.update_if(move |s: &mut State, tx| s.apply(msg, tx));
         }
     };
+    // AirPlay: created idle (no thread, no network) before the players, which ask it where the
+    // audio goes; it starts working when the picker opens or a speaker is chosen.
+    {
+        let sink = sink.clone();
+        airplay::init(move |e| sink(Msg::AirPlay(e)));
+    }
     let local = {
         let sink = sink.clone();
         LocalPlayer::spawn(move |generation, event| sink(Msg::Local { generation, event }), local_active)
@@ -356,6 +367,8 @@ fn main() {
         s.start_update_timer();
         // The last run's song, paused where it was left (`resume.rs`); also arms saving it.
         s.start_resume();
+        // Settings → Playback → "Reconnect to last AirPlay device" (off unless chosen).
+        s.airplay_reconnect();
         s
     });
     // Same as `app.run()` (one window, "main"), but through the display-aware entry point so the
@@ -368,4 +381,5 @@ fn main() {
     // The playback to resume, before Electron goes (the atexit handler writes it too).
     resume::flush();
     engine.shutdown();
+    airplay::shutdown(); // stop the speaker and its helper
 }

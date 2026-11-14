@@ -10,6 +10,26 @@ use crate::state::{LibraryTab, Load, Paged, Route, SHELF_TITLES, State};
 
 pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("home", home),
+    // The AirPlay picker (`ui/airplay.rs`): the button idle, and the popover's states.
+    ("airplay-idle", |s| airplay(s, "closed")),
+    ("airplay-looking", |s| airplay(s, "looking")),
+    ("airplay-list", |s| airplay(s, "list")),
+    ("airplay-connecting", |s| airplay(s, "connecting")),
+    ("airplay-on", |s| airplay(s, "on")),
+    ("airplay-on-closed", |s| airplay(s, "on-closed")),
+    ("airplay-pin", |s| airplay(s, "pin")),
+    ("airplay-password", |s| airplay(s, "password")),
+    ("airplay-password-wrong", |s| airplay(s, "password-wrong")),
+    ("airplay-unavailable", |s| airplay(s, "unavailable")),
+    ("airplay-failed", |s| airplay(s, "failed")),
+    ("airplay-floating", |s| {
+        s.settings.player_style = crate::settings::PlayerStyle::Floating;
+        airplay(s, "on");
+    }),
+    ("airplay-now-playing", |s| {
+        now_playing(s);
+        crate::ui::scene_airplay(s, "on");
+    }),
     ("library-albums", library_albums),
     ("library-songs", library_songs),
     ("search", search),
@@ -398,6 +418,11 @@ fn base(s: &mut State) {
     s.playback.position = 83.0;
     s.playback.duration = 241.0;
     s.playback.volume = 0.7;
+}
+
+fn airplay(s: &mut State, what: &str) {
+    home(s);
+    crate::ui::scene_airplay(s, what);
 }
 
 fn home(s: &mut State) {

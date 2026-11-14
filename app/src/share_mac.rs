@@ -27,10 +27,9 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSBitmapFormat, NSBitmapImageRep, NSCompositingOperation, NSDeviceRGBColorSpace, NSGraphicsContext, NSSharingContentScope,
-    NSSharingService, NSSharingServiceDelegate, NSWindow,
+    NSCompositingOperation, NSSharingContentScope, NSSharingService, NSSharingServiceDelegate, NSSharingServicePicker, NSWindow,
 };
-use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL};
+use objc2_foundation::{NSRectEdge, NSArray, NSError, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL};
 
 use crate::share::Service;
 
@@ -89,42 +88,15 @@ fn items_for(url: &str) -> Option<Retained<NSArray>> {
 /// The service's icon drawn into straight-alpha RGBA, `ICON_PX` square.
 fn icon_of(service: &NSSharingService) -> Option<rune::Pixels> {
     let image = service.image();
-    // SAFETY: a fresh bitmap with its own buffer (null planes), 8-bit RGBA, rows packed.
-    let rep = unsafe {
-        NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bitmapFormat_bytesPerRow_bitsPerPixel(
-            NSBitmapImageRep::alloc(),
-            std::ptr::null_mut(),
-            ICON_PX,
-            ICON_PX,
-            8,
-            4,
-            true,
-            false,
-            NSDeviceRGBColorSpace,
-            NSBitmapFormat::empty(),
-            ICON_PX * 4,
-            32,
-        )
-    }?;
-    let ctx = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
-    NSGraphicsContext::saveGraphicsState_class();
-    NSGraphicsContext::setCurrentContext(Some(&ctx));
     let side = ICON_PX as f64;
-    image.drawInRect_fromRect_operation_fraction(
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(side, side)),
-        NSRect::ZERO,
-        NSCompositingOperation::Copy,
-        1.0,
-    );
-    ctx.flushGraphics();
-    NSGraphicsContext::restoreGraphicsState_class();
-    let data = rep.bitmapData();
-    if data.is_null() {
-        return None;
-    }
-    let len = (ICON_PX * ICON_PX * 4) as usize;
-    // SAFETY: the rep's own buffer, `bytesPerRow * pixelsHigh` long, alive while `rep` is.
-    let mut rgba = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
+    let mut rgba = crate::raster_mac::draw_rgba(ICON_PX, || {
+        image.drawInRect_fromRect_operation_fraction(
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(side, side)),
+            NSRect::ZERO,
+            NSCompositingOperation::Copy,
+            1.0,
+        );
+    })?;
     unpremultiply(&mut rgba);
     let px = rune::Pixels::new();
     px.set(ICON_PX as u32, ICON_PX as u32, rgba);
@@ -208,6 +180,29 @@ pub fn perform(index: usize, url: &str, at: [f32; 2]) {
             eprintln!("share: {} can't share {url}", service.title());
         }
     }
+}
+
+thread_local! {
+    /// The picker on screen (AppKit doesn't keep it alive by itself).
+    static PICKER: RefCell<Option<Retained<NSSharingServicePicker>>> = const { RefCell::new(None) };
+}
+
+/// The native sharing picker for `url`, anchored at the Share item: `at` is its top left in window
+/// points, the rect as wide as a menu and one item high; the picker opens to its right.
+pub fn picker(url: &str, at: [f32; 2]) {
+    let Some(_mtm) = MainThreadMarker::new() else { return };
+    let Some(view) = crate::content_view() else { return };
+    let Some(items) = items_for(url) else {
+        eprintln!("share: not a URL: {url}");
+        return;
+    };
+    let (x, y) = (f64::from(at[0]), f64::from(at[1]));
+    let (w, h) = (f64::from(crate::ui::MENU_W), f64::from(crate::ui::MENU_ITEM_H));
+    let y = if view.isFlipped() { y } else { view.bounds().size.height - y - h };
+    // SAFETY: an array of NSURL, which the picker takes as its items.
+    let picker = unsafe { NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items) };
+    picker.showRelativeToRect_ofView_preferredEdge(NSRect::new(NSPoint::new(x, y), NSSize::new(w, h)), &view, NSRectEdge::MaxX);
+    PICKER.with(|p| *p.borrow_mut() = Some(picker));
 }
 
 /// The menu's point (window points from the top left) as a small rect on screen.

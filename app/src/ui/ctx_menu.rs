@@ -21,6 +21,9 @@ pub struct CtxItem {
     confirm: Option<String>,
     /// Share (macOS): the item opens the Share submenu for this link instead of acting.
     sub: Option<crate::share::Link>,
+    /// With `sub`: the system's list is empty, so the item is a plain Share that opens the native
+    /// picker at itself (Copy Link is the item before it).
+    picker: bool,
 }
 
 pub struct CtxMenu {
@@ -33,16 +36,16 @@ pub struct CtxMenu {
 }
 
 fn it(label: impl Into<String>, f: impl Fn(&mut State) + 'static) -> CtxItem {
-    CtxItem { label: label.into(), act: Some(Rc::new(f)), confirm: None, sub: None }
+    CtxItem { label: label.into(), act: Some(Rc::new(f)), confirm: None, sub: None, picker: false }
 }
 
 /// An item that asks first: "Delete Playlist" → "Click again to delete".
 fn danger(label: impl Into<String>, confirm: impl Into<String>, f: impl Fn(&mut State) + 'static) -> CtxItem {
-    CtxItem { label: label.into(), act: Some(Rc::new(f)), confirm: Some(confirm.into()), sub: None }
+    CtxItem { label: label.into(), act: Some(Rc::new(f)), confirm: Some(confirm.into()), sub: None, picker: false }
 }
 
 fn sep() -> CtxItem {
-    CtxItem { label: String::new(), act: None, confirm: None, sub: None }
+    CtxItem { label: String::new(), act: None, confirm: None, sub: None, picker: false }
 }
 
 /// Scenes: shows the submenu of the open menu's Share item.
@@ -54,14 +57,21 @@ pub fn open_share(s: &mut State) {
 
 /// Share, as in Apple Music: on macOS a submenu with Copy Link and the system's sharing services,
 /// elsewhere a plain Copy Link. Nothing when the item has no page to link to.
-pub fn share_item(link: crate::share::Link) -> Option<CtxItem> {
+pub fn share_item(link: crate::share::Link) -> Vec<CtxItem> {
     if link == crate::share::Link::Hidden {
-        return None;
+        return Vec::new();
     }
     if !crate::share::submenu() {
-        return Some(it("Copy Link", move |s| s.copy_link(&link)));
+        return vec![it("Copy Link", move |s| s.copy_link(&link))];
     }
-    Some(CtxItem { label: "Share".into(), act: Some(Rc::new(|_| {})), confirm: None, sub: Some(link) })
+    crate::share::prepare();
+    let share = |link, picker| CtxItem { label: "Share".into(), act: Some(Rc::new(|_| {})), confirm: None, sub: Some(link), picker };
+    if crate::share::fallback() {
+        // No services to list (or the API stopped working): our Copy Link, and the system's picker.
+        let copy = link.clone();
+        return vec![it("Copy Link", move |s| s.copy_link(&copy)), share(link, true)];
+    }
+    vec![share(link, false)]
 }
 
 pub fn open(s: &mut State, at: [f32; 2], items: Vec<CtxItem>) {
@@ -358,7 +368,15 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
                     _ => item.label.as_str(),
                 };
                 let asks = item.confirm.is_some();
-                if item.sub.is_some() {
+                if item.picker {
+                    // A plain item: the native picker opens at it.
+                    let link = item.sub.clone().unwrap_or(crate::share::Link::Hidden);
+                    let at = [x, y + top - menu::ITEM_H];
+                    menu::item(format!("ctx-{i}"), label, false).on_press(move |s: &mut State| {
+                        s.ui.ctx = None;
+                        s.share_link(&link, crate::share::Via::Picker, at);
+                    })
+                } else if item.sub.is_some() {
                     // Like the song menu's Add to Playlist: the submenu opens when the pointer
                     // rests on the item (or it is clicked) and closes when another item is reached.
                     let shown = m.open_sub == Some(i);
@@ -430,6 +448,7 @@ mod local_tests {
     #[test]
     fn local_albums_artists_and_folders_offer_only_what_works_for_files() {
         crate::share::set_submenu(Some(true));
+        crate::share::set_services(Some(crate::share::sample_services()));
         let mut s = State::offline();
         s.settings.music_folders = vec!["/m".into()];
         s.session.authorized = true; // even signed in: these are files
@@ -449,6 +468,7 @@ mod local_tests {
     #[test]
     fn a_pin_has_the_menu_of_what_it_pins_plus_its_own_items() {
         crate::share::set_submenu(Some(true));
+        crate::share::set_services(Some(crate::share::sample_services()));
         use crate::settings::{Pin, PinKind};
         let mut s = State::offline();
         s.session.authorized = true;
@@ -711,6 +731,57 @@ mod share_tests {
         rt.poll = Some(crate::ui::poll);
         rt.frame(1.0 / 60.0);
         assert_eq!(crate::share::take_performed(), [(0, "https://music.apple.com/it/album/nevermind/1440783617".to_string())]);
+    }
+
+    #[test]
+    fn an_empty_service_list_gives_copy_link_and_a_share_item_for_the_native_picker() {
+        let mut s = scene("recently-added");
+        crate::share::set_services(Some(Vec::new()));
+        assert!(crate::share::fallback());
+        let c = crate::models::Collection { id: "617154241".into(), title: "Random Access Memories".into(), ..sample(CollectionKind::Album) };
+        s.session.storefront = Some("it".into());
+        open_collection(&mut s, &c, [520.0, 200.0]);
+        let all = labels(&s);
+        let copy = all.iter().position(|l| l == "Copy Link").expect("Copy Link stays in our menu");
+        assert_eq!(all.get(copy + 1).map(String::as_str), Some("Share"), "{all:?}");
+        let board = rune::clipboard::memory();
+        let mut rt = run(s);
+        rt.use_clipboard(&board);
+        rt.poll = Some(crate::ui::poll);
+        // Share is a plain item now: no submenu, nothing listed beside it.
+        tap(&mut rt, &format!("ctx-{}", copy + 1));
+        assert!(rt.find("share-copy-link").is_none() && rt.find("share-service-0").is_none());
+        assert!(rt.state.ui.ctx.is_none(), "the menu closes");
+        let done = crate::share::take_performed();
+        assert_eq!(done.len(), 1, "{done:?}");
+        assert!(done[0].1.starts_with("https://music.apple.com/it/album/random-access-memories/617154241 @ ["), "{done:?}");
+        assert_eq!(board.text(), None, "Copy Link was not pressed");
+        // And Copy Link still copies.
+        let mut s = scene("recently-added");
+        crate::share::set_services(Some(Vec::new()));
+        s.session.storefront = Some("it".into());
+        open_collection(&mut s, &c, [520.0, 200.0]);
+        let mut rt = run(s);
+        rt.use_clipboard(&board);
+        rt.poll = Some(crate::ui::poll);
+        tap(&mut rt, &format!("ctx-{copy}"));
+        assert_eq!(board.text().as_deref().map(String::as_str), Some("https://music.apple.com/it/album/random-access-memories/617154241"));
+    }
+
+    #[test]
+    fn the_song_menu_with_an_empty_service_list_has_copy_link_and_share() {
+        let mut s = scene("share-song-player-bar");
+        crate::share::set_services(Some(Vec::new()));
+        s.ui.menu.as_mut().unwrap().share = false;
+        let mut rt = run(s);
+        rt.poll = Some(crate::ui::poll);
+        assert!(rt.find("menu-copy-link").is_some() && rt.find("menu-share").is_some());
+        tap(&mut rt, "menu-share");
+        assert!(rt.state.ui.menu.is_none());
+        let done = crate::share::take_performed();
+        assert_eq!(done.len(), 1, "{done:?}");
+        assert!(done[0].1.starts_with("https://music.apple.com/it/album/night-bus-hymns/1600000002?i=1600000010 @ ["), "{done:?}");
+        assert!(!done[0].1.ends_with("[0.0, 0.0]"), "anchored at the item: {done:?}");
     }
 
     #[test]

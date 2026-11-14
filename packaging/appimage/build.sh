@@ -103,7 +103,7 @@ install -Dm755 "$target/release/uzu" "$lib/uzu"
 strip --strip-unneeded "$lib/uzumaki" "$lib/uzu" 2>/dev/null || true
 
 install -dm755 "$lib/bridge"
-install -m644 bridge/main.js bridge/preload.js bridge/signin.js bridge/package.json \
+install -m644 bridge/main.js bridge/preload.js bridge/signin.js bridge/airplay.js bridge/package.json \
     bridge/package-lock.json bridge/.npmrc "$lib/bridge/"
 cp -a bridge/node_modules "$lib/bridge/"
 # Since 0.1.1 the app itself passes --no-sandbox to Electron inside an AppImage (bridge.rs,

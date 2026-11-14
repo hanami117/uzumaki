@@ -260,10 +260,10 @@ fn bottom_row(s: &State) -> El {
                 .child(icon(icons::volume(s.playback.volume), 18.0).color(PAL.muted))
                 .child(el().w(160.0).child(volume_slider(s, "np-volume", PAL.text2))),
         ))
+        .children(super::airplay::button(s, "np-airplay", PAL.text2).map(|b| b.ml(8.0)))
         .child(
             icon_button("np-lyrics-toggle", if lyrics { "Hide lyrics" } else { "Show lyrics" }, &LYRICS_ICON, 18.0,
                 if lyrics { PAL.accent } else { PAL.text2 })
-                .ml(8.0)
                 .on_press(toggle_lyrics),
         )
         .child(
