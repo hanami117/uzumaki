@@ -3277,3 +3277,125 @@ fn the_paused_state_and_every_screen_follow_the_theme() {
     plain.resize(20);
     assert!(colours(&draw(&plain, now, 140, 20)).contains("Rgb(255, 122, 138)"));
 }
+
+// ------------------------------------------------------------------- uzu.toml: [keys]
+
+fn rig_with(name: &str, config: &str) -> Rig {
+    let mut rig = Rig::new(name);
+    rig.app.set_config(Config::parse(config), rig.now);
+    rig
+}
+
+#[test]
+fn remapped_keys_drive_the_same_actions() {
+    use uzumaki_ctl::VolumeTo;
+    let mut rig = rig_with("keys-remap", "[keys]\nnext = [\"]\", \"ctrl+n\"]\nvolume_up = \"u\"\nplay_pause = \"enter\"\nselect = \"x\"\n");
+    rig.press(&[ch(']')]);
+    assert_eq!(rig.last(), Request::Next);
+    rig.log.lock().unwrap().clear();
+    rig.press(&[KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL)]);
+    assert_eq!(rig.last(), Request::Next);
+    rig.press(&[ch('u')]);
+    assert_eq!(rig.last(), Request::Volume { to: VolumeTo::Change(0.05) });
+    // The old keys do nothing: n, + and = (volume_up's two defaults).
+    rig.log.lock().unwrap().clear();
+    rig.press(&[ch('n'), ch('+'), ch('=')]);
+    assert!(rig.log.lock().unwrap().is_empty(), "{:?}", rig.log.lock().unwrap());
+    // Enter is play/pause now, and x plays the selected song.
+    rig.press(&[key(KeyCode::Enter)]);
+    assert_eq!(rig.last(), Request::Toggle);
+    rig.press(&[ch('j'), ch('x')]);
+    assert_eq!(rig.last(), Request::Jump { index: 0 });
+}
+
+#[test]
+fn an_unbound_quit_key_does_not_quit_but_ctrl_c_still_does() {
+    let mut rig = rig_with("keys-quit", "[keys]\nquit = []\n");
+    rig.press(&[ch('q')]);
+    assert!(!rig.app.quit);
+    rig.press(&[KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)]);
+    assert!(rig.app.quit);
+    // Esc on the queue still quits (its own action, `back`).
+    let mut rig = rig_with("keys-quit2", "[keys]\nquit = []\n");
+    rig.press(&[key(KeyCode::Esc)]);
+    assert!(rig.app.quit);
+}
+
+#[test]
+fn screens_and_lists_follow_the_keymap() {
+    let mut rig = rig_with("keys-screens", "[keys]\ngoto_search = \"s\"\nshuffle = \"S\"\ndown = [\"ctrl+j\"]\n");
+    assert!(rig.app.config.warnings.is_empty());
+    rig.press(&[ch('3')]);
+    assert_eq!(rig.app.screen, Screen::Queue, "3 is not bound to Search any more");
+    rig.press(&[ch('s')]);
+    assert_eq!(rig.app.screen, Screen::Search);
+    // Search opens in its box: the first Esc leaves the box, the second goes back.
+    rig.press(&[key(KeyCode::Esc), key(KeyCode::Esc)]);
+    assert_eq!(rig.app.screen, Screen::Queue);
+    rig.press(&[KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL)]);
+    assert_eq!(rig.app.cursor, 1);
+    rig.press(&[ch('j'), key(KeyCode::Down)]);
+    assert_eq!(rig.app.cursor, 1, "j and Down were replaced by ctrl+j");
+}
+
+#[test]
+fn typing_takes_every_key_whatever_the_keymap_says() {
+    let mut rig = rig_with("keys-typing", "[keys]\nquit = []\nfilter = \"F4\"\nnext = \"x\"\n");
+    // `/` is no longer the filter key (F4 is).
+    rig.press(&[ch('/')]);
+    assert!(!rig.app.filtering);
+    rig.press(&[key(KeyCode::F(4))]);
+    assert!(rig.app.filtering);
+    rig.press(&[ch('q')]);
+    assert_eq!(rig.app.filter, "q");
+    let mut rig = rig_with("keys-typing2", "[keys]\nfilter = \"v\"\nnext = \"x\"\nquit = \"z\"\n");
+    rig.press(&[ch('v')]);
+    assert!(rig.app.filtering);
+    // Inside the filter every key is text, even the ones bound or unbound.
+    rig.press(&[ch('x'), ch('z'), ch('n'), ch('q')]);
+    assert_eq!(rig.app.filter, "xznq");
+    assert!(!rig.app.quit);
+    rig.press(&[key(KeyCode::Esc)]);
+    assert!(!rig.app.filtering);
+    // The search box too.
+    let mut rig = rig_with("keys-search", "[keys]\ngoto_search = \"s\"\nfilter = \"v\"\nquit = \"z\"\n");
+    rig.press(&[ch('s')]);
+    assert!(rig.app.search.typing, "a search with no results opens in the box");
+    rig.press(&[ch('z'), ch('s'), ch('q')]);
+    assert_eq!(rig.app.search.input, "zsq");
+    assert!(!rig.app.quit);
+}
+
+#[test]
+fn the_help_and_the_hints_show_the_remapped_keys() {
+    let now = Instant::now();
+    let mut app = with_config("[keys]\nnext = \"ctrl+n\"\nquit = []\n", now);
+    app.resize(30);
+    let text = lines(&draw(&app, now, 140, 30));
+    let hints = text.last().unwrap();
+    assert!(hints.contains("ctrl+n/p next/prev") && hints.contains("– quit"), "{hints}");
+    app.help = true;
+    let help = lines(&draw(&app, now, 140, 40));
+    assert!(help.iter().any(|l| l.contains("ctrl+n  p") && l.contains("next / previous song")), "{help:#?}");
+    assert!(help.iter().any(|l| l.contains("–  Ctrl+C") && l.contains("quit")), "{help:#?}");
+    // With the default keymap both are as they were.
+    let mut plain = fixture(now);
+    plain.resize(30);
+    assert!(lines(&draw(&plain, now, 140, 30)).last().unwrap().contains("n/p next/prev"));
+}
+
+#[test]
+fn a_keymap_works_in_every_view_and_a_popup_still_takes_any_key() {
+    let mut rig = rig_with("keys-popups", "[keys]\nhelp = \"h\"\nsort = \"S\"\n");
+    rig.press(&[ch('?')]);
+    assert!(!rig.app.help, "? is not the help key any more");
+    rig.press(&[ch('h')]);
+    assert!(rig.app.help);
+    // Any key closes the help, bound or not.
+    rig.press(&[ch('z')]);
+    assert!(!rig.app.help);
+    // The sort popup reads its own letters (n, a, y, …) untranslated.
+    rig.press(&[ch('2')]);
+    rig.press(&[ch('S')]);
+    assert!(rig.app.sorting.is_some());
+}

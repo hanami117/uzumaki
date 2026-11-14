@@ -271,3 +271,221 @@ fn no_color_turns_the_colours_off_unless_the_file_says_otherwise() {
     // With no config at all, NO_COLOR still counts.
     assert_eq!(Config::default().with_no_color(true).theme, Theme::mono());
 }
+
+// --------------------------------------------------------------------------------------- keys
+
+use crate::config::keys::{ACTIONS, Chord, Keymap, parse_key};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+fn chord(text: &str) -> Chord {
+    parse_key(text).unwrap_or_else(|e| panic!("{text}: {e}"))
+}
+
+fn press(map: &Keymap, code: KeyCode, mods: KeyModifiers) -> Option<(KeyCode, KeyModifiers)> {
+    map.translate(KeyEvent::new(code, mods)).map(|e| (e.code, e.modifiers))
+}
+
+fn ch(c: char) -> KeyCode {
+    KeyCode::Char(c)
+}
+
+fn keymap(text: &str) -> (Keymap, Vec<String>) {
+    let cfg = Config::parse(text);
+    (cfg.keys.clone(), lines(&cfg))
+}
+
+#[test]
+fn every_default_key_parses_and_belongs_to_one_action() {
+    let mut seen: Vec<(Chord, &str)> = Vec::new();
+    for a in ACTIONS {
+        assert!(!a.keys.is_empty(), "{}", a.name);
+        for k in a.keys {
+            let c = chord(k);
+            assert!(!seen.iter().any(|(s, _)| *s == c), "{k} is the default of two actions ({} and {})", a.name, seen.iter().find(|(s, _)| *s == c).unwrap().1);
+            seen.push((c, a.name));
+        }
+    }
+    let mut names: Vec<&str> = ACTIONS.iter().map(|a| a.name).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), ACTIONS.len());
+}
+
+#[test]
+fn keys_in_every_spelling() {
+    assert_eq!(chord("n"), Chord::plain(ch('n')));
+    assert_eq!(chord("N"), Chord::plain(ch('N')));
+    assert_eq!(chord("?"), Chord::plain(ch('?')));
+    assert_eq!(chord("+"), Chord::plain(ch('+')));
+    assert_eq!(chord("space"), Chord::plain(ch(' ')));
+    assert_eq!(chord("Space"), Chord::plain(ch(' ')));
+    assert_eq!(chord("ENTER"), Chord::plain(KeyCode::Enter));
+    assert_eq!(chord("return"), Chord::plain(KeyCode::Enter));
+    assert_eq!(chord("esc"), Chord::plain(KeyCode::Esc));
+    assert_eq!(chord("pgdn"), Chord::plain(KeyCode::PageDown));
+    assert_eq!(chord("PageUp"), Chord::plain(KeyCode::PageUp));
+    assert_eq!(chord("del"), Chord::plain(KeyCode::Delete));
+    assert_eq!(chord("f5"), Chord::plain(KeyCode::F(5)));
+    assert_eq!(chord("comma"), Chord::plain(ch(',')));
+    assert_eq!(chord("ctrl+n"), Chord { code: ch('n'), ctrl: true, alt: false });
+    assert_eq!(chord("Ctrl+N"), chord("ctrl+n"));
+    assert_eq!(chord("alt+x"), Chord { code: ch('x'), ctrl: false, alt: true });
+    assert_eq!(chord("ctrl+alt+x"), Chord { code: ch('x'), ctrl: true, alt: true });
+    assert_eq!(chord("shift+n"), Chord::plain(ch('N')));
+    assert_eq!(chord("shift+tab"), Chord::plain(KeyCode::BackTab));
+    assert_eq!(chord("ctrl++"), Chord { code: ch('+'), ctrl: true, alt: false });
+    assert_eq!(chord("ctrl+space"), Chord { code: ch(' '), ctrl: true, alt: false });
+}
+
+#[test]
+fn bad_keys_explain_themselves() {
+    let err = |t: &str| parse_key(t).unwrap_err();
+    assert!(err("").contains("empty"));
+    assert!(err("ctrl+").contains("is not a key"), "{}", err("ctrl+"));
+    assert!(err("entr").contains("did you mean 'enter'?"), "{}", err("entr"));
+    assert!(err("pagedwon").contains("did you mean 'pagedown'?"), "{}", err("pagedwon"));
+    assert!(err("banana").contains("one character, or a name like 'space'"), "{}", err("banana"));
+    assert!(err("shift+1").contains("shift only goes with a letter"), "{}", err("shift+1"));
+    assert!(err("f13").contains("is not a key"));
+}
+
+#[test]
+fn no_keys_section_changes_nothing() {
+    let (map, w) = keymap("");
+    assert!(w.is_empty() && map.is_default());
+    assert_eq!(press(&map, ch('n'), KeyModifiers::NONE), Some((ch('n'), KeyModifiers::NONE)));
+    // Even a Ctrl key goes through exactly as before (the screens read Ctrl+N as n).
+    assert_eq!(press(&map, ch('n'), KeyModifiers::CONTROL), Some((ch('n'), KeyModifiers::CONTROL)));
+    assert_eq!(map.relabel("n  p"), "n  p");
+    assert_eq!(map.relabel_hint("n/p next/prev"), "n/p next/prev");
+}
+
+#[test]
+fn a_new_key_stands_for_the_action_and_the_old_one_is_dropped() {
+    let (map, w) = keymap("[keys]\nnext = \"N\"\n");
+    assert!(w.len() == 1 && w[0].contains("'N' used to be 'play_next'"), "{w:?}");
+    // N (bound) → n, the key the screens answer to; the old n does nothing.
+    assert_eq!(press(&map, ch('N'), KeyModifiers::SHIFT), Some((ch('n'), KeyModifiers::NONE)));
+    assert_eq!(press(&map, ch('n'), KeyModifiers::NONE), None);
+    // Others are untouched.
+    assert_eq!(press(&map, ch('p'), KeyModifiers::NONE), Some((ch('p'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn several_keys_per_action_and_modifiers() {
+    let (map, w) = keymap("[keys]\nnext = [\"ctrl+n\", \"alt+n\", \"]\"]\n");
+    assert!(w.is_empty(), "{w:?}");
+    for (code, mods) in [(ch('n'), KeyModifiers::CONTROL), (ch('n'), KeyModifiers::ALT), (ch(']'), KeyModifiers::NONE)] {
+        assert_eq!(press(&map, code, mods), Some((ch('n'), KeyModifiers::NONE)), "{code:?} {mods:?}");
+    }
+    // An unbound Ctrl or Alt key does nothing once there is a keymap.
+    assert_eq!(press(&map, ch('j'), KeyModifiers::CONTROL), None);
+    assert_eq!(press(&map, ch('x'), KeyModifiers::ALT), None);
+    // Plain unmentioned keys pass.
+    assert_eq!(press(&map, ch('j'), KeyModifiers::NONE), Some((ch('j'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn an_empty_list_unbinds() {
+    let (map, w) = keymap("[keys]\nquit = []\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(press(&map, ch('q'), KeyModifiers::NONE), None);
+    assert_eq!(map.relabel("q  Ctrl+C"), "–  Ctrl+C");
+}
+
+#[test]
+fn a_list_replaces_all_the_defaults_of_the_action() {
+    let (map, _) = keymap("[keys]\ndown = [\"ctrl+n\"]\n");
+    assert_eq!(press(&map, ch('j'), KeyModifiers::NONE), None);
+    assert_eq!(press(&map, KeyCode::Down, KeyModifiers::NONE), None);
+    assert_eq!(press(&map, ch('n'), KeyModifiers::CONTROL), Some((ch('j'), KeyModifiers::NONE)));
+    // Adding the old ones back keeps them.
+    let (map, _) = keymap("[keys]\ndown = [\"j\", \"down\", \"ctrl+n\"]\n");
+    assert_eq!(press(&map, ch('j'), KeyModifiers::NONE), Some((ch('j'), KeyModifiers::NONE)));
+    assert_eq!(press(&map, KeyCode::Down, KeyModifiers::NONE), Some((ch('j'), KeyModifiers::NONE)));
+    assert_eq!(press(&map, ch('n'), KeyModifiers::CONTROL), Some((ch('j'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn swapping_two_actions_works_and_warns_of_nothing() {
+    let (map, w) = keymap("[keys]\nnext = \"p\"\nprev = \"n\"\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(press(&map, ch('p'), KeyModifiers::NONE), Some((ch('n'), KeyModifiers::NONE)));
+    assert_eq!(press(&map, ch('n'), KeyModifiers::NONE), Some((ch('p'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn the_same_key_for_two_actions_warns_and_the_first_keeps_it() {
+    let (map, w) = keymap("[keys]\nshuffle = \"x\"\nrepeat = [\"x\", \"y\"]\n");
+    assert_eq!(w, ["line 3: 'x' is already used for 'shuffle' (line 2); it stays there"]);
+    assert_eq!(press(&map, ch('x'), KeyModifiers::NONE), Some((ch('s'), KeyModifiers::NONE)));
+    assert_eq!(press(&map, ch('y'), KeyModifiers::NONE), Some((ch('r'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn taking_a_key_of_an_action_you_did_not_touch_warns() {
+    let (map, w) = keymap("[keys]\nshuffle = \"n\"\n");
+    assert_eq!(w, ["line 2: 'n' used to be 'next'; it now does 'shuffle', and 'next' loses that key"]);
+    assert_eq!(press(&map, ch('n'), KeyModifiers::NONE), Some((ch('s'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn taking_a_key_that_means_something_on_some_screens_warns() {
+    let (_, w) = keymap("[keys]\nshuffle = \"tab\"\n");
+    assert_eq!(w.len(), 1);
+    assert!(w[0].contains("'tab' also switches panes"), "{}", w[0]);
+    let (_, w) = keymap("[keys]\nshuffle = \"h\"\n");
+    assert!(w[0].contains("'h' also switches panes"), "{}", w[0]);
+}
+
+#[test]
+fn ctrl_c_cannot_be_bound() {
+    let (map, w) = keymap("[keys]\nnext = [\"ctrl+c\", \"x\"]\n");
+    assert_eq!(w, ["line 2: Ctrl+C always quits; it can't be bound to anything else"]);
+    assert_eq!(press(&map, ch('x'), KeyModifiers::NONE), Some((ch('n'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn bad_names_and_bad_keys_get_hints_and_the_rest_still_counts() {
+    let (map, w) = keymap("[keys]\nnxt = \"x\"\nprev = [\"ctrl+\", \"y\"]\nquit = [\"banana\"]\nrepeat = 5\nshuffle = true\nn = \"next\"\n");
+    assert_eq!(w.len(), 6, "{w:?}");
+    assert!(w[0].contains("unknown action 'nxt' in [keys]; did you mean 'next'?"), "{}", w[0]);
+    assert!(w[1].contains("'ctrl+' is not a key"), "{}", w[1]);
+    assert!(w[2].contains("'banana' is not a key"), "{}", w[2]);
+    assert!(w[3].starts_with("line 5") || w[3].contains("needs keys in quotes"), "{}", w[3]);
+    assert!(w.iter().any(|l| l.contains("write it as next = \"n\"")), "{w:?}");
+    // The good key of the list works, and `quit` with only a bad key keeps its default.
+    assert_eq!(press(&map, ch('y'), KeyModifiers::NONE), Some((ch('p'), KeyModifiers::NONE)));
+    assert_eq!(press(&map, ch('q'), KeyModifiers::NONE), Some((ch('q'), KeyModifiers::NONE)));
+    // A digit written as a number is a key.
+    let (map, w) = keymap("[keys]\nrepeat = 9\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(press(&map, ch('9'), KeyModifiers::NONE), Some((ch('r'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn a_key_listed_twice_and_an_action_set_twice() {
+    let (_, w) = keymap("[keys]\nnext = [\"x\", \"x\"]\n");
+    assert_eq!(w, ["line 2: 'x' is listed twice for 'next'"]);
+    let (map, w) = keymap("[keys]\nnext = \"x\"\nnext = \"y\"\n");
+    assert_eq!(w, ["line 3: 'next' is already set on line 2; this line wins"]);
+    assert_eq!(press(&map, ch('y'), KeyModifiers::NONE), Some((ch('n'), KeyModifiers::NONE)));
+    assert_eq!(press(&map, ch('x'), KeyModifiers::NONE), Some((ch('x'), KeyModifiers::NONE)));
+}
+
+#[test]
+fn an_action_outside_keys_says_where_it_goes() {
+    let cfg = Config::parse("[theme]\nnext = \"x\"\n");
+    assert_eq!(lines(&cfg), ["line 2: 'next' belongs under [keys], not [theme]"]);
+}
+
+#[test]
+fn help_and_hints_show_the_user_s_keys() {
+    let (map, _) = keymap("[keys]\nnext = \"ctrl+n\"\ndown = [\"ctrl+j\", \"x\"]\n");
+    assert_eq!(map.relabel("n  p"), "ctrl+n  p");
+    assert_eq!(map.relabel("Up Down  j k"), "Up ctrl+j/x   k");
+    assert_eq!(map.relabel("Space"), "Space");
+    assert_eq!(map.relabel_hint("n/p next/prev"), "ctrl+n/p next/prev");
+    assert_eq!(map.relabel_hint("Space play/pause"), "Space play/pause");
+    assert_eq!(map.relabel_hint("q quit"), "q quit");
+}

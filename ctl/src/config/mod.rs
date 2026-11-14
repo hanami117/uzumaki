@@ -10,6 +10,7 @@
 //!
 //! The reading of the file's text is in `toml`; each section has its own module.
 
+pub mod keys;
 pub mod theme;
 pub mod toml;
 
@@ -20,6 +21,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use ratatui::style::Color;
+use keys::Keymap;
 use theme::Theme;
 use toml::{Document, Entry, Value};
 
@@ -55,6 +57,7 @@ pub struct Config {
     pub found: bool,
     pub warnings: Vec<Warning>,
     pub theme: Theme,
+    pub keys: Keymap,
     /// `[theme] respect_no_color`: `NO_COLOR` turns the colours off.
     pub respect_no_color: bool,
 }
@@ -74,7 +77,7 @@ pub fn path_in(xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>
 
 impl Default for Config {
     fn default() -> Self {
-        Config { path: None, found: false, warnings: Vec::new(), theme: Theme::default(), respect_no_color: true }
+        Config { path: None, found: false, warnings: Vec::new(), theme: Theme::default(), keys: Keymap::default(), respect_no_color: true }
     }
 }
 
@@ -125,6 +128,8 @@ impl Config {
         let mut theme = ThemeSpec::default();
         config.apply(&doc, &mut w, &mut theme);
         config.theme = theme.resolve(&mut w);
+        let keys: Vec<&Entry> = doc.entries.iter().filter(|e| e.section == "keys").collect();
+        config.keys = Keymap::build(&keys, &mut w);
         config.warnings = w.list;
         config.warnings.sort_by_key(|w| w.line);
         config
@@ -177,6 +182,8 @@ impl Config {
 /// The keys each section knows, `None` for a section this build has no schema for yet.
 fn known_keys(section: &str) -> Option<Vec<&'static str>> {
     match section {
+        // Any key: the actions are checked (with hints) when the keymap is built.
+        "keys" => None,
         "theme" => Some(vec!["palette", "accent", "number", "album", "time", "paused", "respect_no_color"]),
         "format" => Some(vec!["status_format", "status_idle"]),
         "layout" => Some(vec!["start_screen", "start_view", "lyrics", "artist_width", "title_width", "album_width", "show_artist", "show_album"]),
@@ -210,7 +217,7 @@ fn check_layout_of_file(doc: &Document, w: &mut Warnings) {
     }
     for e in &doc.entries {
         if e.section.is_empty() {
-            let home = SECTIONS.iter().find(|s| known_keys(s).is_some_and(|k| k.contains(&e.key.as_str())));
+            let home = home_of(&e.key, "");
             let hint = match home {
                 Some(s) => format!("put it under [{s}]"),
                 None => "keys go under a [section]".to_string(),
@@ -220,11 +227,19 @@ fn check_layout_of_file(doc: &Document, w: &mut Warnings) {
     }
 }
 
+/// The section a key belongs to (other than `not`).
+fn home_of(key: &str, not: &str) -> Option<&'static str> {
+    if not != "keys" && keys::ACTIONS.iter().any(|a| a.name == key) {
+        return Some("keys");
+    }
+    SECTIONS.iter().find(|s| **s != not && known_keys(s).is_some_and(|k| k.contains(&key))).copied()
+}
+
 fn unknown_key(section: &str, key: &str, known: &[&str]) -> String {
     if let Some(s) = did_you_mean(key, known) {
         return format!("unknown key '{key}' in [{section}]; did you mean '{s}'?");
     }
-    if let Some(other) = SECTIONS.iter().find(|s| **s != section && known_keys(s).is_some_and(|k| k.contains(&key))) {
+    if let Some(other) = home_of(key, section) {
         return format!("'{key}' belongs under [{other}], not [{section}]");
     }
     format!("unknown key '{key}' in [{section}]; the keys there are {}", list_of(known, "", ""))

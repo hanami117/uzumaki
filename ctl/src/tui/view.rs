@@ -468,10 +468,10 @@ pub(super) fn help_rect(area: Rect, screen: Screen) -> Rect {
     Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
 }
 
-fn help_overlay(f: &mut Frame, area: Rect, screen: Screen) {
+fn help_overlay(f: &mut Frame, area: Rect, screen: Screen, app: &App) {
     let keys: Vec<_> = help_for(screen).iter().chain(HELP_COMMON).collect();
     let r = help_rect(area, screen);
-    let lines: Vec<Line> = keys.iter().map(|(k, d)| Line::from(vec![Span::styled(pad_right(k, 16), coral()), Span::raw(*d)])).collect();
+    let lines: Vec<Line> = keys.iter().map(|(k, d)| Line::from(vec![Span::styled(pad_right(&truncate(&app.config.keys.relabel(k), 15), 16), coral()), Span::raw(*d)])).collect();
     f.render_widget(Clear, r);
     f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(format!(" Keys: {} ", screen.name())).border_style(frame())), r);
 }
@@ -524,7 +524,7 @@ fn overlays(f: &mut Frame, app: &App) {
         sort_popup(f, area, app, view);
     }
     if app.help {
-        help_overlay(f, area, app.screen);
+        help_overlay(f, area, app.screen, app);
     }
 }
 
@@ -613,7 +613,12 @@ pub fn draw(f: &mut Frame, app: &App, now: Instant) {
     // The bottom border carries the key hints (drawn last: it owns the last row).
     let buf = f.buffer_mut();
     hline(buf, h - 1, w, ("╰", "╯"));
-    let text = hint_text(hints(app), (w as usize).saturating_sub(6));
+    let text = if app.config.keys.is_default() || app.filter_text().is_some() || (app.screen == Screen::Search && app.search.typing) {
+        hint_text(hints(app), (w as usize).saturating_sub(6))
+    } else {
+        let items: Vec<String> = hints(app).iter().map(|h| app.config.keys.relabel_hint(h)).collect();
+        hint_text(&items.iter().map(String::as_str).collect::<Vec<_>>(), (w as usize).saturating_sub(6))
+    };
     if !text.is_empty() {
         put(buf, 2, h - 1, &format!(" {text} "), w as usize - 4, dim());
     }

@@ -816,6 +816,16 @@ impl App {
             self.sort_key(view, key.code);
             return;
         }
+        // The keymap (`[keys]` in uzu.toml) turns the user's keys into the default ones the code
+        // below answers to. Typing a filter or a query takes every key as it comes.
+        let key = if self.typing() {
+            key
+        } else {
+            match self.config.keys.translate(key) {
+                Some(k) => k,
+                None => return,
+            }
+        };
         let comma = key.code == KeyCode::Char(',');
         match self.screen {
             Screen::Queue => {
@@ -879,6 +889,16 @@ impl App {
             }
         }
         self.drain(now);
+    }
+
+    /// A filter or the search box is taking text.
+    fn typing(&self) -> bool {
+        match self.screen {
+            Screen::Queue => self.filtering,
+            Screen::Playlists | Screen::Albums => self.browse[usize::from(self.screen == Screen::Albums)].filtering,
+            Screen::Search => self.search.typing,
+            Screen::Lyrics => false,
+        }
     }
 
     fn apply(&mut self, out: Out, be: &mut dyn Backend, now: Instant) {
