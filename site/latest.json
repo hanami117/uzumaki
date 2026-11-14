@@ -1,12 +1,12 @@
 {
-  "version": "0.1.1",
+  "version": "0.2.0",
   "build": 1,
-  "date": "2026-11-12",
+  "date": "2026-11-14",
   "minimum_supported": "0.1.0",
-  "notes_url": "https://github.com/hanami117/uzumaki/releases/tag/v0.1.1",
+  "notes_url": "https://github.com/hanami117/uzumaki/releases/tag/v0.2.0",
   "downloads": {
     "macos_dmg": "https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-macOS.dmg",
-    "linux_tarball": "https://github.com/hanami117/uzumaki/releases/download/v0.1.1/uzumaki-0.1.1.tar.gz",
+    "linux_tarball": "https://github.com/hanami117/uzumaki/releases/download/v0.2.0/uzumaki-0.2.0.tar.gz",
     "appimage": "https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-x86_64.AppImage",
     "aur": "https://aur.archlinux.org/packages/uzumaki",
     "brew": "brew install --cask hanami117/uzumaki/uzumaki"
