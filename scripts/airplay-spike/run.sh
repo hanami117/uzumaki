@@ -57,7 +57,7 @@ bridge_log="${bridge_log%/}/uzumaki-bridge.log"
   echo "=== helper: $UZUMAKI_CLIAIRPLAY"
   echo "=== $(cd "$root" && git log --oneline -1 2>/dev/null)"
 } | tee "$log"
-echo "Starting Uzumaki. Play a song; it should come out of \"$UZUMAKI_AIRPLAY_TARGET\" after a second or two."
+echo "Starting Uzumaki. Play a song or a local file; it should come out of \"$UZUMAKI_AIRPLAY_TARGET\" after a second or two."
 echo "Quit Uzumaki (Cmd+Q / Ctrl+Q) to end the test."
 
 # stderr carries the app's and the helper's lines; the window keeps running in the foreground.

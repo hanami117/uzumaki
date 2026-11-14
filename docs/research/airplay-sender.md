@@ -270,3 +270,9 @@ Stages 1-2 are built behind `UZUMAKI_AIRPLAY_SPIKE=1`; how to run them: `scripts
 - **Transport and sender:** Unix socket → Rust (`airplay/` crate, `mdns-sd` discovery) → `cliairplay`
   v0.5.10 (built from source on macOS arm64). Checked end to end with a stand-in helper and with the real
   helper against a closed port (error lines, retries). No audio was sent to any AirPlay device by agents.
+- **Local files (stage 4, early, same switch):** a rodio `Source` wrapper (`app/src/local/tap.rs`) copies
+  the decoded samples (linear resample to 44.1 kHz stereo s16, × app volume) to the same helper session and
+  sends zeros to the Mac's output while casting (volume setting untouched). One session serves both
+  players: the bridge's bytes while an Apple song plays, the file's while one is loaded, silence while it
+  is paused. Not done yet from section 6 item 7: no FLUSH/START on seek (the seek is heard after the lead),
+  and the sound card stays open (muted) to pace the file. Checked headless with the stand-in helper only.

@@ -6,12 +6,20 @@ from the command pipe and, instead of sending anything, prints the level of the 
 once a second (RMS in dBFS). The audio is only measured in memory, never written anywhere.
 
     UZUMAKI_CLIAIRPLAY=scripts/airplay-spike/fake-cliairplay.py UZUMAKI_AIRPLAY_HOST=127.0.0.1 ...
+
+`--report <file>` (tests only, through UZUMAKI_AIRPLAY_EXTRA_ARGS) also appends the level lines to
+that file.
 """
 import math, os, struct, sys, time
 
 args = sys.argv[1:]
 pipe = args[args.index("--cmdpipe") + 1] if "--cmdpipe" in args else None
-log = lambda s: print(s, file=sys.stderr, flush=True)
+report = args[args.index("--report") + 1] if "--report" in args else None
+def log(s):
+    print(s, file=sys.stderr, flush=True)
+    if report and s.startswith("fake speaker"):
+        with open(report, "a") as f:
+            f.write(s + "\n")
 print("[STATUS] route protocol=fake flow=dry-run timing=none buffered=0", flush=True)
 log("[STATUS] connected")
 fd = os.open(pipe, os.O_RDWR | os.O_NONBLOCK) if pipe else None  # as cliairplay opens it
