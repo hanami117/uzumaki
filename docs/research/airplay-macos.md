@@ -2,6 +2,10 @@
 
 Date: 2026-11-14. Research only. This note changes no code.
 
+> **Update 2026-11-14:** the rule changed. Uzumaki may now send the player's already-decrypted output to the
+> user's own speakers. See `airplay-sender.md` for the in-app AirPlay sender plan. The Cider note below
+> ("Not for us") is out of date.
+
 ## The question
 
 We want an AirPlay button inside Uzumaki. Can we send **only Uzumaki's audio** to an AirPlay speaker?
