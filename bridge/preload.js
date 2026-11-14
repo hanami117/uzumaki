@@ -307,6 +307,7 @@ function pageBridge() {
       else throw new Error('setQueue needs songIds or station');
       if (at !== null) opts.startTime = at;
 
+      forgetStartTimes();
       await timeout(mk.setQueue(opts), 15000, 'setQueue');
       if (gen !== queueGen) {
         mark(`#${id} superseded`);
@@ -345,6 +346,21 @@ function pageBridge() {
 
   // Seconds a resumed song should start at, until playback runs there (see `startQueue`).
   let resumeAt = null;
+
+  // MusicKit keeps setQueue's `startTime` in a map by song id (`playOptions`, shared by the
+  // instance) and drops it only when that song starts playing. A resumed song held paused
+  // (`startPlaying: false`) and then replaced by another click kept it, so playing that song
+  // later, from any list, started at the old position. Each setQueue is a new queue: whatever
+  // the map holds then is stale.
+  function forgetStartTimes() {
+    try {
+      const opts = mk?._mediaItemPlayback?.playOptions;
+      if (opts && typeof opts.clear === 'function' && opts.size > 0) {
+        mark(`forgot ${opts.size} stale start time(s)`);
+        opts.clear();
+      }
+    } catch {}
+  }
 
   // The account's storefront, once the app has asked Apple (`setStorefront`). The page keeps its
   // URL's ("us") otherwise; see applyStorefront in signin.js. Applied again before playback starts,
