@@ -12,6 +12,11 @@ use crate::models::Song;
 
 const BUS_NAME: &str = "org.mpris.MediaPlayer2.uzumaki";
 /// The name the app had before it was renamed (an old copy may still be running).
+/// The name `start` claims. Tests use their own, so a test run never takes the running app's
+/// name (and its media keys and Plasma widget) away from it.
+fn bus_name() -> String {
+    if cfg!(test) { format!("{BUS_NAME}.test{}", std::process::id()) } else { BUS_NAME.to_string() }
+}
 const LEGACY_BUS_NAME: &str = "org.mpris.MediaPlayer2.cadence";
 const PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
@@ -338,7 +343,7 @@ impl Mpris {
         let on_command: Callback = Arc::new(on_command);
         let shared = Arc::new(Mutex::new(Shared::new()));
         let conn = zbus::blocking::connection::Builder::session()
-            .and_then(|b| b.name(BUS_NAME))
+            .and_then(|b| b.name(bus_name()))
             .and_then(|b| b.serve_at(PATH, Root { on_command: on_command.clone() }))
             .and_then(|b| b.serve_at(PATH, Player { shared: shared.clone(), on_command }))
             .and_then(|b| b.build())
@@ -437,6 +442,8 @@ mod tests {
     /// Talks to the real session bus with busctl. Skipped without a bus.
     #[test]
     fn busctl_roundtrip() {
+        let name = bus_name();
+        let name = name.as_str();
         let (tx, rx) = std::sync::mpsc::channel();
         let tx = Mutex::new(tx);
         let Ok(m) = Mpris::start(move |c| {
@@ -468,7 +475,7 @@ mod tests {
         m.observe(&Event::PlayState(PlayState::Playing));
         m.observe(&Event::Time { current: 10.0, duration: 200.0 });
 
-        let get = |p: &str| busctl(&["get-property", BUS_NAME, PATH, PLAYER_IFACE, p]).unwrap();
+        let get = |p: &str| busctl(&["get-property", name, PATH, PLAYER_IFACE, p]).unwrap();
         assert_eq!(get("PlaybackStatus"), "s \"Playing\"");
         assert_eq!(get("Volume"), "d 0.5");
         let md = get("Metadata");
@@ -476,10 +483,10 @@ mod tests {
             assert!(md.contains(want), "{want} missing in {md}");
         }
         assert!(get("Position").starts_with("x 10"), "{}", get("Position"));
-        assert_eq!(busctl(&["get-property", BUS_NAME, PATH, "org.mpris.MediaPlayer2", "Identity"]).unwrap(), "s \"Uzumaki\"");
+        assert_eq!(busctl(&["get-property", name, PATH, "org.mpris.MediaPlayer2", "Identity"]).unwrap(), "s \"Uzumaki\"");
 
         let call = |method: &str, sig_args: &[&str]| {
-            let mut a = vec!["call", BUS_NAME, PATH, PLAYER_IFACE, method];
+            let mut a = vec!["call", name, PATH, PLAYER_IFACE, method];
             a.extend_from_slice(sig_args);
             busctl(&a).expect(method);
             rx.recv_timeout(std::time::Duration::from_secs(2)).expect(method)
@@ -499,7 +506,7 @@ mod tests {
             call("SetPosition", &["ox", "/org/uzumaki/track/i_ab_1", "30000000"]),
             Command::SeekTo(30.0)
         );
-        busctl(&["set-property", BUS_NAME, PATH, PLAYER_IFACE, "Volume", "d", "0.25"]).unwrap();
+        busctl(&["set-property", name, PATH, PLAYER_IFACE, "Volume", "d", "0.25"]).unwrap();
         assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap(), Command::Volume(0.25));
     }
 }
