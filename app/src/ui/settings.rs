@@ -515,6 +515,18 @@ fn row_el(r: &Rx, id: Row) -> El {
             Some("Apple's video loop of the album plays in the Now Playing cover, when it has one. A still cover with Reduce Motion.".into()),
             switch("settings/motion", "Animated artwork", s.settings.animated_artwork, true, |s, on| s.set_animated_artwork(on)),
         ),
+        Row::AlbumPageMotion => setting(
+            narrow,
+            "Also on album pages",
+            Some(super::settings_search::ALBUM_PAGE_MOTION.into()),
+            switch(
+                "settings/motion-album",
+                "Also on album pages",
+                s.settings.animated_artwork && s.settings.album_page_motion,
+                s.settings.animated_artwork,
+                |s, on| s.set_album_page_motion(on),
+            ),
+        ),
         Row::NpCoverEffect => block(
             if r.search { "Now Playing cover effect" } else { "Cover effect" },
             ap.np_effect.description(),
@@ -842,7 +854,7 @@ fn appearance(r: &Rx) -> Vec<El> {
     }
     v.push(divider());
     v.push(text("Now Playing").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
-    v.extend(rows(r, &[Row::NpBackground, Row::NpCoverEffect, Row::AnimatedArtwork]));
+    v.extend(rows(r, &[Row::NpBackground, Row::NpCoverEffect, Row::AnimatedArtwork, Row::AlbumPageMotion]));
     v.push(divider());
     v.extend(item(r, Row::Sidebar));
     v

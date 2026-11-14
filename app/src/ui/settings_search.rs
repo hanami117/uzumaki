@@ -31,6 +31,7 @@ pub enum Row {
     NpBackground,
     NpCoverEffect,
     AnimatedArtwork,
+    AlbumPageMotion,
     Sidebar,
     OpenOn,
     Tray,
@@ -74,6 +75,7 @@ impl Row {
             Row::NpBackground => "np-background",
             Row::NpCoverEffect => "np-cover-effect",
             Row::AnimatedArtwork => "animated-artwork",
+            Row::AlbumPageMotion => "album-page-motion",
             Row::Sidebar => "sidebar",
             Row::OpenOn => "open-on",
             Row::Tray => "tray",
@@ -172,6 +174,7 @@ const SPECS: &[Spec] = &[
     spec(Row::Fade, Tab::Appearance, "Fade toward the bottom", "Keeps long lists on the plain background.", "background gradient"),
     spec(Row::NpBackground, Tab::Appearance, "Now Playing background", "Colour tints the screen with the cover. Same as app uses the picture above.", "full screen fullscreen tint color"),
     spec(Row::AnimatedArtwork, Tab::Appearance, "Animated artwork", "Apple's video loop of the album plays in the Now Playing cover, when it has one. A still cover with Reduce Motion.", "motion video moving cover album art loop now playing"),
+    spec(Row::AlbumPageMotion, Tab::Appearance, "Also on album pages", ALBUM_PAGE_MOTION, "animated artwork motion video moving cover album page header loop"),
     spec(Row::NpCoverEffect, Tab::Appearance, "Now Playing cover effect", "The effect on the cover behind Now Playing.", "full screen fullscreen dither blur"),
     spec(Row::Sidebar, Tab::Appearance, "Sidebar", "Turn off what you don't use. Right-click an entry in the sidebar to hide it from there.", "navigation hide show entries menu"),
     spec(Row::OpenOn, Tab::General, "Open on", "Home or the last page.", "startup start page launch home last page"),
@@ -236,6 +239,9 @@ pub fn find_in(index: &[Entry], query: &str) -> Vec<usize> {
 pub fn find(query: &str) -> Vec<usize> {
     find_in(&INDEX, query)
 }
+
+/// Settings → Appearance → Now Playing → Also on album pages: what it does.
+pub const ALBUM_PAGE_MOTION: &str = "The loop also plays in the cover at the top of an album page while you look at it.";
 
 #[cfg(test)]
 mod tests {

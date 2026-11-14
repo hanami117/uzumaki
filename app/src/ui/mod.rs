@@ -154,7 +154,7 @@ impl UiState {
 
 pub use new_playlist::{open as new_playlist_open, open_edit as edit_playlist_open};
 pub use now_playing::{close as close_now_playing, open as open_now_playing};
-pub use now_playing::{scene_np_cover_only, scene_np_motion, scene_np_interlude, scene_np_intro, scene_np_lines_only, scene_np_unsynced, scene_np_words};
+pub use now_playing::{scene_clip, scene_np_cover_only, scene_np_motion, scene_np_interlude, scene_np_intro, scene_np_lines_only, scene_np_unsynced, scene_np_words};
 
 /// Page horizontal padding.
 pub const PAGE_PX: f32 = 32.0;
@@ -184,7 +184,8 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
     let h = onboarding::poll(s, t, tx);
     let i = settings::poll(s, t, tx);
     let j = caret::poll(s, t, tx);
-    a || b || c || d || e || f || g || h || i || j
+    let k = collection::poll(s, tx);
+    a || b || c || d || e || f || g || h || i || j || k
 }
 
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {

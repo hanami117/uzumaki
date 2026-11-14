@@ -14,6 +14,10 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("library-songs", library_songs),
     ("search", search),
     ("album", album),
+    ("album-motion", album_motion),
+    ("album-motion-paused", album_motion_paused),
+    ("album-long", |s| { album(s); long_album(s) }),
+    ("album-motion-long", |s| { album_motion(s); long_album(s) }),
     ("album-artists-two", album_two_artists),
     ("album-artist-none", album_no_artist),
     ("album-file", album_file),
@@ -423,6 +427,39 @@ fn album(s: &mut State) {
     s.back_stack.push(Route::Home);
     s.route = Route::Collection { kind: CollectionKind::Album, id: c.id.clone() };
     s.collections.insert(c.id.clone(), Load::Ready(c));
+}
+
+/// `album` as a catalog album with animated artwork (the local fixture clip): the cover
+/// crossfades to the loop after its first frame. `--frames`/`--at` to see it move; as for
+/// `now-playing-motion`, the Mac's player is deterministic headless, the ffmpeg path real time.
+fn album_motion(s: &mut State) {
+    album(s);
+    let Route::Collection { id, .. } = &s.route else { return };
+    let Some(Load::Ready(mut c)) = s.collections.remove(id) else { return };
+    c.id = "1440857781".into();
+    s.route = Route::Collection { kind: CollectionKind::Album, id: c.id.clone() };
+    crate::ui::scene_clip(s, &c.id);
+    s.collections.insert(c.id.clone(), Load::Ready(c));
+}
+
+/// The shown album page with 40 songs, for measuring scrolling (`--script`).
+fn long_album(s: &mut State) {
+    let Route::Collection { id, .. } = &s.route else { return };
+    if let Some(Load::Ready(c)) = s.collections.get_mut(id) {
+        let base = c.tracks.clone();
+        c.tracks = (0..40).map(|k| {
+            let mut t = base[k % base.len()].clone();
+            t.id = format!("{}-{k}", t.id);
+            t.track_number = Some(k as u32 + 1);
+            t
+        }).collect();
+    }
+}
+
+/// `album-motion` with the music paused: the album page's loop plays anyway, as Apple's does.
+fn album_motion_paused(s: &mut State) {
+    album_motion(s);
+    s.playback.state = PlayState::Paused;
 }
 
 /// Album 6: two artist ids, so the name opens a menu of them.
