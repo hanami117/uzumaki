@@ -87,7 +87,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/bridge/node_modules/elec
 cp "$bin/uzumaki" "$bin/uzu" "$app/Contents/MacOS/"
 # The bridge needs only its own files and Electron (main.js loads nothing from npm). bridge.rs
 # finds it in Contents/Resources/bridge.
-cp bridge/main.js bridge/preload.js bridge/signin.js bridge/package.json "$app/Contents/Resources/bridge/"
+cp bridge/main.js bridge/preload.js bridge/signin.js bridge/airplay.js bridge/package.json "$app/Contents/Resources/bridge/"
 # The licence and the notices travel with the app (GPL-3.0-or-later; Rune, its fonts, Electron).
 cp LICENSE THIRD_PARTY_NOTICES.md "$app/Contents/Resources/"
 # ditto keeps the framework symlinks and Electron's own signatures as they are.

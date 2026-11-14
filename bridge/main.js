@@ -369,6 +369,7 @@ function createWindow(show) {
     sendSignInCss(); // sign-in redirects load the page again
     // The account's storefront setter (signin.js), for the page bridge's `setStorefront`.
     win.webContents.executeJavaScript(`window.__uzumakiApplyStorefront = ${signin.applyStorefront};`).catch(() => {});
+    airplayToPage(); // a new document needs its capture graph again (spike only)
   });
   win.loadURL(START_URL);
 }
@@ -390,6 +391,96 @@ function preconnect(why) {
     log(`preconnect failed: ${err?.message ?? err}`);
   }
 }
+
+// ---- AirPlay spike (bridge/airplay.js), only with UZUMAKI_AIRPLAY_SPIKE=1; without it nothing
+// below runs and the page gets no capture graph. The preload taps MusicKit's <audio> and sends PCM
+// chunks here; they go to the app's PCM socket (UZUMAKI_AIRPLAY_PCM_SOCKET) while it is connected.
+// The log gets the level once a second (never the audio). While casting, the local output is muted
+// in the page's graph (UZUMAKI_AIRPLAY_LOCAL=1 keeps it on); MusicKit's volume is never touched.
+const AIRPLAY = process.env.UZUMAKI_AIRPLAY_SPIKE === '1';
+const airplay = AIRPLAY ? require('./airplay.js') : null; // loaded only for the spike
+const AIRPLAY_KEEP_LOCAL = process.env.UZUMAKI_AIRPLAY_LOCAL === '1';
+let pcmLink = null;
+let casting = false;
+const meter = { chunks: 0, frames: 0, sum: 0, n: 0, peak: 0, status: null, silentSince: 0, lastSilentLog: 0, lastChunkAt: 0, gapLogged: false };
+
+function airplayToPage() {
+  if (!AIRPLAY || !win || win.isDestroyed()) return;
+  win.webContents.send('uzumaki:airplay', {
+    source: airplay.workletSource(),
+    localMuted: casting && !AIRPLAY_KEEP_LOCAL,
+    previewCors: process.env.UZUMAKI_AIRPLAY_PREVIEW_CORS === '1', // tests: measurable signed-out previews
+  });
+}
+
+function airplayStart() {
+  if (!AIRPLAY) return;
+  const path = airplay.socketPath();
+  log(`airplay spike on: capture ${airplay.SAMPLE_RATE} Hz s16le stereo, ${airplay.CHUNK_FRAMES}-frame chunks; ` +
+    (path ? `PCM socket ${path}` : 'no PCM socket (UZUMAKI_AIRPLAY_PCM_SOCKET unset): level log only'));
+  if (path) {
+    pcmLink = new airplay.PcmLink(path, {
+      log,
+      onState: (on) => {
+        casting = on;
+        log(`airplay: ${on ? 'casting: local output muted in the page graph' : 'not casting: local output back on'}` +
+          (on && AIRPLAY_KEEP_LOCAL ? ' (kept on: UZUMAKI_AIRPLAY_LOCAL=1)' : ''));
+        airplayToPage();
+      },
+    });
+  }
+  const tick = setInterval(() => {
+    const now = Date.now();
+    if (meter.chunks === 0) {
+      if (meter.lastChunkAt && !meter.gapLogged && now - meter.lastChunkAt > 5000) {
+        meter.gapLogged = true;
+        log('airplay capture: no chunks for 5 s (graph gone? page reloading?)');
+      }
+      return;
+    }
+    meter.gapLogged = false;
+    const rms = meter.n ? Math.sqrt(meter.sum / meter.n) : 0;
+    const st = meter.status || {};
+    const line = airplay.levelLine({
+      chunks: meter.chunks, frames: meter.frames, rms, peak: meter.peak,
+      sending: !!(pcmLink && pcmLink.connected), localMuted: casting && !AIRPLAY_KEEP_LOCAL,
+      ctxState: st.ctxState ?? '?', elements: st.elements ?? '?', elementVolume: st.elementVolume ?? '?', path: st.path ?? '?',
+    });
+    // Sound: every second. Silence (paused, or a muted tap): once when it starts, then every 30 s.
+    if (rms > 0) {
+      meter.silentSince = 0;
+      log(line);
+    } else if (!meter.silentSince || now - meter.lastSilentLog > 30000) {
+      if (!meter.silentSince) meter.silentSince = now;
+      meter.lastSilentLog = now;
+      log(line + ' [silent]');
+    }
+    Object.assign(meter, { chunks: 0, frames: 0, sum: 0, n: 0, peak: 0 });
+  }, 1000);
+  tick.unref();
+}
+
+ipcMain.on('uzumaki:pcm', (e, data) => {
+  if (!AIRPLAY || !win || e.sender !== win.webContents || !data || !data.byteLength) return;
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const samples = bytes.byteOffset % 2 === 0
+    ? new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 1)
+    : new Int16Array(bytes.slice().buffer);
+  const l = airplay.level(samples);
+  meter.chunks++;
+  meter.frames += samples.length >> 1;
+  meter.sum += l.rms * l.rms * samples.length;
+  meter.n += samples.length;
+  meter.peak = Math.max(meter.peak, l.peak);
+  meter.lastChunkAt = Date.now();
+  pcmLink?.write(bytes);
+});
+
+ipcMain.on('uzumaki:airplay-status', (e, st) => {
+  if (!AIRPLAY || !win || e.sender !== win.webContents || !st) return;
+  if (st.note) return log(`airplay capture: ${String(st.note).slice(0, 300)}`);
+  meter.status = st;
+});
 
 // Everything the page bridge sends (replies + events) goes straight to stdout.
 ipcMain.on('cadence:out', (e, msg) => {
@@ -446,6 +537,7 @@ function shutdown() {
   try {
     win?.webContents.setAudioMuted(true);
   } catch {}
+  pcmLink?.close();
   setTimeout(() => app.exit(0), 2000).unref();
   app.quit();
 }
@@ -534,6 +626,7 @@ app.whenReady().then(async () => {
   // window still shows (setVisible activates it).
   if (process.platform === 'darwin') app.dock?.hide();
   createWindow(process.argv.includes('--show'));
+  airplayStart();
 
   const rl = readline.createInterface({ input: process.stdin });
   rl.on('line', (line) => {

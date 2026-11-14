@@ -103,6 +103,116 @@ function signinMark() {
   document.documentElement.setAttribute('data-uzu-signin', '');
 }
 
+// ---- AirPlay spike capture (bridge/airplay.js). Nothing here runs unless main sends
+// 'uzumaki:airplay', which it does only with UZUMAKI_AIRPLAY_SPIKE=1.
+// Graph (built once per document, at the first message):
+//   each <audio> -> MediaElementSource -> input -> local gain -> speakers
+//                                           input -> AudioWorklet (s16le chunks to main) -> gain 0 -> speakers
+// From createMediaElementSource on, the element's sound goes only through this graph, so the local
+// gain is the local output: 0 while casting. MusicKit's volume (saved by MusicKit) is never touched.
+// The audio stays in memory: chunks go to main, which forwards them to the app's socket or drops them.
+let tap = null; // { ctx, input, local, path, elements: WeakSet, count, lastEl }
+ipcRenderer.on('uzumaki:airplay', (_e, msg) => {
+  tapStart(msg).catch((err) => tapNote(`setup failed: ${err?.message ?? err}`));
+});
+
+const tapNote = (note) => ipcRenderer.send('uzumaki:airplay-status', { note });
+
+async function tapStart(msg) {
+  if (!msg) return;
+  if (!tap) {
+    const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'playback' });
+    const input = ctx.createGain();
+    const local = ctx.createGain();
+    input.connect(local).connect(ctx.destination);
+    const quiet = ctx.createGain();
+    quiet.gain.value = 0; // keeps the tap pulled by the graph without making a sound
+    quiet.connect(ctx.destination);
+    tap = { ctx, input, local, path: 'starting', elements: new WeakSet(), count: 0, lastEl: null };
+    const send = (buf) => ipcRenderer.send('uzumaki:pcm', new Uint8Array(buf));
+    try {
+      const url = URL.createObjectURL(new Blob([String(msg.source)], { type: 'application/javascript' }));
+      await ctx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      const node = new AudioWorkletNode(ctx, 'uzumaki-tap', {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+        channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+      });
+      node.port.onmessage = (e) => send(e.data);
+      input.connect(node).connect(quiet);
+      tap.path = 'AudioWorklet';
+    } catch (err) {
+      // The page's CSP may refuse a blob: worklet module: fall back to a ScriptProcessor (main thread).
+      const sp = ctx.createScriptProcessor(4096, 2, 2);
+      sp.onaudioprocess = (e) => {
+        const l = e.inputBuffer.getChannelData(0);
+        const r = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : l;
+        const out = new Int16Array(l.length * 2);
+        for (let i = 0; i < l.length; i++) {
+          out[i * 2] = Math.max(-32768, Math.min(32767, Math.round(l[i] * 32767)));
+          out[i * 2 + 1] = Math.max(-32768, Math.min(32767, Math.round(r[i] * 32767)));
+        }
+        send(out.buffer);
+      };
+      input.connect(sp).connect(quiet);
+      tap.path = 'ScriptProcessor';
+      tapNote(`AudioWorklet failed (${err?.message ?? err}); using a ScriptProcessor`);
+    }
+    ctx.resume().catch(() => {});
+    tapNote(`graph ready: ${tap.path}, context ${ctx.sampleRate} Hz, ${ctx.state}`);
+    // MusicKit creates its <audio> when it first plays, and may replace it: look twice a second.
+    const scan = () => {
+      for (const el of document.querySelectorAll('audio')) {
+        if (tap.elements.has(el)) continue;
+        tap.elements.add(el);
+        // Test switch (UZUMAKI_AIRPLAY_PREVIEW_CORS=1): signed-out previews are plain https files from
+        // another host, which taint the tap (zeros). Their CDN allows CORS, so asking for it makes them
+        // measurable; it applies from the element's next load. Full songs are a same-origin blob: stream.
+        if (msg.previewCors && !el.crossOrigin) el.crossOrigin = 'anonymous';
+        try {
+          ctx.createMediaElementSource(el).connect(input);
+          tap.count++;
+          tapNote(`tapped <audio${el.id ? ' id=' + el.id : ''}> (${tap.count} so far)`);
+        } catch (err) {
+          tapNote(`could not tap <audio${el.id ? ' id=' + el.id : ''}>: ${err?.message ?? err}`);
+        }
+      }
+      const el = document.getElementById('apple-music-player') || document.querySelector('audio');
+      if (el) tap.lastEl = el;
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    };
+    scan();
+    setInterval(scan, 500);
+    // What the element plays from, for the log: a blob: URL is MusicKit's MSE stream (full songs,
+    // Widevine when mediaKeys is set); an https: file from another host (previews) taints the tap
+    // unless the element asked for CORS, and Chromium then hands Web Audio zeros. Host only, no path.
+    let lastSource = '';
+    setInterval(() => {
+      const el = tap.lastEl;
+      let source = 'none';
+      if (el) {
+        const src = el.currentSrc || el.src || '';
+        let where = src ? src.split(':')[0] : 'empty';
+        try {
+          if (/^https?:/.test(src)) where = new URL(src).host;
+        } catch {}
+        source = `${where}, crossOrigin ${el.crossOrigin ?? 'unset'}, mediaKeys ${el.mediaKeys ? 'yes' : 'no'}, ` +
+          `${el.paused ? 'paused' : 'playing'}, muted ${el.muted}`;
+      }
+      if (source !== lastSource) {
+        lastSource = source;
+        tapNote(`element source: ${source}`);
+      }
+      ipcRenderer.send('uzumaki:airplay-status', {
+        ctxState: ctx.state, elements: tap.count, path: tap.path,
+        elementVolume: el ? Number(el.volume).toFixed(2) : 'none',
+      });
+    }, 1000);
+  }
+  const muted = !!msg.localMuted;
+  tap.local.gain.setTargetAtTime(muted ? 0 : 1, tap.ctx.currentTime, 0.02);
+}
+
 // ---------------------------------------------------------------------------
 // Everything below runs in the page's main world (stringified and injected).
 function pageBridge() {
