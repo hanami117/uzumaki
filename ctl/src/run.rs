@@ -236,6 +236,55 @@ fn volume(be: &mut dyn Backend, env: &Env, out: &mut dyn Write) -> Result<(), Fa
     put(out, &render(&fmt::volume_spans(&st)[..2], env.term.width, env.term.color))
 }
 
+/// How long `uzu airplay <name>` waits for the speaker to play.
+const AIRPLAY_WAIT: Duration = Duration::from_secs(20);
+
+/// `uzu airplay`: the speakers (the app looks for them for a moment), `off`, or a speaker by
+/// name; the last waits until it plays, or says that it didn't.
+fn airplay(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, to: uzumaki_ctl::AirPlayTo, quiet: bool) -> Result<(), Fail> {
+    use uzumaki_ctl::AirPlayTo;
+    let line = |now: &Option<uzumaki_ctl::AirPlayNow>| match now {
+        Some(n) if n.connecting => format!("AirPlay: connecting to {}", n.name),
+        Some(n) => format!("AirPlay: playing on {}", n.name),
+        None => "AirPlay: off (playing on this computer)".to_string(),
+    };
+    match to {
+        AirPlayTo::List => {
+            let Reply::AirPlay { current, devices } = call(be, Request::AirPlay { to: AirPlayTo::List })? else { return Err(unexpected()) };
+            put(out, &line(&current))?;
+            if devices.is_empty() {
+                return put(out, "No AirPlay speakers found on this network.");
+            }
+            let width = devices.iter().map(|d| d.name.chars().count()).max().unwrap_or(0);
+            for d in &devices {
+                let mark = if current.as_ref().is_some_and(|c| c.name.eq_ignore_ascii_case(&d.name)) { "\u{25b6}" } else { " " };
+                let kind = if d.pair { format!("{}, stereo pair", d.kind) } else { d.kind.clone() };
+                put(out, &format!("{mark} {:<width$}  {kind}", d.name))?;
+            }
+            Ok(())
+        }
+        AirPlayTo::Off => {
+            let Reply::Status(st) = call(be, Request::AirPlay { to: AirPlayTo::Off })? else { return Err(unexpected()) };
+            if quiet { Ok(()) } else { put(out, &line(&st.airplay)) }
+        }
+        AirPlayTo::Name(name) => {
+            let Reply::Status(mut st) = call(be, Request::AirPlay { to: AirPlayTo::Name(name.clone()) })? else { return Err(unexpected()) };
+            let started = Instant::now();
+            while st.airplay.as_ref().is_some_and(|a| a.connecting) && started.elapsed() < AIRPLAY_WAIT {
+                std::thread::sleep(env.timing.poll);
+                st = status(be)?;
+            }
+            match &st.airplay {
+                Some(a) if !a.connecting => {
+                    if quiet { Ok(()) } else { put(out, &line(&st.airplay)) }
+                }
+                Some(_) => Err(Fail::err(format!("still connecting to '{name}' (see: uzu airplay)"))),
+                None => Err(Fail::err(format!("couldn't play on '{name}': the sound stays on this computer (speakers: uzu airplay)"))),
+            }
+        }
+    }
+}
+
 // ------------------------------------------------------------------------------- library commands
 
 fn find(be: &mut dyn Backend, env: &Env, kind: Kind, query: &str) -> Result<CollectionInfo, Fail> {
@@ -479,6 +528,7 @@ pub fn run(inv: &Invocation, be: &mut dyn Backend, env: &Env, out: &mut dyn Writ
         Command::Seek(to) => act(be, env, out, Request::Seek { to: *to }, false, q),
         Command::Vol(Some(to)) => act(be, env, out, Request::Volume { to: *to }, false, q),
         Command::Vol(None) => volume(be, env, out),
+        Command::AirPlay(to) => airplay(be, env, out, to.clone(), q),
         Command::Shuffle(on) => act(be, env, out, Request::Shuffle { on: *on }, false, q),
         Command::Repeat(mode) => act(be, env, out, Request::Repeat { mode: *mode }, false, q),
         Command::Playlists => list_collections(be, env, out, Kind::Playlist, ""),

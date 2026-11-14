@@ -29,8 +29,10 @@ pub struct AirPlay {
     /// The bridge must capture (a speaker is connected). Sent again to a bridge that starts later.
     pub capture: bool,
     pub ask: Option<Ask>,
-    /// Somebody is looking for speakers (the picker is open).
+    /// Somebody is looking for speakers (the picker is open, or `uzu airplay` asked).
     pub browsing: bool,
+    /// `uzu airplay` is looking: the picker closing doesn't end the search.
+    pub ctl_browsing: bool,
     /// The helper program is installed. False: the picker says AirPlay is unavailable.
     pub available: bool,
     pub prefs: Prefs,
@@ -116,12 +118,23 @@ impl State {
 
     /// The picker opened or closed: speakers are looked for only meanwhile.
     pub fn airplay_browse(&mut self, on: bool) {
+        let on = on || self.airplay.ctl_browsing;
         if self.airplay.browsing == on {
             return;
         }
         self.airplay.browsing = on;
         if let Some(c) = crate::airplay::controller() {
             c.browse(on);
+        }
+    }
+
+    /// `uzu airplay`: looks for speakers for a moment, without the picker.
+    pub fn airplay_ctl_browse(&mut self, on: bool) {
+        self.airplay.ctl_browsing = on;
+        if on {
+            self.airplay_browse(true);
+        } else if !self.ui.airplay.open {
+            self.airplay_browse(false);
         }
     }
 

@@ -24,6 +24,8 @@ use crate::state::{Handle, State, TRACKS_CAP};
 const UI_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long `Quit` waits after answering, so the client reads the reply first.
 const QUIT_DELAY: Duration = Duration::from_millis(200);
+/// How long `uzu airplay` looks for speakers before answering.
+const AIRPLAY_LOOK: Duration = Duration::from_secs(3);
 /// How long one Apple Music API call may take.
 const API_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -142,6 +144,17 @@ impl Ctl {
             // From memory: `ctl_lyrics` never calls the bridge except to fetch lyrics that are
             // missing, once (this thread doesn't wait for Apple; the next poll sees the result).
             R::Lyrics => self.on_ui(true, |s| s.ctl_lyrics()),
+            R::AirPlay { to: uzumaki_ctl::AirPlayTo::List } => {
+                // Speakers are looked for only on request: for a moment here, as while the picker is open.
+                self.on_ui(false, |s| s.airplay_ctl_browse(true))?;
+                std::thread::sleep(AIRPLAY_LOOK);
+                self.on_ui(false, |s| {
+                    s.airplay_ctl_browse(false);
+                    s.ctl_airplay()
+                })
+            }
+            R::AirPlay { to: uzumaki_ctl::AirPlayTo::Off } => self.act(|s| s.airplay_pick(None)),
+            R::AirPlay { to: uzumaki_ctl::AirPlayTo::Name(name) } => self.try_act(move |s| s.airplay_pick_named(&name)),
             R::Quit => {
                 let reply = self.read(|s| Reply::Status(s.ctl_status()));
                 // Quit a moment after answering, so the reply is written before the socket goes.

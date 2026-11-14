@@ -210,6 +210,12 @@ pub enum Request {
     /// until they land). Replies `Lyrics`. Not part of `Status`: that is polled twice a second
     /// and word timing is ~20 KB. An app older than this answers "bad request".
     Lyrics,
+    /// AirPlay: lists the speakers (`List`, which looks for them for a moment; replies
+    /// `AirPlay`), sends the sound to one by name, or back to this computer (`Off`); both reply
+    /// `Status`, whose `airplay` then says "connecting" until the speaker plays. An app older
+    /// than this answers "bad request".
+    #[serde(rename = "airplay")]
+    AirPlay { to: AirPlayTo },
     /// Shows the app's window. Replies `Status`.
     Show,
     /// Quits the app (as the tray's Quit does). Replies `Status`, then the app goes away.
@@ -225,6 +231,37 @@ pub enum SeekTo {
     Relative(f64),
     /// 0..100 of the song.
     Percent(f64),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AirPlayTo {
+    List,
+    /// This computer.
+    Off,
+    /// The speaker of that name, as the picker shows it (any case).
+    Name(String),
+}
+
+/// The AirPlay speaker the sound goes to.
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+pub struct AirPlayNow {
+    pub name: String,
+    /// Not playing yet.
+    #[serde(default)]
+    pub connecting: bool,
+}
+
+/// A speaker in `Reply::AirPlay`.
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+pub struct AirPlayDevice {
+    pub name: String,
+    /// "HomePod", "Apple TV", "TV", "Speaker".
+    #[serde(default)]
+    pub kind: String,
+    /// Two HomePods set up as a stereo pair.
+    #[serde(default)]
+    pub pair: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -281,6 +318,14 @@ pub enum Reply {
         status: LyricsStatus,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lines: Vec<LyricLine>,
+    },
+    /// The speakers found and the one in use (`None`: this computer).
+    #[serde(rename = "airplay")]
+    AirPlay {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current: Option<AirPlayNow>,
+        #[serde(default)]
+        devices: Vec<AirPlayDevice>,
     },
     Error { message: String },
 }
@@ -366,6 +411,10 @@ pub struct Status {
     /// `uzu` always runs where the app does (over ssh only the terminal is elsewhere).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover: Option<String>,
+    /// The AirPlay speaker the sound goes to. `None`: this computer (and apps older than this
+    /// field).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub airplay: Option<AirPlayNow>,
 }
 
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
@@ -680,6 +729,27 @@ mod tests {
         }
         let OldReply::Collections { items } = serde_json::from_str::<OldReply>(&text).unwrap();
         assert_eq!(items[0].id, "p.1");
+    }
+
+    /// AirPlay is new: the wire names, an old status still reads (no speaker), and a status
+    /// without a speaker is byte-for-byte what it was (old clients see nothing new).
+    #[test]
+    fn airplay_reads_both_ways() {
+        assert_eq!(serde_json::to_string(&Request::AirPlay { to: AirPlayTo::List }).unwrap(), r#"{"cmd":"airplay","to":"list"}"#);
+        assert_eq!(serde_json::to_string(&Request::AirPlay { to: AirPlayTo::Name("Bedroom".into()) }).unwrap(), r#"{"cmd":"airplay","to":{"name":"Bedroom"}}"#);
+        assert_eq!(serde_json::from_str::<Request>(r#"{"cmd":"airplay","to":"off"}"#).unwrap(), Request::AirPlay { to: AirPlayTo::Off });
+        let old = r#"{"reply":"status","state":"playing","song":null,"position":1.0,"duration":2.0,"volume":0.5,"shuffle":false,"repeat":"off","source":"","index":null,"count":0,"queued":0,"connected":true,"signed_in":false,"error":null}"#;
+        let Reply::Status(st) = serde_json::from_str::<Reply>(old).unwrap() else { panic!() };
+        assert_eq!(st.airplay, None);
+        assert_eq!(serde_json::to_string(&Reply::Status(st.clone())).unwrap(), old);
+        let with = Reply::Status(Status { airplay: Some(AirPlayNow { name: "Bedroom".into(), connecting: true }), ..st });
+        let text = serde_json::to_string(&with).unwrap();
+        assert!(text.ends_with(r#""airplay":{"name":"Bedroom","connecting":true}}"#), "{text}");
+        assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), with);
+        let list = Reply::AirPlay { current: None, devices: vec![AirPlayDevice { name: "Bedroom".into(), kind: "HomePod".into(), pair: false }] };
+        let text = serde_json::to_string(&list).unwrap();
+        assert_eq!(text, r#"{"reply":"airplay","devices":[{"name":"Bedroom","kind":"HomePod","pair":false}]}"#);
+        assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), list);
     }
 
     #[test]

@@ -18,6 +18,8 @@ pub enum Command {
     Prev,
     Seek(SeekTo),
     Vol(Option<VolumeTo>),
+    /// `airplay`, `airplay list`: the speakers; `airplay off`; `airplay <name>`.
+    AirPlay(uzumaki_ctl::AirPlayTo),
     Shuffle(Option<bool>),
     Repeat(Option<RepeatMode>),
     Playlists,
@@ -134,6 +136,12 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         "prev" => none(name, p).map(|_| Command::Prev)?,
         "seek" => Command::Seek(parse_seek(one(name, p, "a position (30, 1:30, +10, -10, 50%)")?)?),
         "vol" | "volume" => Command::Vol(if p.is_empty() { None } else { Some(parse_volume(one(name, p, "a level")?)?) }),
+        "airplay" => Command::AirPlay(match p {
+            [] => uzumaki_ctl::AirPlayTo::List,
+            [a] if a == "list" => uzumaki_ctl::AirPlayTo::List,
+            [a] if a == "off" => uzumaki_ctl::AirPlayTo::Off,
+            words => uzumaki_ctl::AirPlayTo::Name(words.join(" ")),
+        }),
         "shuffle" => Command::Shuffle(match p {
             [] => None,
             [a] if a == "on" => Some(true),
@@ -209,6 +217,7 @@ In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (
   play -p|-a <x> [n]          force a playlist (also: play playlist <x>) or an album (play album <x>)
   seek <pos>                  30  1:30  +10  -10  +1:00  50%
   vol [<level>]               60  +5  -5
+  airplay [list|<name>|off]   the AirPlay speakers; send the sound to one, or back to this computer
   shuffle [on|off]            no argument: turn it on/off (also: toggle shuffle)
   repeat [off|all|one]        no argument: off -> all -> one (also: toggle repeat)
   playlists                   playlist <playlist>
