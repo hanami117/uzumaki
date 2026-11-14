@@ -16,7 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::toml::{Entry, Value};
+use super::reader::Entry;
+use toml::Value;
 use super::{Warnings, did_you_mean, list_of};
 
 /// One remappable action.
@@ -405,15 +406,15 @@ impl Keymap {
 /// The key names a `[keys]` value gives: one string, a list of strings, or a digit.
 fn specs_of(e: &Entry, w: &mut Warnings) -> Option<Vec<String>> {
     let one = |v: &Value, w: &mut Warnings| match v {
-        Value::Str(s) => Some(s.clone()),
-        Value::Int(n) if (0..=9).contains(n) => Some(n.to_string()),
+        Value::String(s) => Some(s.clone()),
+        Value::Integer(n) if (0..=9).contains(n) => Some(n.to_string()),
         other => {
-            w.add(e.line, format!("'{}' needs keys in quotes, like \"n\" or [\"n\", \"ctrl+n\"] (got {})", e.key, other.kind()));
+            w.add(e.line, format!("'{}' needs keys in quotes, like \"n\" or [\"n\", \"ctrl+n\"] (got {})", e.key, super::reader::kind(other)));
             None
         }
     };
     match &e.value {
-        Value::List(items) => {
+        Value::Array(items) => {
             let specs: Vec<Option<String>> = items.iter().map(|v| one(v, w)).collect();
             // A list with a bad item is still used for its good ones.
             Some(specs.into_iter().flatten().collect())
@@ -424,7 +425,7 @@ fn specs_of(e: &Entry, w: &mut Warnings) -> Option<Vec<String>> {
 
 fn unknown_action(e: &Entry, names: &[&str]) -> String {
     // `n = "next"`: the way round people write it in other programs.
-    if let Value::Str(v) = &e.value
+    if let Value::String(v) = &e.value
         && names.contains(&v.as_str())
     {
         return format!("write it as {v} = \"{}\" (the action first, then its keys)", e.key);

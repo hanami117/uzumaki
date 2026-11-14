@@ -24,3 +24,4 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm"]
 # No `chafa` (it links libchafa); `image` decodes the cached JPEG (PNG comes with ratatui-image).
 ratatui-image = { version = "11.1", default-features = false, features = ["crossterm"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+toml = { version = "1.2", default-features = false, features = ["std", "serde", "parse"] }

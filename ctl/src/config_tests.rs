@@ -3,7 +3,8 @@
 
 use std::path::PathBuf;
 
-use crate::config::toml::{self, Value};
+use crate::config::reader;
+use toml::Value;
 use crate::config::{self, Config, did_you_mean};
 
 fn lines(cfg: &Config) -> Vec<String> {
@@ -19,62 +20,136 @@ fn scratch(name: &str) -> PathBuf {
 
 // ------------------------------------------------------------------------------- the reader
 
+fn get(doc: &reader::Document, section: &str, key: &str) -> Option<Value> {
+    doc.entries.iter().find(|e| e.section == section && e.key == key).map(|e| e.value.clone())
+}
+
+fn problem_lines(text: &str) -> Vec<usize> {
+    reader::parse(text).problems.iter().map(|p| p.line).collect()
+}
+
 #[test]
 fn reads_sections_strings_numbers_bools_and_lists() {
-    let doc = toml::parse("top = 1\n[a]\ns = \"x y\"  # note\nl = 'lit\\eral'\nn = 42\nb = true\nlist = [\"a\", 'b',\n  \"c\", # inline\n]\nempty = []\n\n[b-c]\nz = false\n");
+    let doc = reader::parse("top = 1\n[a]\ns = \"x y\"  # note\nl = 'lit\\eral'\nn = 42\nb = true\nlist = [\"a\", 'b',\n  \"c\", # inline\n]\nempty = []\n\n[b-c]\nz = false\n");
     assert!(doc.problems.is_empty(), "{:?}", doc.problems);
-    let get = |section: &str, key: &str| doc.entries.iter().find(|e| e.section == section && e.key == key).map(|e| e.value.clone());
-    assert_eq!(get("", "top"), Some(Value::Int(1)));
-    assert_eq!(get("a", "s"), Some(Value::Str("x y".into())));
-    assert_eq!(get("a", "l"), Some(Value::Str("lit\\eral".into())));
-    assert_eq!(get("a", "n"), Some(Value::Int(42)));
-    assert_eq!(get("a", "b"), Some(Value::Bool(true)));
-    assert_eq!(get("a", "list"), Some(Value::List(vec![Value::Str("a".into()), Value::Str("b".into()), Value::Str("c".into())])));
-    assert_eq!(get("a", "empty"), Some(Value::List(vec![])));
-    assert_eq!(get("b-c", "z"), Some(Value::Bool(false)));
+    assert_eq!(get(&doc, "", "top"), Some(Value::Integer(1)));
+    assert_eq!(get(&doc, "a", "s"), Some(Value::String("x y".into())));
+    assert_eq!(get(&doc, "a", "l"), Some(Value::String("lit\\eral".into())));
+    assert_eq!(get(&doc, "a", "n"), Some(Value::Integer(42)));
+    assert_eq!(get(&doc, "a", "b"), Some(Value::Boolean(true)));
+    assert_eq!(get(&doc, "a", "list"), Some(Value::Array(vec!["a".into(), "b".into(), "c".into()])));
+    assert_eq!(get(&doc, "a", "empty"), Some(Value::Array(vec![])));
+    assert_eq!(get(&doc, "b-c", "z"), Some(Value::Boolean(false)));
     assert_eq!(doc.sections, vec![("a".to_string(), 2), ("b-c".to_string(), 12)]);
-    // The line of an entry is the line of its key, also for a list that runs on.
+    // The line of an entry is the line of its key, also for a list that runs on; entries are in file order.
     assert_eq!(doc.entries.iter().find(|e| e.key == "list").unwrap().line, 7);
+    let lines: Vec<usize> = doc.entries.iter().map(|e| e.line).collect();
+    assert!(lines.windows(2).all(|w| w[0] < w[1]), "{lines:?}");
 }
 
 #[test]
 fn string_escapes() {
-    let doc = toml::parse("[a]\ns = \"tab\\t quote\\\" back\\\\ dash \\u2014 end\"\n");
+    let doc = reader::parse("[a]\ns = \"tab\\t quote\\\" back\\\\ dash \\u2014 end\"\n");
     assert!(doc.problems.is_empty(), "{:?}", doc.problems);
-    assert_eq!(doc.entries[0].value, Value::Str("tab\t quote\" back\\ dash — end".into()));
+    assert_eq!(doc.entries[0].value, Value::String("tab\t quote\" back\\ dash — end".into()));
+}
+
+#[test]
+fn what_the_old_reader_refused_now_reads() {
+    // Dotted keys: `keys.next = "n"` at the top is the section [keys] with a key `next`.
+    let doc = reader::parse("keys.next = \"n\"\ntheme.accent = \"coral\"\n");
+    assert!(doc.problems.is_empty(), "{:?}", doc.problems);
+    assert_eq!(get(&doc, "keys", "next"), Some(Value::String("n".into())));
+    assert_eq!(doc.sections.iter().map(|s| s.0.as_str()).collect::<Vec<_>>(), ["keys", "theme"]);
+    // Floats, inline tables, hex numbers, multi-line strings.
+    let doc = reader::parse("[a]\nf = 1.5\nt = { x = 1 }\nh = 0xff\nm = \"\"\"\nline\"\"\"\n");
+    assert!(doc.problems.is_empty(), "{:?}", doc.problems);
+    assert_eq!(get(&doc, "a", "f"), Some(Value::Float(1.5)));
+    assert_eq!(get(&doc, "a", "h"), Some(Value::Integer(255)));
+    assert!(matches!(get(&doc, "a", "t"), Some(Value::Table(_))));
+    // A section can be given by a dotted header too.
+    let doc = reader::parse("[theme]\naccent = \"red\"\n[theme.extra]\nx = 1\n");
+    assert_eq!(get(&doc, "theme", "accent"), Some(Value::String("red".into())));
+    assert!(matches!(get(&doc, "theme", "extra"), Some(Value::Table(_))));
 }
 
 #[test]
 fn a_bad_line_costs_only_that_line() {
-    let doc = toml::parse("[a]\nx = 1\nthis is nonsense\ny = \"open\nz = [1, 2\nw = 3\n");
-    let ok: Vec<&str> = doc.entries.iter().map(|e| e.key.as_str()).collect();
-    assert!(ok.contains(&"x"));
-    let bad: Vec<usize> = doc.problems.iter().map(|p| p.line).collect();
-    assert!(bad.contains(&3) && bad.contains(&4), "{bad:?}");
+    let doc = reader::parse("[a]\nx = 1\nthis is nonsense\nq = 2\n");
+    assert_eq!(doc.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), ["x", "q"]);
+    assert_eq!(problem_lines("[a]\nx = 1\nthis is nonsense\nq = 2\n"), [3]);
+    // An unclosed string stops at its line.
+    let doc = reader::parse("[a]\nx = 1\ny = \"open\nz = 2\n");
+    assert_eq!(doc.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), ["x", "z"]);
+    assert_eq!(problem_lines("[a]\nx = 1\ny = \"open\nz = 2\n"), [3]);
+    // The crate's guess for a broken line is not used: no `a = coral` with a "fixed" value.
+    let doc = reader::parse("[a]\nc = coral\nn = 1 2\ne =\nok = 1\n");
+    assert_eq!(doc.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), ["ok"]);
+    assert_eq!(doc.problems.iter().map(|p| p.line).collect::<Vec<_>>(), [2, 3, 4]);
 }
 
 #[test]
-fn problems_say_what_is_wrong() {
-    let msg = |text: &str| toml::parse(text).problems.first().map(|p| p.message.clone()).unwrap_or_default();
-    assert!(msg("a = coral").contains("needs quotes"), "{}", msg("a = coral"));
-    assert!(msg("a = \"x").contains("closing"));
-    assert!(msg("a =").contains("expected a value"));
-    assert!(msg("a 1").contains("'= value'"));
-    assert!(msg("a = 1.5").contains("whole numbers"));
-    assert!(msg("[a").contains("closing ']'"));
-    assert!(msg("[[a]]").contains("not supported"));
-    assert!(msg("a.b = 1").contains("dotted"));
-    assert!(msg("a = 1 2").contains("follows"));
-    assert!(msg("a = \"\\q\"").contains("escape"));
-    assert!(msg("a = [,]").contains("','"));
+fn an_unclosed_list_does_not_swallow_the_file() {
+    let doc = reader::parse("[a]\nx = 1\nz = [1, 2\nw = 3\n[b]\nq = 1\n");
+    assert_eq!(doc.entries.iter().map(|e| (e.section.as_str(), e.key.as_str())).collect::<Vec<_>>(), [("a", "x"), ("a", "w"), ("b", "q")]);
+    assert_eq!(doc.problems.len(), 1, "{:?}", doc.problems);
+    assert_eq!(doc.problems[0].line, 3);
+    assert!(doc.problems[0].message.contains("unclosed"), "{}", doc.problems[0].message);
+}
+
+#[test]
+fn a_bad_header_costs_its_section_not_the_file() {
+    let doc = reader::parse("[a b]\nx = 1\n[c]\ny = 2\n");
+    assert_eq!(doc.problems.iter().map(|p| p.line).collect::<Vec<_>>(), [1]);
+    assert_eq!(doc.sections, vec![("c".to_string(), 3)]);
+    assert_eq!(get(&doc, "c", "y"), Some(Value::Integer(2)));
+    // [[name]] is a list of tables: said once, at its line, and its lines are ignored.
+    let doc = reader::parse("[[keys]]\nnext = \"n\"\n[theme]\naccent = \"red\"\n");
+    assert_eq!(doc.problems.len(), 1);
+    assert!(doc.problems[0].message.contains("[[keys]]"), "{:?}", doc.problems);
+    assert!(get(&doc, "keys", "next").is_none());
+    assert!(get(&doc, "theme", "accent").is_some());
+}
+
+#[test]
+fn duplicates_keep_the_first() {
+    let doc = reader::parse("[a]\nx = 1\nx = 2\n");
+    assert_eq!(get(&doc, "a", "x"), Some(Value::Integer(1)));
+    assert_eq!(doc.problems.len(), 1);
+    assert_eq!(doc.problems[0].line, 3);
+    assert!(doc.problems[0].message.contains("duplicate key"), "{}", doc.problems[0].message);
+}
+
+#[test]
+fn a_number_too_big_is_a_problem_of_its_own() {
+    let doc = reader::parse("[a]\nx = 99999999999999999999\ny = 1\n");
+    assert_eq!(doc.problems.iter().map(|p| p.line).collect::<Vec<_>>(), [2]);
+    assert_eq!(get(&doc, "a", "y"), Some(Value::Integer(1)));
 }
 
 #[test]
 fn nothing_loops_or_panics_on_odd_input() {
-    for text in ["", "\n\n", "[", "]", "=", "= 1", "a = [", "a = [[", "a = \"\\", "a = '", "\u{feff}", "a = \"\\u12", "#", "[a]]", "a = [\"x\" \"y\"]", "\0\0", "a = \"\u{1F600}\"", "ключ = 1"] {
-        let _ = toml::parse(text);
+    for text in ["", "\n\n", "[", "]", "=", "= 1", "a = [", "a = [[", "a = \"\\", "a = '", "\u{feff}", "a = \"\\u12", "#", "[a]]", "a = [\"x\" \"y\"]", "\0\0", "a = \"\u{1F600}\"", "ключ = 1", "a = {", "[a]\nb = [\n[c]\nd = [\n", "[[a]]\n[[a]]\n", "a.b.c.d = 1\na.b = 2"] {
+        let _ = reader::parse(text);
         let _ = Config::parse(text);
     }
+}
+
+#[test]
+fn dotted_keys_and_floats_go_through_the_same_checks() {
+    // Dotted keys are the section's keys.
+    let cfg = Config::parse("keys.next = \"x\"\ntheme.palette = \"mono\"\nformat.status_idle = \"idle\"\n");
+    assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    assert_eq!(cfg.status_idle, "idle");
+    assert_eq!(cfg.theme, crate::config::theme::Theme::mono());
+    // A float where a whole number goes is that key's warning only.
+    let cfg = Config::parse("[layout]\nartist_width = 2.5\ntitle_width = 7\n");
+    assert_eq!(lines(&cfg), ["line 2: 'artist_width' needs a whole number (got a number with decimals)"]);
+    assert_eq!(cfg.layout.columns.title, 7);
+    // A table where a value goes, and a [[list of tables]] for a section.
+    let cfg = Config::parse("[layout]\nlyrics = { a = 1 }\nshow_album = false\n[[keys]]\nnext = \"x\"\n");
+    assert_eq!(lines(&cfg).len(), 2, "{:?}", lines(&cfg));
+    assert!(!cfg.layout.columns.show_album);
 }
 
 // ---------------------------------------------------------------------------------- loading
@@ -156,9 +231,10 @@ fn unknown_sections_are_reported_once_and_ignored() {
 }
 
 #[test]
-fn a_repeated_key_says_which_line_wins() {
+fn a_repeated_key_keeps_the_first() {
     let cfg = Config::parse("[format]\nstatus_idle = \"a\"\nstatus_idle = \"b\"\n");
-    assert_eq!(lines(&cfg), ["line 3: 'status_idle' is already set on line 2; this line wins"]);
+    assert_eq!(lines(&cfg), ["line 3: duplicate key; the first one counts"]);
+    assert_eq!(cfg.status_idle, "a");
 }
 
 #[test]
@@ -468,9 +544,9 @@ fn a_key_listed_twice_and_an_action_set_twice() {
     let (_, w) = keymap("[keys]\nnext = [\"x\", \"x\"]\n");
     assert_eq!(w, ["line 2: 'x' is listed twice for 'next'"]);
     let (map, w) = keymap("[keys]\nnext = \"x\"\nnext = \"y\"\n");
-    assert_eq!(w, ["line 3: 'next' is already set on line 2; this line wins"]);
-    assert_eq!(press(&map, ch('y'), KeyModifiers::NONE), Some((ch('n'), KeyModifiers::NONE)));
-    assert_eq!(press(&map, ch('x'), KeyModifiers::NONE), Some((ch('x'), KeyModifiers::NONE)));
+    assert_eq!(w, ["line 3: duplicate key; the first one counts"]);
+    assert_eq!(press(&map, ch('x'), KeyModifiers::NONE), Some((ch('n'), KeyModifiers::NONE)));
+    assert_eq!(press(&map, ch('y'), KeyModifiers::NONE), Some((ch('y'), KeyModifiers::NONE)));
 }
 
 #[test]
@@ -741,13 +817,13 @@ fn the_default_file_is_all_comments_and_changes_nothing() {
     assert_eq!(cfg.theme, Theme::default());
     assert_eq!(cfg.layout, LayoutCfg::default());
     assert_eq!(cfg.status_format, None);
-    assert!(toml::parse(&text).entries.is_empty(), "every setting is commented out");
+    assert!(reader::parse(&text).entries.is_empty(), "every setting is commented out");
 }
 
 #[test]
 fn the_default_file_with_every_setting_switched_on_is_valid_and_is_the_defaults() {
     let text = uncomment(&config::default_file());
-    let doc = toml::parse(&text);
+    let doc = reader::parse(&text);
     assert!(doc.problems.is_empty(), "{:?}", doc.problems);
     let cfg = Config::parse(&text);
     assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));

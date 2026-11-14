@@ -52,7 +52,7 @@ The line also says how many more there are. `uzu config` lists them all.
 
 ## The format of the file
 
-The file is TOML. The part `uzu` reads is small:
+The file is [TOML](https://toml.io), read with the standard TOML library. The part `uzu` uses is small:
 
 ```toml
 # A comment.
@@ -65,7 +65,12 @@ list = ["one", "two"]
 
 - Text needs quotes.
 - A list can run over several lines.
-- A line that `uzu` cannot read is a warning. It does not stop the rest.
+- Dotted keys work too: `keys.next = "n"` on its own line is the same as `next = "n"` under `[keys]`.
+- A key set twice is a warning, and the first one counts.
+- A line that cannot be read is a warning with its line number. `uzu` skips that line (or, for a bad
+  `[section]` line, that section) and reads the rest.
+- A value of the wrong kind (a number where text is expected, `1.5` where a whole number is expected,
+  and so on) is a warning for that key only. The other keys still count.
 
 ## [keys]: change the keys
 

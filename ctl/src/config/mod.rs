@@ -8,12 +8,12 @@
 //!   hint when one is likely), the bad line is skipped, and the rest of the file still counts.
 //! - Warnings show in the interactive screens' status line, and `uzu config` lists them all.
 //!
-//! The reading of the file's text is in `toml`; each section has its own module.
+//! The reading of the file's text is in `reader` (the `toml` crate); each section has its own module.
 
 pub mod format;
 pub mod keys;
 pub mod theme;
-pub mod toml;
+pub mod reader;
 
 const DEFAULT_TEMPLATE: &str = include_str!("default.toml");
 
@@ -39,7 +39,8 @@ use ratatui::style::Color;
 use keys::Keymap;
 use crate::tui::sort::{Prefs, View};
 use theme::Theme;
-use toml::{Document, Entry, Value};
+use reader::{Document, Entry};
+use toml::Value;
 
 /// The sections the file may have.
 pub const SECTIONS: &[&str] = &["keys", "theme", "format", "layout", "defaults"];
@@ -191,7 +192,7 @@ impl Config {
     /// Reads the text of a file. Never fails: problems end up in `warnings`.
     pub fn parse(text: &str) -> Config {
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-        let doc = toml::parse(text);
+        let doc = reader::parse(text);
         let mut w = Warnings::default();
         for p in &doc.problems {
             w.add(p.line, p.message.clone());
@@ -209,15 +210,10 @@ impl Config {
     }
 
     fn apply(&mut self, doc: &Document, w: &mut Warnings, theme: &mut ThemeSpec) {
-        let mut seen: Vec<(&str, &str, usize)> = Vec::new();
         for e in &doc.entries {
             if !SECTIONS.contains(&e.section.as_str()) {
                 continue; // reported once for the header
             }
-            if let Some(&(_, _, first)) = seen.iter().find(|(s, k, _)| *s == e.section && *k == e.key) {
-                w.add(e.line, format!("'{}' is already set on line {first}; this line wins", e.key));
-            }
-            seen.push((&e.section, &e.key, e.line));
             if let Some(known) = known_keys(&e.section)
                 && !known.contains(&e.key.as_str())
             {
@@ -269,7 +265,7 @@ impl Config {
         match e.key.as_str() {
             "start_screen" => {
                 // A screen's number works too.
-                if let Value::Int(n) = &e.value
+                if let Value::Integer(n) = &e.value
                     && (1..=5).contains(n)
                 {
                     l.start_screen = *n as usize - 1;
@@ -474,9 +470,9 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
 /// The entry's value as a string, or a warning saying what was expected.
 pub fn want_str<'a>(e: &'a Entry, w: &mut Warnings) -> Option<&'a str> {
     match &e.value {
-        Value::Str(s) => Some(s),
+        Value::String(s) => Some(s),
         other => {
-            w.add(e.line, format!("'{}' needs text in quotes (got {})", e.key, other.kind()));
+            w.add(e.line, format!("'{}' needs text in quotes (got {})", e.key, reader::kind(other)));
             None
         }
     }
@@ -499,9 +495,9 @@ pub fn want_choice(e: &Entry, w: &mut Warnings, choices: &[&str]) -> Option<usiz
 
 pub fn want_bool(e: &Entry, w: &mut Warnings) -> Option<bool> {
     match &e.value {
-        Value::Bool(b) => Some(*b),
+        Value::Boolean(b) => Some(*b),
         other => {
-            w.add(e.line, format!("'{}' needs true or false (got {})", e.key, other.kind()));
+            w.add(e.line, format!("'{}' needs true or false (got {})", e.key, reader::kind(other)));
             None
         }
     }
@@ -509,9 +505,9 @@ pub fn want_bool(e: &Entry, w: &mut Warnings) -> Option<bool> {
 
 pub fn want_int(e: &Entry, w: &mut Warnings) -> Option<i64> {
     match &e.value {
-        Value::Int(n) => Some(*n),
+        Value::Integer(n) => Some(*n),
         other => {
-            w.add(e.line, format!("'{}' needs a whole number (got {})", e.key, other.kind()));
+            w.add(e.line, format!("'{}' needs a whole number (got {})", e.key, reader::kind(other)));
             None
         }
     }
@@ -537,9 +533,9 @@ impl ThemeSpec {
         }
         let Some(role) = theme::ROLES.iter().find(|r| **r == e.key) else { return };
         let colour = match &e.value {
-            Value::Str(text) => theme::parse_colour(text),
-            Value::Int(n) => u8::try_from(*n).map(|n| Some(Color::Indexed(n))).map_err(|_| format!("{n} is not a colour; numbers go from 0 to 255")),
-            other => Err(format!("'{}' needs a colour in quotes (got {})", e.key, other.kind())),
+            Value::String(text) => theme::parse_colour(text),
+            Value::Integer(n) => u8::try_from(*n).map(|n| Some(Color::Indexed(n))).map_err(|_| format!("{n} is not a colour; numbers go from 0 to 255")),
+            other => Err(format!("'{}' needs a colour in quotes (got {})", e.key, reader::kind(other))),
         };
         match colour {
             Ok(c) => self.roles.push((role, c)),
