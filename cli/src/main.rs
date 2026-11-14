@@ -72,8 +72,6 @@ fn main() {
     if show {
         cmd.arg("--show");
     }
-    // AirPlay spike: the PCM socket's path (nothing unless UZUMAKI_AIRPLAY_SPIKE=1).
-    cmd.envs(uzumaki_airplay::bridge_env());
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

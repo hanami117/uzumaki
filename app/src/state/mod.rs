@@ -20,6 +20,7 @@ use crate::settings::{IconVariant, Pin, PinKind, Settings, StartPage};
 use crate::tray::TrayCtl;
 
 mod actions;
+pub mod airplay;
 mod artist;
 pub use artist::More;
 pub mod ctl;
@@ -333,6 +334,8 @@ impl Default for Playback {
 #[derive(Debug)]
 pub enum Msg {
     Bridge(Event),
+    /// AirPlay: speakers found, the output changed, a question or a failure (`state/airplay.rs`).
+    AirPlay(uzumaki_airplay::Event),
     /// A reply about the signed-in account (a `/v1/me` read, any write), stamped with the
     /// `Session::account` it was asked under: one from before a sign-out (or a sign-in) is
     /// dropped, so a page landing late can't bring the old library back.
@@ -563,6 +566,8 @@ pub struct State {
     new_playlist_picture: Option<std::path::PathBuf>,
     /// Animated artwork in Now Playing (`motion.rs`).
     pub motion: motion::MotionState,
+    /// Where the audio goes: this computer or an AirPlay speaker (`airplay.rs`).
+    pub airplay: airplay::AirPlay,
     /// View-only state owned by the UI module (text field contents, scroll, …).
     pub ui: crate::ui::UiState,
 }
@@ -649,6 +654,7 @@ impl State {
             favs: Default::default(),
             new_playlist_picture: None,
             motion: motion::MotionState::default(),
+            airplay: airplay::AirPlay::new(persist),
             ui,
             browse_new: Load::Idle,
             made_for_you: Load::Idle,
@@ -726,6 +732,7 @@ impl State {
     fn apply_msg(&mut self, msg: Msg) -> bool {
         match msg {
             Msg::Bridge(event) => return self.apply_event(event),
+            Msg::AirPlay(event) => return self.airplay_event(event),
             Msg::Account { generation, msg } => {
                 if generation != self.session.account {
                     return false; // asked before a sign-out or sign-in
@@ -1019,6 +1026,10 @@ impl State {
                 }
                 self.reapply_playback_prefs();
                 self.resume_bridge_ready();
+                // A speaker is connected: this (new, or reloaded) page captures for it.
+                if self.airplay.capture {
+                    self.airplay_capture();
+                }
             }
             Event::Auth { authorized, storefront } => {
                 self.set_authorized(authorized);

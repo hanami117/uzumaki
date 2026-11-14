@@ -98,7 +98,7 @@ impl Blink {
 /// The field that has the keyboard, if one of ours does.
 fn focused(s: &State) -> Option<Sig> {
     let [name, desc] = super::new_playlist::edits(&s.ui.new_pl);
-    [&s.ui.search, &s.ui.filter.edit, &s.ui.settings.query, name, desc]
+    [&s.ui.search, &s.ui.filter.edit, &s.ui.settings.query, name, desc, super::airplay::edit(&s.ui.airplay)]
         .into_iter()
         .enumerate()
         .find(|(_, e)| e.focused)

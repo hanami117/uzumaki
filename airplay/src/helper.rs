@@ -12,6 +12,10 @@ pub enum Status {
     ClockReady { mode: String, state: String },
     Buffered { ms: u64 },
     Started { requested_ms: u64, at_ms: u64 },
+    /// `ACTION=FLUSH` was taken: the helper waits for new audio and the next START.
+    Flushed,
+    /// The receiver's queue depth (native AirPlay 2): how late a seek is heard.
+    Latency { warm_lead_ms: u64 },
     Error { code: String, http: u64, detail: String },
     Eof,
     IdleTimeout,
@@ -49,6 +53,8 @@ pub fn parse_status(line: &str) -> Option<Status> {
         },
         "audio" => Status::Buffered { ms: num("buffered_ms") },
         "started" => Status::Started { requested_ms: num("requested_unix_ms"), at_ms: num("at_unix_ms") },
+        "flushed" => Status::Flushed,
+        "latency" => Status::Latency { warm_lead_ms: num("warm_lead_ms") },
         "error" => Status::Error {
             code: field(rest, "code").unwrap_or("").into(),
             http: num("http"),
@@ -61,24 +67,24 @@ pub fn parse_status(line: &str) -> Option<Status> {
     })
 }
 
-/// A plain-words line for an error code, for the log Thomas sends back.
+/// A plain-words line for an error code, for the log.
 pub fn explain(code: &str) -> &'static str {
     match code {
         "auth_required" => {
-            "the speaker wants a password or a HomeKit pairing. HomePod: Home app → Home Settings → Speakers & TV → \
+            "the speaker wants a password or a pairing. HomePod: Home app → Home Settings → Speakers & TV → \
              Allow Speaker & TV Access → \"Everyone\" or \"Anyone on the Same Network\" (no password). \
-             Apple TV: needs a PIN pairing (cliairplay --pair-setup), not part of this spike"
+             Apple TV: pair with the PIN it shows"
         }
-        "auth_failed" => "the speaker rejected the password or the stored credentials",
+        "auth_failed" => "the speaker rejected the password or the stored pairing",
         "connect_failed" => "could not set up the session (speaker off or asleep? another Wi-Fi? firewall?)",
         "start_failed" => "the speaker accepted the session but would not schedule the start",
+        "flush_failed" => "the speaker did not take the flush (a seek is heard a little later)",
         _ => "see the cliairplay lines above",
     }
 }
 
-pub const STALLED_HINT: &str = "the speaker never answered our PTP clock (UDP 319/320): it will play silence. \
-     Check the macOS firewall (allow incoming connections for cliairplay), or try \
-     UZUMAKI_AIRPLAY_EXTRA_ARGS=\"--timing ntp\"";
+pub const STALLED_HINT: &str = "the speaker never answered our clock (UDP 319/320): it would play silence. \
+     Check the firewall (allow incoming connections for cliairplay; Linux: UDP 319 and 320)";
 
 /// The settings that shape the command line.
 #[derive(Clone, Debug)]
@@ -88,6 +94,26 @@ pub struct Options {
     pub extra: Vec<String>,
     pub dacp: String,
     pub active_remote: u32,
+    /// The device's AirPlay password (`pw=true` devices).
+    pub password: Option<String>,
+    /// Stored HomeKit pairing (from `--pair-setup`, with the same `dacp`).
+    pub auth: Option<String>,
+}
+
+impl Options {
+    /// Options with a DACP id and remote id made from `seed` (the DACP id is the pairing's
+    /// identity: keep the seed to keep a pairing).
+    pub fn seeded(seed: u64, volume: u8) -> Self {
+        Options {
+            volume,
+            debug: None,
+            extra: Vec::new(),
+            dacp: format!("{seed:016X}"),
+            active_remote: (seed >> 16) as u32 & 0x7fff_ffff,
+            password: None,
+            auth: None,
+        }
+    }
 }
 
 /// The command line for one speaker, after Music Assistant's `_build_cli_args`: `--protocol auto`
@@ -132,6 +158,12 @@ pub fn args(device: &Device, cmdpipe: &Path, opt: &Options) -> Vec<String> {
     if !txt.is_empty() {
         a.extend(["--txt".into(), txt]);
     }
+    if let Some(p) = opt.password.as_ref().filter(|p| !p.is_empty()) {
+        a.extend(["--password".into(), p.clone()]);
+    }
+    if let Some(c) = opt.auth.as_ref().filter(|c| !c.is_empty()) {
+        a.extend(["--auth".into(), c.clone()]);
+    }
     if let Some(d) = opt.debug {
         a.extend(["--debug".into(), d.to_string()]);
     }
@@ -140,9 +172,23 @@ pub fn args(device: &Device, cmdpipe: &Path, opt: &Options) -> Vec<String> {
     a
 }
 
+/// The command line of a HomeKit pairing (`--pair-setup`): the device shows a PIN, the helper
+/// reads it on stdin and prints `CREDENTIALS: <hex>`. Needs an IPv4 address.
+pub fn pair_args(device: &Device, dacp: &str) -> Vec<String> {
+    let port = device.airplay.as_ref().map_or(7000, |s| s.port);
+    vec!["--pair-setup".into(), "--port".into(), port.to_string(), "--dacp".into(), dacp.into(), device.ip.to_string()]
+}
+
+/// The credentials in a `--pair-setup` output line.
+pub fn parse_credentials(line: &str) -> Option<&str> {
+    let c = line.trim().strip_prefix("CREDENTIALS:")?.trim();
+    (!c.is_empty() && c.chars().all(|ch| ch.is_ascii_hexdigit())).then_some(c)
+}
+
 /// Where the helper is: `$UZUMAKI_CLIAIRPLAY`; next to the program (`cliairplay`); in a macOS
-/// bundle's Resources; the source tree's `target/cliairplay/` (scripts/airplay-spike/build-cliairplay.sh);
-/// else `cliairplay` on the PATH.
+/// bundle's Resources; an installed copy (`<prefix>/share/uzumaki/cliairplay` for install.sh,
+/// `<prefix>/lib/uzumaki/cliairplay` for packages); the source tree's `target/cliairplay/`
+/// (scripts/airplay/build-cliairplay.sh); else `cliairplay` on the PATH.
 pub fn find(env_path: Option<PathBuf>) -> Option<PathBuf> {
     if let Some(p) = env_path {
         return p.is_file().then_some(p);
@@ -153,6 +199,8 @@ pub fn find(env_path: Option<PathBuf>) -> Option<PathBuf> {
     {
         candidates.push(dir.join("cliairplay"));
         candidates.push(dir.join("../Resources/cliairplay"));
+        candidates.push(dir.join("../share/uzumaki/cliairplay"));
+        candidates.push(dir.join("../lib/uzumaki/cliairplay"));
     }
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/cliairplay/cliairplay"));
     if let Some(path) = std::env::var_os("PATH") {
@@ -184,7 +232,9 @@ mod tests {
         );
         assert_eq!(parse_status("[STATUS] route protocol=airplay2 flow=native timing=ptp buffered=0"), Some(Status::Route("protocol=airplay2 flow=native timing=ptp buffered=0".into())));
         assert_eq!(parse_status("[STATUS] eof"), Some(Status::Eof));
-        assert_eq!(parse_status("[STATUS] latency warm_lead_ms=600"), None);
+        assert_eq!(parse_status("[STATUS] latency warm_lead_ms=600 render_lead_ms=250"), Some(Status::Latency { warm_lead_ms: 600 }));
+        assert_eq!(parse_status("[STATUS] flushed head_unix_ms=5"), Some(Status::Flushed));
+        assert_eq!(parse_status("[STATUS] capabilities requested=0x0"), None);
         assert_eq!(parse_status("plain log line"), None);
     }
 
@@ -196,7 +246,7 @@ mod tests {
 
     #[test]
     fn homepod_command_line() {
-        let opt = Options { volume: 30, debug: None, extra: vec!["--timing".into(), "ntp".into()], dacp: "0123456789ABCDEF".into(), active_remote: 42 };
+        let opt = Options { extra: vec!["--timing".into(), "ntp".into()], dacp: "0123456789ABCDEF".into(), active_remote: 42, ..Options::seeded(0, 30) };
         let a = args(&homepod(), Path::new("/tmp/x/cmd.fifo"), &opt);
         let s = a.join(" ");
         assert!(s.starts_with("--protocol auto --dacp 0123456789ABCDEF --activeremote 42 --cmdpipe /tmp/x/cmd.fifo"), "{s}");
@@ -206,6 +256,18 @@ mod tests {
         // The TXT blob is one argument; the device address is last.
         assert!(a.iter().any(|x| x.starts_with("acl=0 features=")));
         assert_eq!(a.last().map(String::as_str), Some("192.168.1.50"));
+    }
+
+    #[test]
+    fn password_and_pairing_reach_the_command_line() {
+        let opt = Options { password: Some("secret".into()), auth: Some("ABCD".into()), ..Options::seeded(7, 20) };
+        let s = args(&homepod(), Path::new("/tmp/c"), &opt).join(" ");
+        assert!(s.contains("--password secret --auth ABCD"), "{s}");
+        assert!(s.contains("--dacp 0000000000000007"), "{s}");
+        assert_eq!(pair_args(&homepod(), "0000000000000007").join(" "), "--pair-setup --port 7000 --dacp 0000000000000007 192.168.1.50");
+        assert_eq!(parse_credentials("CREDENTIALS: 00ffAA\n"), Some("00ffAA"));
+        assert_eq!(parse_credentials("CREDENTIALS: nope!"), None);
+        assert_eq!(parse_credentials("Pairing failed."), None);
     }
 
     #[test]

@@ -1,10 +1,11 @@
-//! AirPlay spike (`UZUMAKI_AIRPLAY_SPIKE=1` only): a tap on the local player's output.
+//! AirPlay: a tap on the local player's output.
 //!
 //! [`Tap`] wraps the decoder inside the rodio sink. The samples it passes on to the sink are the
 //! decoder's, unchanged, or silence while a speaker takes the audio (so this computer stays quiet
 //! without touching the user's volume). A copy, resampled to stereo 44.1 kHz s16 (what the AirPlay
 //! helper takes, as the bridge's capture) and scaled by the app's volume (as MusicKit's volume
-//! scales the bridge's capture), goes to a [`CastSink`] in 4096-frame chunks. Without the spike the
+//! scales the bridge's capture), goes to a [`CastSink`] in 4096-frame chunks. While no speaker is
+//! connected the tap only looks at a flag every few milliseconds; in tests and headless runs the
 //! player doesn't build a `Tap` at all.
 
 use std::sync::Arc;
@@ -18,6 +19,9 @@ use rodio::{ChannelCount, SampleRate, Source};
 pub const OUT_RATE: u32 = 44100;
 /// Frames per chunk handed to the sink (~93 ms, as the bridge's worklet).
 const CHUNK_FRAMES: usize = 4096;
+/// Frames between two looks at the sink's switches (~5 ms at 48 kHz): picking a speaker takes
+/// effect well within a chunk, and playing with none costs a counter.
+const CHECK_EVERY: u16 = 256;
 
 /// Where the tapped audio goes (the AirPlay session; a recorder in tests).
 pub trait CastSink: Send + Sync {
@@ -105,9 +109,11 @@ pub struct Tap<S: Source> {
     channels: ChannelCount,
     rate: SampleRate,
     frame: [f32; 2],
-    /// Read at each frame's start: copy for the speaker / silence for this computer.
+    /// Read every `CHECK_EVERY` frames: copy for the speaker / silence for this computer.
     copying: bool,
     muted: bool,
+    /// Frames until the next look at the sink's switches.
+    check_in: u16,
 }
 
 impl<S: Source> Tap<S> {
@@ -126,6 +132,7 @@ impl<S: Source> Tap<S> {
             frame: [0.0; 2],
             copying: false,
             muted: false,
+            check_in: 0,
         }
     }
 
@@ -139,6 +146,11 @@ impl<S: Source> Tap<S> {
     fn frame_start(&mut self) {
         self.channels = self.inner.channels().max(1);
         self.rate = self.inner.sample_rate();
+        if self.check_in > 0 {
+            self.check_in -= 1;
+            return;
+        }
+        self.check_in = CHECK_EVERY - 1;
         let copying = self.sink.casting();
         if copying != self.copying {
             self.copying = copying;
@@ -199,9 +211,11 @@ impl<S: Source> Source for Tap<S> {
     }
     fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
         self.inner.try_seek(pos)?;
-        // A seek lands on a frame boundary; don't interpolate across it.
+        // A seek lands on a frame boundary; don't interpolate across it, and what was collected
+        // for the speaker belongs to the old position.
         self.pos = 0;
         self.resampler.reset();
+        self.chunk.clear();
         Ok(())
     }
 }
@@ -345,13 +359,16 @@ pub mod tests {
         let here: Vec<f32> = tap.by_ref().take(8820).collect();
         assert!(here.iter().any(|&s| s.abs() > 0.4));
         assert!(rec.chunks.lock().unwrap().is_empty());
-        // Casting starts mid-song: silence here from the next frame, the copy has the sound.
+        // Casting starts mid-song: silence here within a few milliseconds (the switch is read
+        // every `CHECK_EVERY` frames), and the copy has the sound.
         rec.casting.store(true, Ordering::SeqCst);
+        let _switching: Vec<f32> = tap.by_ref().take(usize::from(CHECK_EVERY) * 2).collect();
         let muted: Vec<f32> = tap.by_ref().take(44100).collect();
         assert!(muted.iter().all(|&s| s == 0.0), "no sound out of this computer while casting");
         assert!(rms(&rec.samples()) > 0.3);
         // Casting ends: sound here again.
         rec.casting.store(false, Ordering::SeqCst);
+        let _switching: Vec<f32> = tap.by_ref().take(usize::from(CHECK_EVERY) * 2).collect();
         let back: Vec<f32> = tap.by_ref().take(8820).collect();
         assert!(back.iter().any(|&s| s.abs() > 0.4));
     }

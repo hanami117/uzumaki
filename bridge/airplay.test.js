@@ -9,12 +9,21 @@ const path = require('node:path');
 const vm = require('node:vm');
 const airplay = require('./airplay.js');
 
-test('the spike is off unless UZUMAKI_AIRPLAY_SPIKE=1', () => {
-  assert.equal(airplay.enabled({}), false);
-  assert.equal(airplay.enabled({ UZUMAKI_AIRPLAY_SPIKE: '0' }), false);
-  assert.equal(airplay.enabled({ UZUMAKI_AIRPLAY_SPIKE: '1' }), true);
-  assert.equal(airplay.socketPath({ UZUMAKI_AIRPLAY_PCM_SOCKET: '/tmp/x.sock' }), null);
-  assert.equal(airplay.socketPath({ UZUMAKI_AIRPLAY_SPIKE: '1', UZUMAKI_AIRPLAY_PCM_SOCKET: '/tmp/x.sock' }), '/tmp/x.sock');
+test('the PCM socket comes from the environment the app sets', () => {
+  assert.equal(airplay.socketPath({}), null);
+  assert.equal(airplay.socketPath({ UZUMAKI_AIRPLAY_PCM_SOCKET: '/tmp/x.sock' }), '/tmp/x.sock');
+});
+
+test('nothing of AirPlay runs in the bridge until the app asks', () => {
+  const main = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+  // airplay.js is loaded lazily, at the first `airplay` command, and nowhere else.
+  assert.equal(main.match(/require\('\.\/airplay\.js'\)/g).length, 1);
+  assert.match(main, /airplay \?\?= require\('\.\/airplay\.js'\)/);
+  assert.match(main, /case 'airplay':\s+airplaySet\(msg\.on\)/);
+  // The page gets its graph only on a capture request.
+  const preload = fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8');
+  assert.match(preload, /if \(!capture\) return; \/\/ never cast in this document/);
+  assert.equal(preload.match(/new AudioContext\(/g).length, 1);
 });
 
 test('float channels become interleaved, saturated s16', () => {

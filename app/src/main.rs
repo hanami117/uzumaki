@@ -7,6 +7,7 @@
 //! `cargo run -p uzumaki -- --snap /tmp/x.png --scene album --size 1360x860 --scale 1`
 //! (`--list-scenes` lists them).
 
+mod airplay;
 mod appearance;
 mod artist;
 #[cfg(any(target_os = "linux", test))]
@@ -257,6 +258,12 @@ fn main() {
             handle.update_if(move |s: &mut State, tx| s.apply(msg, tx));
         }
     };
+    // AirPlay: created idle (no thread, no network) before the players, which ask it where the
+    // audio goes; it starts working when the picker opens or a speaker is chosen.
+    {
+        let sink = sink.clone();
+        airplay::init(move |e| sink(Msg::AirPlay(e)));
+    }
     let local = {
         let sink = sink.clone();
         LocalPlayer::spawn(move |generation, event| sink(Msg::Local { generation, event }), local_active)
@@ -330,6 +337,8 @@ fn main() {
         s.start_update_timer();
         // The last run's song, paused where it was left (`resume.rs`); also arms saving it.
         s.start_resume();
+        // Settings → Playback → "Reconnect to last AirPlay device" (off unless chosen).
+        s.airplay_reconnect();
         s
     });
     // Same as `app.run()` (one window, "main"), but through the display-aware entry point so the
@@ -342,5 +351,5 @@ fn main() {
     // The playback to resume, before Electron goes (the atexit handler writes it too).
     resume::flush();
     engine.shutdown();
-    uzumaki_airplay::shutdown(); // AirPlay spike: stop the speaker and its helper (no-op otherwise)
+    airplay::shutdown(); // stop the speaker and its helper
 }

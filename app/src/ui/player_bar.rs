@@ -331,10 +331,13 @@ pub fn player_bar(s: &State, compact: bool, still: bool) -> El {
 
     if compact {
         // Seek on top, then cover and title | transport | queue and a volume button.
-        let right = row().justify_end().center_y().gap(2.0).child(lyrics).child(queue).child(
+        let right = row().justify_end().center_y().gap(2.0).child(super::airplay::button(s, "airplay", PAL.text2)).child(lyrics).child(queue).child(
             wheel_volume(
                 icon_button("volume-button", "Volume", icons::volume(s.playback.volume), 18.0, if s.ui.volume_open { PAL.accent } else { PAL.text2 })
-                    .on_press(|s: &mut State| s.ui.volume_open = !s.ui.volume_open),
+                    .on_press(|s: &mut State| {
+                        super::airplay::close(s);
+                        s.ui.volume_open = !s.ui.volume_open;
+                    }),
             ),
         );
         return col().key("player-bar").w_full().h(PLAYER_H).fill(PAL.player)
@@ -345,6 +348,7 @@ pub fn player_bar(s: &State, compact: bool, still: bool) -> El {
 
     let centre = col().grow(2.0).min_w(0.0).items_center().gap(4.0).justify_center().child(transport).child(seek);
     let right = row().grow(1.0).min_w(0.0).justify_end().center_y().gap(4.0)
+        .child(super::airplay::button(s, "airplay", PAL.text2))
         .child(lyrics)
         .child(queue)
         .child(wheel_volume(
@@ -417,7 +421,10 @@ pub fn floating_bar(s: &State, win_w: f32, still: bool) -> El {
     let queue = super::dnd::queue_target(s, queue, |e| e.fill(crate::theme::drop_fill(0.25)));
     let volume = wheel_volume(
         icon_button("volume-button", "Volume", icons::volume(s.playback.volume), 18.0, if s.ui.volume_open { PAL.accent } else { PAL.text2 })
-            .on_press(|s: &mut State| s.ui.volume_open = !s.ui.volume_open),
+            .on_press(|s: &mut State| {
+                        super::airplay::close(s);
+                        s.ui.volume_open = !s.ui.volume_open;
+                    }),
     );
     let mut right = row().center_y().gap(2.0);
     if !narrow {
@@ -433,7 +440,7 @@ pub fn floating_bar(s: &State, win_w: f32, still: bool) -> El {
             ),
         );
     }
-    right = right.child(lyrics).child(queue).child(volume);
+    right = right.child(super::airplay::button(s, "airplay", PAL.text2)).child(lyrics).child(queue).child(volume);
 
     let capsule = row().key("player-bar").w_full().max_w(FLOAT_MAX_W).h(FLOAT_H).px(14.0).gap(14.0).center_y().radius(FLOAT_H / 2.0)
         .fill(PAL.player.alpha(0.92)).border(1.0, crate::theme::ov(0.08))

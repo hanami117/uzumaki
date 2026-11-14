@@ -324,6 +324,12 @@ fn row_el(r: &Rx, id: Row) -> El {
             Some("At start, the last song comes back paused where you stopped, with its queue. Nothing plays until you press Play.".to_string()),
             switch("settings/resume", "Resume where you left off", s.settings.resume_playback, true, |s, on| s.set_resume_playback(on)),
         ),
+        Row::AirPlay => setting(
+            narrow,
+            "Reconnect to last AirPlay device",
+            Some("At start, the sound goes back to the AirPlay speaker you used last, if it is on. Off: Uzumaki always starts on this computer.".to_string()),
+            switch("settings/airplay", "Reconnect to last AirPlay device", s.airplay.prefs.reconnect, true, |s, on| s.set_airplay_reconnect(on)),
+        ),
         Row::Lyrics => {
             let words = s.settings.lyrics_words;
             setting(
@@ -816,7 +822,7 @@ fn account(r: &Rx) -> Vec<El> {
 }
 
 fn playback(r: &Rx) -> Vec<El> {
-    rows(r, &[Row::Quality, Row::Lyrics, Row::Resume])
+    rows(r, &[Row::Quality, Row::Lyrics, Row::Resume, Row::AirPlay])
 }
 
 fn appearance(r: &Rx) -> Vec<El> {

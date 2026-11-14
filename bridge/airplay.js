@@ -1,4 +1,5 @@
-// AirPlay spike (stage 1-2 of docs/research/airplay-sender.md), off unless UZUMAKI_AIRPLAY_SPIKE=1.
+// AirPlay capture and transport. Loaded by main.js only when the app first sends audio to an
+// AirPlay speaker (`{cmd: 'airplay', on: true}`).
 //
 // Capture: the preload taps MusicKit's <audio> element with Web Audio (createMediaElementSource ->
 // AudioWorklet). That is the player's own output, already decoded by Chromium; nothing here
@@ -6,8 +7,8 @@
 // in 4096-frame chunks (~93 ms), and the preload hands the chunks to main.js over IPC.
 // Transport: main.js writes the raw chunks to the Unix socket the app named in
 // UZUMAKI_AIRPLAY_PCM_SOCKET (not stdin/stdout, which carry the JSON protocol). Nothing is written to
-// disk. While the socket is connected (the app is casting) the local output is silenced with a gain
-// node in the graph, never with MusicKit's volume (which MusicKit saves).
+// disk. While the socket is connected (the speaker takes the audio) the local output is silenced
+// with a gain node in the graph, never with MusicKit's volume (which MusicKit saves).
 // The pure helpers below are shared with the worklet (as source text) and the node tests.
 'use strict';
 
@@ -16,8 +17,7 @@ const net = require('node:net');
 const SAMPLE_RATE = 44100;
 const CHUNK_FRAMES = 4096;
 
-const enabled = (env = process.env) => env.UZUMAKI_AIRPLAY_SPIKE === '1';
-const socketPath = (env = process.env) => (enabled(env) && env.UZUMAKI_AIRPLAY_PCM_SOCKET) || null;
+const socketPath = (env = process.env) => env.UZUMAKI_AIRPLAY_PCM_SOCKET || null;
 
 // Float [-1, 1] channels -> interleaved s16le, written into `out` (Int16Array) from frame `at`.
 // One input channel is copied to both sides; clipping saturates.
@@ -93,7 +93,7 @@ function levelLine({ chunks, frames, rms, peak, sending, localMuted, ctxState, e
 }
 
 // Main-process side of the PCM socket: connects to the app's socket, retrying every second while it
-// isn't there (the app binds it only once the speaker accepted the session). `onState(connected)`
+// isn't there (the app binds it once the speaker accepted the session, just before it asks for the capture). `onState(connected)`
 // tells main.js when casting starts and stops, to mute the local output. Chunks written while the
 // socket is down, or while over `maxQueued` bytes are waiting, are dropped (live audio: late is useless).
 class PcmLink {
@@ -159,4 +159,4 @@ class PcmLink {
   }
 }
 
-module.exports = { SAMPLE_RATE, CHUNK_FRAMES, enabled, socketPath, toS16, level, workletSource, levelLine, PcmLink };
+module.exports = { SAMPLE_RATE, CHUNK_FRAMES, socketPath, toS16, level, workletSource, levelLine, PcmLink };
