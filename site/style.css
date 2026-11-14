@@ -197,6 +197,11 @@ section { scroll-margin-top: 72px; }
 .page .status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; margin-top: 22px; color: var(--ink-3); font-size: .9rem; }
 .page .status .pill { margin-right: 6px; }
 .page .btn { margin-top: 20px; }
+.page .page-cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.page .page-cta .btn { margin-top: 0; }
+.page .shot { margin: 36px 0 0; }
+.page figcaption { color: var(--ink-3); font-size: .88rem; margin-top: 12px; }
+.page .faq-list { margin-top: 18px; }
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; }
 .tabs a { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); color: var(--ink-2); font-size: .88rem; font-weight: 500; text-decoration: none; }
 .tabs a:hover { color: var(--ink-1); border-color: var(--border-hi); }

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apple Music on Linux: Uzumaki, a free desktop client</title>
+<meta name="description" content="There&rsquo;s no official Apple Music app for Linux. Uzumaki is a free, independent desktop client with synced lyrics, AutoPlay and local files. AUR and AppImage.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0e0e11">
+<meta property="og:title" content="Apple Music on Linux: Uzumaki, a free desktop client">
+<meta property="og:description" content="There&rsquo;s no official Apple Music app for Linux. Uzumaki is a free, independent desktop client with synced lyrics, AutoPlay and local files. AUR and AppImage.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://getuzumaki.app/apple-music-linux/">
+<meta property="og:site_name" content="Uzumaki">
+<meta property="og:image" content="https://getuzumaki.app/assets/og-v2.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Uzumaki logo">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@Uzumaki_App">
+<meta name="twitter:title" content="Apple Music on Linux: Uzumaki, a free desktop client">
+<meta name="twitter:description" content="There&rsquo;s no official Apple Music app for Linux. Uzumaki is a free, independent desktop client with synced lyrics, AutoPlay and local files. AUR and AppImage.">
+<meta name="twitter:image" content="https://getuzumaki.app/assets/og-v2.jpg">
+<link rel="canonical" href="https://getuzumaki.app/apple-music-linux/">
+<link rel="icon" href="/assets/icon-coral.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "Is Uzumaki an official Apple Music app?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. Uzumaki is an independent project and is not made, affiliated with or endorsed by Apple. It plays music through Apple’s own web player, with your own Apple Music account."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Is it free?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Yes. Uzumaki is free and open source under the GPL-3.0. To stream Apple Music you need your own Apple Music subscription; your own music files play without one."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Does it play lossless or Dolby Atmos?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. Apple offers 256 kbps AAC to its web player, which is the player Uzumaki uses. Lossless and Spatial Audio need Apple’s own apps, which don’t exist on Linux."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Which distros does it run on?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Arch Linux and its derivatives through the AUR, and most other x86_64 distros through the AppImage (glibc 2.35 or newer: Ubuntu 22.04 and later, Debian 12 and later, current Fedora, openSUSE Tumbleweed and so on). Wayland and X11 both work."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can I download songs to keep?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. Uzumaki streams Apple Music the same way music.apple.com does and never saves or converts the audio. Songs you own as files play from your own music folders."
+   }
+  }
+ ]
+}
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="/" aria-label="Uzumaki, home">
+      <img src="/assets/icon.svg" alt="" width="28" height="28">
+      <span>Uzumaki</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="/#features">Features</a>
+      <a href="/#how">How it works</a>
+      <a href="/#uzu">uzu</a>
+      <a href="/#requirements">Requirements</a>
+      <a href="/#download">Download</a>
+      <a href="/#faq">FAQ</a>
+    </nav>
+    <a class="nav-x" href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener" aria-label="Uzumaki on X (@Uzumaki_App)" title="@Uzumaki_App on X"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg></a>
+    <a class="nav-x nav-gh" href="https://github.com/hanami117/uzumaki" target="_blank" rel="noopener" aria-label="Uzumaki on GitHub" title="Uzumaki on GitHub"><svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+  </div>
+</header>
+
+<main id="main">
+<section class="wrap page">
+  <span class="eyebrow"><b>linux</b> &middot; apple music</span>
+  <h1>Apple Music on Linux</h1>
+  <p class="lead">Apple doesn&rsquo;t make an Apple Music app for Linux. Uzumaki is a free, independent desktop client that does the job: your library, playlists and synced lyrics in a fast native window, with media keys and a terminal player.</p>
+  <div class="body">
+    <div class="page-cta">
+    <a class="btn primary" href="/download/arch/">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+      <span>Arch Linux (AUR)</span>
+    </a>
+    <a class="btn" href="/download/linux/">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+      <span>AppImage, any distro</span>
+    </a>
+    </div>
+
+    <h2>Why there&rsquo;s no Apple Music app on Linux</h2>
+    <p>Apple makes Apple Music apps for macOS, Windows, iPhone and Android, but not for Linux. On Linux the official way to listen is music.apple.com in a browser tab, one tab among many, which stops when you close the browser.</p>
+    <p>Uzumaki is a real desktop app instead. It is written in Rust and draws its own interface on the GPU, so it opens quickly and scrolls smoothly even through a large library. It&rsquo;s free and open source under the GPL, and it runs on Wayland and X11.</p>
+
+    <figure class="shot">
+      <img src="/assets/shots/np-bg-cover.webp" width="1360" height="860" loading="lazy" decoding="async"
+           alt="Uzumaki on Linux: the full-screen Now Playing view, with the controls on the left and synced lyrics on the right over a blurred copy of the album cover.">
+      <figcaption>Full-screen Now Playing with synced lyrics.</figcaption>
+    </figure>
+
+    <h2>How it plays Apple Music</h2>
+    <p>Uzumaki runs Apple&rsquo;s own Apple Music web player in a hidden window, inside a standard licensed browser engine, and tells it what to play. You sign in on Apple&rsquo;s own sign-in page, so Uzumaki never sees your password. Everything you see and click is Uzumaki&rsquo;s own window.</p>
+    <p>Because the sound comes from Apple&rsquo;s web player, the quality is what Apple offers on the web: 256 kbps AAC. Uzumaki streams the same way music.apple.com does and never saves or converts the music.</p>
+
+    <h2>What you get</h2>
+    <ul>
+      <li><b>Synced lyrics, word by word.</b> Lyrics fill in word by word when Apple has word timing, or line by line when it doesn&rsquo;t. Read them full screen in Now Playing or in a side panel next to whatever you&rsquo;re browsing.</li>
+      <li><b>AutoPlay and stations.</b> When your queue, album or playlist ends, AutoPlay keeps going with similar songs, as in Apple&rsquo;s apps. Create a station from any song or artist.</li>
+      <li><b>Animated artwork.</b> Albums with a motion cover play it on the album page and in Now Playing (on Linux this uses <code>ffmpeg</code>). Always, Now Playing only, or off.</li>
+      <li><b>Your library, fast.</b> Albums, artists, songs, playlists, Favourite Songs, New, Radio and Made for You. The library is kept on disk, so it opens at once and you can browse it offline. Create and edit playlists.</li>
+      <li><b>Local files in the same queue.</b> FLAC, MP3, AAC/M4A, ALAC, Vorbis and WAV from your own music folders play inside the app, mixed with Apple Music songs. No subscription? Use Uzumaki as a local music player only.</li>
+      <li><b>Media keys and desktop widgets.</b> Uzumaki registers with MPRIS, so media keys, the KDE and GNOME media widgets and <code>playerctl</code> control it. There&rsquo;s also a tray icon, song-change notifications and hook scripts.</li>
+      <li><b>A terminal player, <code>uzu</code>.</b> Control the running app from scripts and key bindings the way <code>mpc</code> controls mpd, or type <code>uzu</code> for a full-screen terminal player with your queue, playlists, search, albums and lyrics. It works over SSH too.</li>
+      <li><b>Themes and backgrounds.</b> Dark, light or follow the system. Put Uzumaki&rsquo;s swirl, your own picture or the playing cover behind the app, with dither, ASCII, halftone, scanline or blur effects. Every keyboard shortcut can be changed.</li>
+    </ul>
+    <p>The <a href="/#features">home page</a> has an interactive preview of the window and more screenshots.</p>
+
+    <h2>Install on Arch Linux</h2>
+    <p>Two packages are in the AUR. <code>uzumaki-bin</code> installs the prebuilt app and needs no build; <code>uzumaki</code> builds from source. Pick one: they conflict with each other. Both update with the rest of your system.</p>
+    <span class="cmd"><i>$</i> yay -S uzumaki-bin</span>
+    <p>Details, including what the source package builds: <a href="/download/arch/">Uzumaki for Arch Linux</a>.</p>
+
+    <h2>Install on any other distro</h2>
+    <p>Download the AppImage, make it executable and run it. One file, no install, no sudo. It needs glibc 2.35 or newer (Ubuntu 22.04 and later) and FUSE 2.</p>
+    <span class="cmd"><i>$</i> chmod +x Uzumaki-x86_64.AppImage
+<i>$</i> ./Uzumaki-x86_64.AppImage</span>
+    <p>You can also build it from source with Rust and Node.js. Both ways: <a href="/download/linux/">Uzumaki for Linux, any distro</a>.</p>
+
+    <h2>Also on macOS</h2>
+    <p>The same app runs on Macs with Apple silicon and macOS 13 or later, from a disk image or with Homebrew. See <a href="/download/macos/">Uzumaki for macOS</a>.</p>
+    <span class="cmd"><i>$</i> brew install --cask hanami117/uzumaki/uzumaki</span>
+
+    <h2>What you need</h2>
+    <ul>
+      <li>An Apple Music subscription, to stream. Your own music files play without one.</li>
+      <li>A 64-bit Intel or AMD PC (x86_64) with a GPU that has Vulkan drivers, on Wayland or X11.</li>
+      <li>Songs stream at 256 kbps AAC, with a 64 kbps data saver. Lossless and Dolby Atmos aren&rsquo;t available this way.</li>
+    </ul>
+
+    <h2 id="faq">Questions</h2>
+    <div class="faq-list">
+      <details>
+        <summary>Is Uzumaki an official Apple Music app?</summary>
+        <p>No. Uzumaki is an independent project and is not made, affiliated with or endorsed by Apple. It plays music through Apple&rsquo;s own web player, with your own Apple Music account.</p>
+      </details>
+      <details>
+        <summary>Is it free?</summary>
+        <p>Yes. Uzumaki is free and open source under the GPL-3.0. To stream Apple Music you need your own Apple Music subscription; your own music files play without one.</p>
+      </details>
+      <details>
+        <summary>Does it play lossless or Dolby Atmos?</summary>
+        <p>No. Apple offers 256 kbps AAC to its web player, which is the player Uzumaki uses. Lossless and Spatial Audio need Apple&rsquo;s own apps, which don&rsquo;t exist on Linux.</p>
+      </details>
+      <details>
+        <summary>Which distros does it run on?</summary>
+        <p>Arch Linux and its derivatives through the AUR, and most other x86_64 distros through the AppImage (glibc 2.35 or newer: Ubuntu 22.04 and later, Debian 12 and later, current Fedora, openSUSE Tumbleweed and so on). Wayland and X11 both work.</p>
+      </details>
+      <details>
+        <summary>Can I download songs to keep?</summary>
+        <p>No. Uzumaki streams Apple Music the same way music.apple.com does and never saves or converts the audio. Songs you own as files play from your own music folders.</p>
+      </details>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="brand">
+      <img src="/assets/icon.svg" alt="" width="24" height="24" loading="lazy">
+      <span>Uzumaki</span>
+    </div>
+    <p class="foot-social"><a href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg> Follow @Uzumaki_App on X</a></p>
+    <p class="foot-contact">Install: <a href="/download/macos/">macOS</a> · <a href="/download/arch/">Arch Linux</a> · <a href="/download/linux/">AppImage · any distro</a> · <a href="/download/windows/">Windows (soon)</a></p>
+    <p class="foot-contact"><a href="/apple-music-linux/">Apple Music on Linux</a> · <a href="https://github.com/hanami117/uzumaki">GitHub</a> · <a href="https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki/blob/main/LICENSE">GPL-3.0</a></p>
+    <p class="foot-contact">Questions or ideas: <a href="mailto:hello@getuzumaki.app">hello@getuzumaki.app</a> · Help with the app: <a href="mailto:support@getuzumaki.app">support@getuzumaki.app</a></p>
+    <p class="disclaimer">Uzumaki is an independent project, not affiliated with or endorsed by Apple. Apple Music is a trademark of Apple Inc.</p>
+    <p class="fine">Uzumaki streams through Apple's own web player and does not download, convert or decrypt music.</p>
+  </div>
+</footer>
+
+</body>
+</html>
