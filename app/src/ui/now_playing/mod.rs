@@ -33,8 +33,9 @@ pub fn close(s: &mut State) {
     }
     s.ui.now_playing = false;
     s.set_fine_time(false);
-    // The clip and its decoder go now: a hidden window may draw no further frame to poll on.
-    s.motion.stop();
+    // The clip holds its frame (no decoding) while the overlay slides away, then goes
+    // (`MotionState::park`); hiding the window stops it at once (`hide_on_close`).
+    s.motion.park();
 }
 
 /// Catalog id lyrics are keyed by.
@@ -174,15 +175,28 @@ fn cover(s: &State, song: &Song, size: f32) -> El {
     }
 }
 
-/// Animated artwork over the still (`state::motion`): fades in once its first frame is ready,
-/// in the same box, so nothing moves. Kept outside the per-song stack so the next song of the
+/// Animated artwork over the still (`state::motion`): fades in once its first frame is drawn,
+/// in the same box, so nothing moves (before that, the Mac's clip draws nearly transparent so
+/// its first frame gets drawn at all). Kept outside the per-song stack so the next song of the
 /// same album keeps the clip running. Not on the small cover of a narrow window.
+///
+/// It leaves at once, without a fade: closing Now Playing stops the clip that same frame, and
+/// a fading copy of a stopped video doesn't follow the overlay sliding away (it was cut off
+/// and smeared over the page on a quick Cmd+Shift+F). The still under it moves with the overlay.
 fn motion_layer(s: &State, song: &Song, size: f32) -> Option<El> {
     if size < 160.0 {
         return None;
     }
-    let layer = s.motion.layer_for(s.motion_album(song))?;
-    Some(layer.key("np-motion").transition(Transition::opacity()).enter_delay(0.12))
+    let album = s.motion_album(song);
+    if let Some(layer) = s.motion.layer_for(album) {
+        return Some(layer.key("np-motion").transition(motion_transition()));
+    }
+    Some(s.motion.warm_layer_for(album)?.key("np-motion-warm").transition(Transition::none()))
+}
+
+/// The clip layer's transition (Now Playing and album pages): fades in, gone at once.
+pub(crate) fn motion_transition() -> Transition {
+    Transition::asymmetric(Transition::opacity(), Transition::none())
 }
 
 /// The cover's rounded, shadowed box.
@@ -385,6 +399,16 @@ pub fn poll(s: &mut State, landed: bool, tx: &mut Tx) -> bool {
     // can again (`state::motion::frame_outcome`).
     if s.motion.covered && s.motion.playback.is_some() {
         tx.wake_after(std::time::Duration::from_secs(1));
+    }
+    if let Some(d) = s.motion.closing_left() {
+        tx.wake_after(d); // drops the parked clip once the slide is over
+    }
+    if s.motion.playback.as_ref().is_some_and(|p| p.warming()) {
+        tx.wake_after(std::time::Duration::from_millis(250));
+    }
+    // A lookup that failed is asked again later: a frame then, even if nothing else draws.
+    if let (true, Some(d)) = (s.ui.now_playing, s.motion.next_retry()) {
+        tx.wake_after(d);
     }
     lyrics_poll(s, landed, tx) || motion
 }
@@ -611,10 +635,117 @@ mod tests {
         for _ in 0..60 {
             step(&mut rt);
         }
+        rt.update(|s, _| { s.motion.stop(); }); // the parked clip's timer (real time here)
+        step(&mut rt);
         assert!(rt.presented("np-motion").is_none());
         let mut gone = false;
         rt.update(|s, _| gone = s.motion.playback.is_none());
         assert!(gone, "no player left once Now Playing closed");
+    }
+
+    /// Keys of every element on screen, leaving ones included.
+    fn keyed(rt: &Runtime<State>, key: &str) -> Vec<rune::ElementInfo> {
+        rt.elements().into_iter().filter(|e| e.key.as_deref() == Some(key)).collect()
+    }
+
+    /// 2026-11-14, Cmd+Shift+F pressed quickly: closing dropped the clip's player at once while
+    /// Rune kept drawing the leaving overlay as it was, video layer included, so mid-slide the
+    /// video's area was cut out. Now the clip is parked on its frame: the leaving overlay's
+    /// video moves with it, exactly over the still, until the slide is over; then it goes.
+    /// Reopening mid-slide takes the same clip back (no restart, no second decoder).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_clip_slides_away_with_now_playing_and_goes_after() {
+        if std::env::var("UZUMAKI_MOTION").as_deref() == Ok("ffmpeg") {
+            return;
+        }
+        crate::clock::freeze();
+        let mut s = State::offline();
+        super::scene_np_motion(&mut s, false);
+        let mut rt = Runtime::new(s, crate::ui::view, (1360.0, 860.0), Env { system_dark: true, scale: 1.0 });
+        let step = |rt: &mut Runtime<State>| {
+            rt.update_if(|s, tx| crate::ui::poll(s, 0.0, tx));
+            rt.frame(DT);
+        };
+        for _ in 0..40 {
+            step(&mut rt);
+        }
+        let mut g0 = 0;
+        rt.update(|s, _| g0 = s.motion.playback.as_ref().unwrap().generation);
+        for round in 0..3 {
+            rt.update(|s, _| super::close(s));
+            let mut moved = false;
+            for _ in 0..8 {
+                step(&mut rt);
+                crate::clock::advance(std::time::Duration::from_millis(16));
+                let clip = keyed(&rt, "np-motion");
+                let cover = keyed(&rt, "np-cover");
+                assert_eq!(clip.len(), 1, "round {round}: the clip leaves with the overlay");
+                assert!(clip[0].exiting && cover[0].exiting);
+                assert_eq!(clip[0].rect, cover[0].rect, "round {round}: exactly over the still");
+                moved |= cover[0].rect[1] > 60.0;
+            }
+            assert!(moved, "round {round}: it slides");
+            let mut parked = false;
+            rt.update(|s, _| parked = s.motion.parked() && s.motion.playback.is_none());
+            assert!(parked, "round {round}: held, not decoding");
+            // Reopened mid-slide: the same clip.
+            rt.update(|s, _| super::open(s));
+            step(&mut rt);
+            let mut g = 0;
+            rt.update(|s, _| g = s.motion.playback.as_ref().map_or(0, |p| p.generation));
+            assert_eq!(g, g0, "round {round}: the parked clip is taken back");
+            for _ in 0..30 {
+                step(&mut rt);
+            }
+        }
+        rt.update(|s, _| super::close(s));
+        step(&mut rt);
+        crate::clock::advance(crate::state::motion::CLOSING);
+        step(&mut rt);
+        let mut gone = false;
+        rt.update(|s, _| gone = !s.motion.parked() && s.motion.playback.is_none());
+        assert!(gone, "dropped once the slide is over");
+    }
+
+    /// In a window the Mac's clip counts as shown only once a frame of it is drawn: until then
+    /// its layer is drawn nearly transparent (so Rune pulls that frame) and the still shows;
+    /// then the clip fades in from a picture, never from an empty box.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_clip_fades_in_only_after_its_first_frame_is_drawn() {
+        if std::env::var("UZUMAKI_MOTION").as_deref() == Ok("ffmpeg") {
+            return;
+        }
+        let mut s = State::offline();
+        super::scene_np_motion(&mut s, false);
+        let album = s.playback.song.as_ref().and_then(|song| s.motion_album(song)).unwrap().to_string();
+        let clip = s.motion.clips.values().find_map(crate::state::Load::ready).unwrap().clone();
+        let p = crate::motion::Playback::start(album, 7, &clip, Box::new(|_, _| {}), true);
+        assert!(!p.shown() && p.warming());
+        s.motion.playback = Some(p);
+        let mut rt = Runtime::new(s, crate::ui::view, (1360.0, 860.0), Env { system_dark: true, scale: 1.0 });
+        let step = |rt: &mut Runtime<State>| {
+            rt.update_if(|s, tx| crate::ui::poll(s, 0.0, tx));
+            rt.frame(DT);
+        };
+        for _ in 0..20 {
+            step(&mut rt);
+            assert!(rt.presented("np-motion").is_none(), "no fade before a frame is drawn");
+            let (_, o) = rt.presented("np-motion-warm").expect("drawn, to pull its first frame");
+            assert!(o > 0.001 && o < 0.01, "invisible over the still: {o}");
+        }
+        rt.update_if(|s, _| s.motion_event(7, crate::motion::Event::FirstFrame));
+        let mut seen = Vec::new();
+        for _ in 0..40 {
+            step(&mut rt);
+            assert!(rt.presented("np-motion-warm").is_none());
+            if let Some((_, o)) = rt.presented("np-motion") {
+                seen.push(o);
+            }
+        }
+        assert!(seen.iter().any(|o| *o > 0.05 && *o < 0.95), "a crossfade: {seen:?}");
+        assert!((seen.last().unwrap() - 1.0).abs() < 1e-3);
     }
 
     /// The screencast's setup (`np-slide`), Now Playing closed, settled.
