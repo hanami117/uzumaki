@@ -40,6 +40,7 @@ mod notify;
 mod nowplaying;
 mod scenes;
 mod settings;
+mod share;
 mod state;
 mod theme;
 mod tray;

@@ -99,6 +99,15 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("menu-pin-playlist", menu_pin_playlist),
     ("menu-pin-rail", menu_pin_rail),
     ("menu-card", menu_card),
+    ("share-album-card", share_album_card),
+    ("share-album-header", share_album_header),
+    ("share-playlist", share_playlist),
+    ("share-playlist-library-hidden", share_playlist_library_hidden),
+    ("share-artist", share_artist),
+    ("share-station", share_station),
+    ("share-song-player-bar", share_song_player_bar),
+    ("share-song-row", share_song_row),
+    ("share-library-album", share_library_album),
     ("menu-submenu", menu_submenu),
     ("signed-out", signed_out),
     ("starting", starting),
@@ -1305,6 +1314,103 @@ fn menu_card(s: &mut State) {
     let c = album_item(1, false);
     s.library_albums = Paged::ready(vec![]);
     crate::ui::scene_menu_collection(s, &c, [520.0, 260.0]);
+}
+
+// ---- Share ▸ Copy Link ----
+
+/// Opens the Share submenu of the context or song menu that is showing.
+fn share_open(s: &mut State) {
+    crate::ui::scene_share_open(s);
+}
+
+/// A catalog album card (as Apple Music's: Share ▸ Copy Link in the "…" menu).
+fn share_album_card(s: &mut State) {
+    recently_added(s);
+    let mut c = album_item(1, false);
+    c.id = "617154241".into();
+    s.session.storefront = Some("it".into());
+    crate::ui::scene_menu_collection(s, &c, [520.0, 200.0]);
+    share_open(s);
+}
+
+/// The album page's "…" menu; the page's own `attributes.url` is preferred over a built one.
+fn share_album_header(s: &mut State) {
+    album(s);
+    s.session.storefront = Some("it".into());
+    let id = "a2".to_string();
+    crate::share::note(
+        crate::share::Kind::Album,
+        &serde_json::json!({"id": id, "attributes": {"url": "https://music.apple.com/it/album/aurora-line/1600000002"}}),
+    );
+    if let Some(Load::Ready(c)) = s.collections.get(&id).cloned() {
+        crate::ui::scene_menu_collection(s, &c, [770.0, 300.0]);
+        share_open(s);
+    }
+}
+
+fn share_playlist(s: &mut State) {
+    recently_added(s);
+    let mut c = playlist_item(7, "Today's Hits");
+    c.id = "pl.f4d106fed2bd41149aaacabb233eb5eb".into();
+    s.session.storefront = Some("it".into());
+    crate::ui::scene_menu_collection(s, &c, [520.0, 200.0]);
+    share_open(s);
+}
+
+/// The user's own library playlist has no catalog id: no Share in its menu.
+fn share_playlist_library_hidden(s: &mut State) {
+    recently_added(s);
+    let c = s.library_playlists.items.iter().find(|c| c.editable).cloned().expect("an editable playlist");
+    crate::ui::scene_menu_collection(s, &c, [520.0, 200.0]);
+}
+
+fn share_artist(s: &mut State) {
+    artist(s);
+    s.session.storefront = Some("it".into());
+    let a = Artist { id: "5468295".into(), name: "Mara Quell".into() };
+    crate::ui::scene_menu_artist(s, &a, [300.0, 200.0]);
+    share_open(s);
+}
+
+fn share_station(s: &mut State) {
+    radio(s);
+    s.session.storefront = Some("it".into());
+    crate::ui::scene_menu_station(s, &station(978194965, "Apple Music 1", true), [520.0, 240.0]);
+    share_open(s);
+}
+
+fn catalog_song(s: &mut State) -> Song {
+    let mut now = song(2, 1);
+    now.id = "1600000010".into();
+    now.catalog_id = Some("1600000010".into());
+    now.album_id = Some("1600000002".into());
+    s.session.storefront = Some("it".into());
+    now
+}
+
+/// Right-click on the player bar: Share ▸ Copy Link of the playing song.
+fn share_song_player_bar(s: &mut State) {
+    home(s);
+    let now = catalog_song(s);
+    s.playback.song = Some(now.clone());
+    crate::ui::scene_song_menu(s, now, [80.0, 380.0]);
+    share_open(s);
+}
+
+fn share_song_row(s: &mut State) {
+    playlist_page(s);
+    let now = catalog_song(s);
+    crate::ui::scene_song_menu(s, now, [420.0, 240.0]);
+    share_open(s);
+}
+
+/// A library album: its catalog page is asked for when Copy Link is clicked.
+fn share_library_album(s: &mut State) {
+    library_albums(s);
+    let mut c = album_item(1, false);
+    c.id = "l.8f3a1".into();
+    crate::ui::scene_menu_collection(s, &c, [520.0, 200.0]);
+    share_open(s);
 }
 
 fn menu_submenu(s: &mut State) {

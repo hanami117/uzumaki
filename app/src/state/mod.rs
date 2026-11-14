@@ -386,6 +386,8 @@ pub enum Msg {
     AutoplayStation { run: u64, result: Result<String, String> },
     /// Songs of AutoPlay's station for queue `run`.
     AutoplayTracks { run: u64, result: Result<Vec<Song>, String> },
+    /// Share → Copy Link on a library album or artist: its catalog id and url (`share::lookup_path`).
+    ShareLink { kind: crate::share::Kind, id: String, title: String, result: Result<Option<(String, Option<String>)>, String> },
     /// The bridge's answer to `signOut`.
     SignedOut(Result<(), String>),
     /// Apple's storefront (id, name): a name lookup (`/v1/storefronts/{id}`).
@@ -538,6 +540,8 @@ pub struct State {
     pub cache_sizes: Option<CacheSizes>,
     /// Last non-fatal error, shown briefly.
     pub toast: Option<String>,
+    /// A link for the clipboard: `ui::poll` hands it to Rune (a menu action has no `Tx` of its own).
+    pub pending_copy: Option<String>,
     /// A newer version is out (`update.rs`, `state/update.rs`): the banner atop the content.
     pub update: Option<crate::update::Notice>,
     /// The manual update check and when the last check ran (Settings → General).
@@ -643,6 +647,7 @@ impl State {
             sent: Default::default(),
             playback,
             toast: None,
+            pending_copy: None,
             update: None,
             update_check: Default::default(),
             update_auto: Default::default(),
@@ -733,7 +738,7 @@ impl State {
         }
     }
 
-    fn apply_msg(&mut self, msg: Msg) -> bool {
+    pub(crate) fn apply_msg(&mut self, msg: Msg) -> bool {
         match msg {
             Msg::Bridge(event) => return self.apply_event(event),
             Msg::Account { generation, msg } => {
@@ -949,6 +954,14 @@ impl State {
                 Ok(Some(id)) => self.navigate(Route::Collection { kind: CollectionKind::Album, id }),
                 Ok(None) => self.toast = Some("Couldn't find the album of this song.".into()),
                 Err(e) => self.toast = Some(format!("Couldn't open the album: {e}")),
+            },
+            Msg::ShareLink { kind, id, title, result } => match result {
+                Ok(Some(found)) => {
+                    let url = crate::share::resolved(kind, &id, &title, found, self.session.storefront.as_deref());
+                    self.copied(url);
+                }
+                Ok(None) => self.toast = Some("Apple Music has no page to link to.".into()),
+                Err(e) => self.toast = Some(format!("Couldn't copy the link: {e}")),
             },
             Msg::Lyrics { id, result } => self.lyrics_reply(id, result),
             Msg::AddedToPlaylist { id, name, count, result } => match result {

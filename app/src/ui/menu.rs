@@ -36,6 +36,8 @@ pub struct MenuState {
     pub rows: Vec<(usize, Song)>,
     /// "Add to Playlist" submenu showing.
     pub sub: bool,
+    /// "Share" submenu (Copy Link) showing.
+    pub share: bool,
     pub context: MenuContext,
     /// "Remove from Library" was clicked once: the next click removes.
     pub confirm: bool,
@@ -50,14 +52,14 @@ pub fn open(s: &mut State, list: &str, key: &str, at: [f32; 2]) {
     }
     let songs = select::unique(rows.iter().map(|(_, x)| x.clone()).collect());
     s.ui.ctx = None;
-    s.ui.menu = Some(MenuState { at, list: list.into(), id: key.into(), songs, rows, sub: false, context: MenuContext::List, confirm: false });
+    s.ui.menu = Some(MenuState { at, list: list.into(), id: key.into(), songs, rows, sub: false, share: false, context: MenuContext::List, confirm: false });
 }
 
 /// The menu for one song outside the page's lists: the player bar's, or an Up Next row's.
 pub fn open_song(s: &mut State, song: Song, context: MenuContext, at: [f32; 2]) {
     s.ui.ctx = None;
     let id = song.id.clone();
-    s.ui.menu = Some(MenuState { at, list: String::new(), id, rows: Vec::new(), songs: vec![song], sub: false, context, confirm: false });
+    s.ui.menu = Some(MenuState { at, list: String::new(), id, rows: Vec::new(), songs: vec![song], sub: false, share: false, context, confirm: false });
 }
 
 /// The user's playlist whose page the menu's list `list` is, when songs can be removed from it.
@@ -160,6 +162,7 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
         e.on_hover_change(|s: &mut State, inside, tx: &mut rune::Tx| {
             if let (true, Some(m)) = (inside, &mut s.ui.menu) {
                 m.sub = false;
+                m.share = false;
                 tx.instant();
             }
         })
@@ -237,6 +240,7 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
         p.add(add.on_hover_change(|s: &mut State, inside, tx: &mut rune::Tx| {
             if let Some(m) = &mut s.ui.menu {
                 m.sub = m.sub || inside;
+                m.share = m.share && !inside;
                 tx.instant();
             }
         }));
@@ -279,6 +283,7 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
     p.sep();
 
     // Elsewhere.
+    let mut share: Option<(f32, String)> = None;
     if let Some(song) = &one {
         if let Some(path) = song.local_path() {
             let path = path.to_path_buf();
@@ -286,7 +291,7 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
                 s.ui.menu = None;
                 crate::desktop::show_in_folder(&path);
             })));
-        } else if let Some(url) = crate::desktop::apple_music_url(song, s.session.storefront.as_deref()) {
+        } else if let crate::share::Link::Url(url) = crate::share::song_link(song, s.session.storefront.as_deref()) {
             let u2 = url.clone();
             p.add(closes(item("menu-web".into(), "Show in Apple Music", false).on_press_tx(move |s: &mut State, tx: &mut rune::Tx| {
                 s.ui.menu = None;
@@ -294,11 +299,23 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
                     s.toast = Some("Couldn't open the link.".into());
                 }
             })));
-            p.add(closes(item("menu-link".into(), "Copy Link", false).on_press_tx(move |s: &mut State, tx: &mut rune::Tx| {
-                s.ui.menu = None;
-                tx.copy(u2.clone());
-                s.toast = Some("Link copied".into());
-            })));
+            // Share ▸ Copy Link, as in Apple's menus; the submenu opens like Add to Playlist's.
+            share = Some((p.next_y(), u2));
+            let shown = m.share;
+            let e = item("menu-share".into(), "Share", true).on_press(|s: &mut State| {
+                if let Some(m) = &mut s.ui.menu {
+                    m.share = true;
+                    m.sub = false;
+                }
+            });
+            let e = if shown { e.fill(crate::theme::ov(0.09)) } else { e };
+            p.add(e.on_hover_change(|s: &mut State, inside, tx: &mut rune::Tx| {
+                if let (true, Some(m)) = (inside, &mut s.ui.menu) {
+                    m.share = true;
+                    m.sub = false;
+                    tx.instant();
+                }
+            }));
         }
     }
     // Placed once its height is known (the Now Playing menu is much shorter than a list's).
@@ -342,6 +359,14 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
                 col().key("menu-playlists").w_full().max_h(288.0).scroll(ScrollSpec { stick_bottom: false }).child(list),
             ),
         );
+    }
+    if let (true, Some((share_y, url))) = (m.share, share) {
+        let sx = if x + 2.0 * W + 12.0 > win[0] { x - W - 4.0 } else { x + W + 4.0 };
+        let sy = (y + share_y - 6.0).min(win[1] - 60.0).max(8.0);
+        layer = layer.child(panel(sx, sy).child(item("menu-copy-link".into(), "Copy Link", false).on_press(move |s: &mut State| {
+            s.ui.menu = None;
+            s.copy_link(&crate::share::Link::Url(url.clone()));
+        })));
     }
     Some(layer)
 }

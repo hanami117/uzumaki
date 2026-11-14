@@ -174,6 +174,9 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
     // Data that landed since the last frame makes this frame's commit instant: the lyrics
     // views and a pin drag then hold a change back a frame so it glides (see `State::landing`).
     let landed = crate::state::take_landed();
+    if let Some(url) = s.pending_copy.take() {
+        tx.copy(url);
+    }
     let a = dnd::poll(s, t, landed, tx);
     let b = now_playing::poll(s, landed, tx);
     let c = right_panel::poll(s, landed, tx);
@@ -475,6 +478,18 @@ pub fn scene_menu_artist(s: &mut State, a: &crate::models::Artist, at: [f32; 2])
 /// A song row's menu (a page's list), as a right-click on one row opens it.
 pub fn scene_song_menu_list(s: &mut State, song: crate::models::Song, at: [f32; 2]) {
     menu::open_song(s, song, menu::MenuContext::List, at);
+}
+
+pub fn scene_menu_station(s: &mut State, st: &crate::models::Station, at: [f32; 2]) {
+    ctx_menu::open_station(s, st, at);
+}
+
+/// Scenes: the open menu's Share submenu showing.
+pub fn scene_share_open(s: &mut State) {
+    if let Some(m) = &mut s.ui.menu {
+        m.share = true;
+    }
+    ctx_menu::open_share(s);
 }
 
 pub fn scene_submenu(s: &mut State) {

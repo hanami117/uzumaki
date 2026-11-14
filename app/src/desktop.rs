@@ -1,14 +1,6 @@
-//! Small desktop integrations: links to music.apple.com and "Show in Folder".
+//! Small desktop integrations: "Show in Folder".
 
 use std::path::Path;
-
-use crate::models::Song;
-
-/// The song's page on music.apple.com, in the user's storefront ("it", else "us").
-pub fn apple_music_url(song: &Song, storefront: Option<&str>) -> Option<String> {
-    let id = song.catalog_ref()?;
-    Some(format!("https://music.apple.com/{}/song/{id}", storefront.unwrap_or("us")))
-}
 
 /// Opens the file manager on `path`'s folder with the file selected (the freedesktop
 /// FileManager1 `ShowItems` call: Dolphin, Nautilus, Nemo, Thunar…), else just the folder.
@@ -60,32 +52,5 @@ mod tests {
     #[test]
     fn file_uris_escape_spaces_and_non_ascii() {
         assert_eq!(file_uri(Path::new("/music/Telu/Late Train (live) è.flac")), "file:///music/Telu/Late%20Train%20%28live%29%20%C3%A8.flac");
-    }
-
-    #[test]
-    fn apple_music_links_need_a_catalog_id() {
-        let mut s = Song {
-            id: "i.abc".into(),
-            catalog_id: Some("1440857781".into()),
-            title: String::new(),
-            artist: String::new(),
-            album: String::new(),
-            album_is_fallback: false,
-            duration: 0.0,
-            track_number: None,
-            disc_number: None,
-            explicit: false,
-            artwork: None,
-            playable: true,
-            genre: None,
-            year: None,
-            album_id: None,
-            artists: Vec::new(),
-        };
-        assert_eq!(apple_music_url(&s, Some("it")).as_deref(), Some("https://music.apple.com/it/song/1440857781"));
-        s.catalog_id = None;
-        assert_eq!(apple_music_url(&s, Some("it")), None, "an unmatched library song has no page");
-        s.id = "file:///m/a.flac".into();
-        assert_eq!(apple_music_url(&s, None), None);
     }
 }

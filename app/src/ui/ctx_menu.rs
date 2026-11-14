@@ -19,6 +19,8 @@ pub struct CtxItem {
     act: Option<Act>,
     /// A destructive item: the first click shows this label instead, the second acts.
     confirm: Option<String>,
+    /// A submenu (Share ▸ Copy Link): the item opens it instead of acting.
+    sub: Option<Vec<CtxItem>>,
 }
 
 pub struct CtxMenu {
@@ -26,24 +28,42 @@ pub struct CtxMenu {
     items: Vec<CtxItem>,
     /// The destructive item clicked once.
     armed: Option<usize>,
+    /// The item whose submenu is showing.
+    open_sub: Option<usize>,
 }
 
 fn it(label: impl Into<String>, f: impl Fn(&mut State) + 'static) -> CtxItem {
-    CtxItem { label: label.into(), act: Some(Rc::new(f)), confirm: None }
+    CtxItem { label: label.into(), act: Some(Rc::new(f)), confirm: None, sub: None }
 }
 
 /// An item that asks first: "Delete Playlist" → "Click again to delete".
 fn danger(label: impl Into<String>, confirm: impl Into<String>, f: impl Fn(&mut State) + 'static) -> CtxItem {
-    CtxItem { label: label.into(), act: Some(Rc::new(f)), confirm: Some(confirm.into()) }
+    CtxItem { label: label.into(), act: Some(Rc::new(f)), confirm: Some(confirm.into()), sub: None }
 }
 
 fn sep() -> CtxItem {
-    CtxItem { label: String::new(), act: None, confirm: None }
+    CtxItem { label: String::new(), act: None, confirm: None, sub: None }
+}
+
+/// Scenes: shows the submenu of the open menu's Share item.
+pub fn open_share(s: &mut State) {
+    if let Some(m) = &mut s.ui.ctx {
+        m.open_sub = m.items.iter().position(|i| i.sub.is_some());
+    }
+}
+
+/// Share ▸ Copy Link, as in Apple's menus; nothing when the item has no page to link to.
+pub fn share_item(link: crate::share::Link) -> Option<CtxItem> {
+    if link == crate::share::Link::Hidden {
+        return None;
+    }
+    let copy = it("Copy Link", move |s| s.copy_link(&link));
+    Some(CtxItem { label: "Share".into(), act: Some(Rc::new(|_| {})), confirm: None, sub: Some(vec![copy]) })
 }
 
 pub fn open(s: &mut State, at: [f32; 2], items: Vec<CtxItem>) {
     s.ui.menu = None;
-    s.ui.ctx = Some(CtxMenu { at, items, armed: None });
+    s.ui.ctx = Some(CtxMenu { at, items, armed: None, open_sub: None });
 }
 
 fn pin_item(s: &State, id: &str, pin: impl Fn(&mut State) + 'static) -> CtxItem {
@@ -149,7 +169,9 @@ fn items_of_collection(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
     if !crate::state::in_library(&c.id) {
         let c4 = c.clone();
         v.push(it("Add to Library", move |s| s.add_collection_to_library(&c4)));
-    } else if c.id.starts_with("l.") || (c.id.starts_with("p.") && c.editable) {
+    }
+    v.extend(share_item(crate::share::collection_link(c, s.session.storefront.as_deref())));
+    if crate::state::in_library(&c.id) && (c.id.starts_with("l.") || (c.id.starts_with("p.") && c.editable)) {
         let c5 = c.clone();
         let (label, confirm) = if c.id.starts_with("p.") {
             ("Delete Playlist", "Click again to delete it")
@@ -184,6 +206,7 @@ pub fn artist_items(s: &State, a: &Artist) -> Vec<CtxItem> {
         v.push(it("Create Station", move |s| s.create_artist_station(&id, &name)));
     }
     v.push(pin_item(s, &a.id, move |s| s.pin_artist(&a2)));
+    v.extend(share_item(crate::share::artist_link(a, s.session.storefront.as_deref())));
     v
 }
 
@@ -212,7 +235,8 @@ pub fn open_folder(s: &mut State, path: &std::path::Path, at: [f32; 2]) {
 
 pub fn open_station(s: &mut State, st: &Station, at: [f32; 2]) {
     let (s1, s2) = (st.clone(), st.clone());
-    let items = vec![it("Play", move |s| s.play_station(&s1)), sep(), pin_item(s, &st.id, move |s| s.pin_station(&s2))];
+    let mut items = vec![it("Play", move |s| s.play_station(&s1)), sep(), pin_item(s, &st.id, move |s| s.pin_station(&s2))];
+    items.extend(share_item(crate::share::station_link(st, s.session.storefront.as_deref())));
     open(s, at, items);
 }
 
@@ -267,7 +291,9 @@ pub fn pin_items(s: &State, id: &str) -> Vec<CtxItem> {
         PinKind::Album | PinKind::Playlist => items_of_collection(s, &pin_collection(s, pin), false),
         PinKind::Station => {
             let st = Station { id: pin.id.clone(), name: pin.title.clone(), artwork: pin.artwork.clone(), live: false };
-            vec![it("Play", move |s| s.play_station(&st))]
+            let mut v = vec![it("Play", move |s| s.play_station(&st))];
+            v.extend(share_item(crate::share::link_of_station(&pin.id, &pin.title, s.session.storefront.as_deref())));
+            v
         }
         PinKind::Artist => Vec::new(),
     };
@@ -314,7 +340,10 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
     let x = m.at[0].min(win[0] - menu::W - 8.0).max(8.0);
     let y = menu::place_y(m.at[1], h, win[1]);
     let mut panel = menu::panel(x, y);
+    let mut sub_at = None;
+    let mut top = 6.0;
     for (i, item) in m.items.iter().enumerate() {
+        top += if item.act.is_some() { menu::ITEM_H } else { 9.0 };
         panel = panel.child(match &item.act {
             None => menu::sep(),
             Some(act) => {
@@ -325,29 +354,69 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
                     _ => item.label.as_str(),
                 };
                 let asks = item.confirm.is_some();
-                let e = menu::item(format!("ctx-{i}"), label, false).on_press(move |s: &mut State| {
-                    if asks && !armed {
-                        if let Some(m) = &mut s.ui.ctx {
-                            m.armed = Some(i);
-                        }
-                        return;
+                if item.sub.is_some() {
+                    // Like the song menu's Add to Playlist: the submenu opens when the pointer
+                    // rests on the item (or it is clicked) and closes when another item is reached.
+                    let shown = m.open_sub == Some(i);
+                    if shown {
+                        sub_at = Some((i, top - menu::ITEM_H));
                     }
-                    s.ui.ctx = None;
-                    act(s);
-                });
-                if armed { e.fill(PAL.danger_bg) } else { e }
+                    let e = menu::item(format!("ctx-{i}"), label, true).on_press(move |s: &mut State| {
+                        if let Some(m) = &mut s.ui.ctx {
+                            m.open_sub = Some(i); // the pointer resting on it opened it already
+                        }
+                    });
+                    let e = if shown { e.fill(crate::theme::ov(0.09)) } else { e };
+                    e.on_hover_change(move |s: &mut State, inside, tx: &mut Tx| {
+                        if let (true, Some(m)) = (inside, &mut s.ui.ctx) {
+                            m.open_sub = Some(i);
+                            tx.instant();
+                        }
+                    })
+                } else {
+                    let e = menu::item(format!("ctx-{i}"), label, false).on_press(move |s: &mut State| {
+                        if asks && !armed {
+                            if let Some(m) = &mut s.ui.ctx {
+                                m.armed = Some(i);
+                            }
+                            return;
+                        }
+                        s.ui.ctx = None;
+                        act(s);
+                    });
+                    let e = if armed { e.fill(PAL.danger_bg) } else { e };
+                    e.on_hover_change(|s: &mut State, inside, tx: &mut Tx| {
+                        let closed = inside && s.ui.ctx.as_mut().is_some_and(|m| m.open_sub.take().is_some());
+                        if closed {
+                            tx.instant();
+                        }
+                    })
+                }
             }
         });
     }
-    Some(
-        el().key("ctx-layer").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-            .child(
-                el().key("ctx-scrim").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-                    .on_press(|s: &mut State| s.ui.ctx = None)
-                    .on_secondary_press(|s: &mut State, _p, _tx: &mut Tx| s.ui.ctx = None),
-            )
-            .child(panel),
-    )
+    let mut layer = el().key("ctx-layer").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+        .child(
+            el().key("ctx-scrim").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .on_press(|s: &mut State| s.ui.ctx = None)
+                .on_secondary_press(|s: &mut State, _p, _tx: &mut Tx| s.ui.ctx = None),
+        )
+        .child(panel);
+    if let Some((i, off)) = sub_at {
+        // Beside the main panel, or on its left near the right edge; top aligned with its item.
+        let sx = if x + 2.0 * menu::W + 12.0 > win[0] { x - menu::W - 4.0 } else { x + menu::W + 4.0 };
+        let sy = (y + off - 6.0).min(win[1] - 60.0).max(8.0);
+        let mut sub = menu::panel(sx, sy);
+        for (j, item) in m.items[i].sub.iter().flatten().enumerate() {
+            let Some(act) = item.act.clone() else { continue };
+            sub = sub.child(menu::item(format!("ctx-sub-{j}"), &item.label, false).on_press(move |s: &mut State| {
+                s.ui.ctx = None;
+                act(s);
+            }));
+        }
+        layer = layer.child(sub);
+    }
+    Some(layer)
 }
 
 #[cfg(test)]
@@ -374,7 +443,7 @@ mod local_tests {
         assert_eq!(labels(&folder), ["Play", "Shuffle", "Play Next", "Add to Queue", "", "Show in Folder"]);
         // Apple items keep their menus.
         let apple = Artist { id: "r.1".into(), name: "Ann".into() };
-        assert_eq!(labels(&artist_items(&s, &apple)), ["Pin to Sidebar"]);
+        assert_eq!(labels(&artist_items(&s, &apple)), ["Pin to Sidebar", "Share"], "a library artist is looked up in the catalog");
     }
 
     #[test]
@@ -393,12 +462,181 @@ mod local_tests {
         let mut want = row.clone();
         want.extend(["".to_string(), "Unpin".into(), "Move Down".into()]);
         assert_eq!(labels(&pin_items(&s, "p.1")), want);
-        assert_eq!(labels(&pin_items(&s, "pl.apple")), ["Play", "Shuffle", "", "Favourite", "Add to Library", "", "Unpin", "Move Up", "Move Down"]);
-        assert_eq!(labels(&pin_items(&s, "ra.1")), ["Play", "", "Unpin", "Move Up", "Move Down"]);
+        assert_eq!(labels(&pin_items(&s, "pl.apple")), ["Play", "Shuffle", "", "Favourite", "Add to Library", "Share", "", "Unpin", "Move Up", "Move Down"]);
+        assert_eq!(labels(&pin_items(&s, "ra.1")), ["Play", "Share", "", "Unpin", "Move Up", "Move Down"]);
         assert_eq!(labels(&pin_items(&s, "r.1")), ["Unpin", "Move Up"]);
         // Its Play plays the list (loaded first, as from the row).
         let play = pin_items(&s, "p.1").into_iter().next().unwrap();
         (play.act.unwrap())(&mut s);
         assert_eq!(s.sent.borrow().iter().filter(|p| p.contains("/v1/me/library/playlists/p.1")).count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod share_tests {
+    use super::*;
+    use crate::share::{Kind, Link};
+    use rune::{Env, Runtime};
+
+    fn scene(name: &str) -> State {
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == name).unwrap().1)(&mut s);
+        s
+    }
+
+    fn run(s: State) -> Runtime<State> {
+        let mut rt = Runtime::new(s, crate::ui::view, (1180.0, 760.0), Env { system_dark: true, scale: 1.0 });
+        rt.frame(0.0);
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        rt
+    }
+
+    fn tap(rt: &mut Runtime<State>, key: &str) {
+        let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+        rt.pointer_move(x + 8.0, y + 8.0);
+        rt.pointer_down(x + 8.0, y + 8.0);
+        rt.pointer_up(x + 8.0, y + 8.0);
+        for _ in 0..20 {
+            rt.frame(1.0 / 60.0);
+        }
+    }
+
+    fn labels(s: &State) -> Vec<String> {
+        s.ui.ctx.as_ref().map(|m| m.items.iter().map(|i| i.label.clone()).collect()).unwrap_or_default()
+    }
+
+    #[test]
+    fn share_then_copy_link_puts_the_page_on_the_clipboard_and_toasts() {
+        let mut s = scene("recently-added");
+        // A catalog album's card.
+        let c = crate::models::Collection { id: "617154241".into(), title: "Random Access Memories".into(), ..sample(CollectionKind::Album) };
+        s.session.storefront = Some("it".into());
+        open_collection(&mut s, &c, [520.0, 200.0]);
+        assert!(labels(&s).contains(&"Share".to_string()));
+        let board = rune::clipboard::memory();
+        let mut rt = run(s);
+        rt.use_clipboard(&board);
+        rt.poll = Some(crate::ui::poll);
+        let share = rt.state.ui.ctx.as_ref().unwrap().items.iter().position(|i| i.sub.is_some()).unwrap();
+        assert!(rt.find("ctx-sub-0").is_none(), "the submenu is closed until Share is reached");
+        tap(&mut rt, &format!("ctx-{share}"));
+        tap(&mut rt, "ctx-sub-0");
+        let s = rt.state;
+        assert!(s.ui.ctx.is_none(), "the menu closes");
+        assert_eq!(s.toast.as_deref(), Some("Link copied"));
+        // `ui::poll` hands the link to Rune's clipboard (the system one in the app).
+        assert_eq!(s.pending_copy, None);
+        assert_eq!(board.text().as_deref().map(String::as_str), Some("https://music.apple.com/it/album/random-access-memories/617154241"));
+    }
+
+    #[test]
+    fn copy_link_asks_for_the_link_before_toasting_on_a_library_album() {
+        let mut s = State::offline();
+        s.copy_link(&Link::Lookup { kind: Kind::Album, id: "l.zzz".into(), title: "Nevermind".into() });
+        assert_eq!(s.sent.borrow().len(), 1);
+        assert!(s.sent.borrow()[0].starts_with("/v1/me/library/albums/l.zzz/catalog "));
+        assert_eq!(s.pending_copy, None, "nothing is copied before Apple answers");
+        s.apply_msg(crate::state::Msg::ShareLink {
+            kind: Kind::Album,
+            id: "l.zzz".into(),
+            title: "Nevermind".into(),
+            result: Ok(Some(("1440783617".into(), None))),
+        });
+        assert_eq!(s.pending_copy.as_deref(), Some("https://music.apple.com/us/album/nevermind/1440783617"));
+        assert_eq!(s.toast.as_deref(), Some("Link copied"));
+        // No catalog match: a toast, nothing copied.
+        let mut s = State::offline();
+        s.apply_msg(crate::state::Msg::ShareLink { kind: Kind::Artist, id: "r.1".into(), title: "X".into(), result: Ok(None) });
+        assert_eq!(s.pending_copy, None);
+        assert_eq!(s.toast.as_deref(), Some("Apple Music has no page to link to."));
+    }
+
+    #[test]
+    fn each_kind_of_menu_has_share_where_a_page_exists() {
+        let mut s = State::offline();
+        s.session.storefront = Some("it".into());
+        let album = crate::models::Collection { id: "617154241".into(), ..sample(CollectionKind::Album) };
+        assert!(labels_of(collection_items(&s, &album)).contains(&"Share".to_string()));
+        let local = crate::models::Collection { id: format!("{}abc", crate::local::view::ALBUM_PREFIX), ..sample(CollectionKind::Album) };
+        assert!(!labels_of(collection_items(&s, &local)).contains(&"Share".to_string()), "local albums: no page");
+        let own = crate::models::Collection { id: "p.own1".into(), editable: true, ..sample(CollectionKind::Playlist) };
+        assert!(!labels_of(collection_items(&s, &own)).contains(&"Share".to_string()), "a library playlist with no global id");
+        let apple = crate::models::Collection { id: "pl.abc".into(), ..sample(CollectionKind::Playlist) };
+        assert!(labels_of(collection_items(&s, &apple)).contains(&"Share".to_string()));
+        let artist = Artist { id: "5468295".into(), name: "Daft Punk".into() };
+        assert!(labels_of(artist_items(&s, &artist)).contains(&"Share".to_string()));
+        let local_artist = Artist { id: crate::local::view::artist_id("x"), name: "x".into() };
+        assert!(!labels_of(artist_items(&s, &local_artist)).contains(&"Share".to_string()));
+    }
+
+    fn labels_of(v: Vec<CtxItem>) -> Vec<String> {
+        v.into_iter().map(|i| i.label).collect()
+    }
+
+    fn sample(kind: CollectionKind) -> crate::models::Collection {
+        crate::models::Collection {
+            kind,
+            id: String::new(),
+            title: "T".into(),
+            subtitle: String::new(),
+            artwork: None,
+            year: None,
+            genre: None,
+            description: None,
+            track_count: None,
+            modified: None,
+            editable: false,
+            favorites: false,
+            public: None,
+            tracks: Vec::new(),
+            artists: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn stations_apple_made_have_share_the_personal_one_does_not() {
+        let mut s = State::offline();
+        let apple = Station { id: "ra.978194965".into(), name: "Apple Music 1".into(), artwork: None, live: true };
+        open_station(&mut s, &apple, [10.0, 10.0]);
+        assert!(labels(&s).contains(&"Share".to_string()));
+        let mine = Station { id: "ra.u-1234".into(), name: "My Station".into(), artwork: None, live: false };
+        open_station(&mut s, &mine, [10.0, 10.0]);
+        assert!(!labels(&s).contains(&"Share".to_string()));
+    }
+
+    #[test]
+    fn the_song_menu_copies_the_album_page_with_the_song_id() {
+        let mut s = scene("share-song-player-bar");
+        s.ui.menu.as_mut().unwrap().share = false;
+        let board = rune::clipboard::memory();
+        let mut rt = run(s);
+        rt.use_clipboard(&board);
+        rt.poll = Some(crate::ui::poll);
+        tap(&mut rt, "menu-share");
+        tap(&mut rt, "menu-copy-link");
+        assert!(rt.state.ui.menu.is_none());
+        assert_eq!(rt.state.toast.as_deref(), Some("Link copied"));
+        assert_eq!(
+            board.text().as_deref().map(String::as_str),
+            Some("https://music.apple.com/it/album/night-bus-hymns/1600000002?i=1600000010")
+        );
+    }
+
+    #[test]
+    fn a_library_song_without_a_catalog_twin_and_a_local_file_have_no_share() {
+        let mut s = scene("share-song-player-bar");
+        let mut song = s.ui.menu.as_ref().unwrap().songs[0].clone();
+        song.id = "i.abc".into();
+        song.catalog_id = None;
+        crate::ui::menu::open_song(&mut s, song.clone(), crate::ui::menu::MenuContext::NowPlaying, [80.0, 380.0]);
+        s.ui.menu.as_mut().unwrap().share = true;
+        let rt = run(s);
+        assert!(rt.find("menu-share").is_none());
+        let mut s = State::offline();
+        song.id = "file:///m/a.flac".into();
+        crate::ui::menu::open_song(&mut s, song, crate::ui::menu::MenuContext::NowPlaying, [80.0, 380.0]);
+        assert!(run(s).find("menu-share").is_none());
     }
 }
