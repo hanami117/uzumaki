@@ -44,9 +44,23 @@ pub enum Command {
     Restart,
     /// How the screens' cover is detected in this terminal (no app needed).
     CoverInfo,
+    /// `uzu config`: where `uzu.toml` is and what is wrong in it; `--default` prints a commented
+    /// one, `--path` just its path. No app needed.
+    Config(ConfigShow),
     Help,
     /// `uzu --version`: the version, no app needed.
     Version,
+}
+
+/// What `uzu config` shows.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum ConfigShow {
+    /// The path and the problems in the file.
+    Check,
+    /// The full commented file, to start from.
+    Default,
+    /// Only the path.
+    Path,
 }
 
 #[derive(Debug, PartialEq)]
@@ -177,6 +191,12 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         "quit" => none(name, p).map(|_| Command::Quit)?,
         "restart" => none(name, p).map(|_| Command::Restart)?,
         "cover-info" => none(name, p).map(|_| Command::CoverInfo)?,
+        "config" => Command::Config(match p {
+            [] => ConfigShow::Check,
+            [a] if a == "--default" => ConfigShow::Default,
+            [a] if a == "--path" => ConfigShow::Path,
+            _ => return Err("'config' takes --default or --path".into()),
+        }),
         "help" | "-h" | "--help" => Command::Help,
         "version" | "-V" | "--version" => none(name, p).map(|_| Command::Version)?,
         other => return Err(format!("unknown command '{other}'")),
@@ -222,6 +242,8 @@ In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (
   quit                        quit Uzumaki (does nothing if it isn't running)
   restart                     quit and start again (the queue starts empty)
   cover-info                  how the cover is drawn in this terminal (for bug reports)
+  config [--default|--path]   check ~/.config/uzumaki/uzu.toml and list its problems; --default prints a
+                              commented file to start from; --path prints where it is
   --version                   uzu's version and build
 
 <playlist> and <album> are a number from the list, or part of the name.
@@ -270,6 +292,10 @@ mod tests {
         assert_eq!(p("quit"), Ok(Command::Quit));
         assert_eq!(p("restart"), Ok(Command::Restart));
         assert!(p("quit now").is_err() && p("restart now").is_err());
+        assert_eq!(p("config"), Ok(Command::Config(ConfigShow::Check)));
+        assert_eq!(p("config --default"), Ok(Command::Config(ConfigShow::Default)));
+        assert_eq!(p("config --path"), Ok(Command::Config(ConfigShow::Path)));
+        assert!(p("config --now").is_err() && p("config --default --path").is_err());
         assert_eq!(p("--version"), Ok(Command::Version));
         assert_eq!(p("-V"), Ok(Command::Version));
     }

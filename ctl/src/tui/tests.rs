@@ -3153,3 +3153,54 @@ fn dump_the_history_screens() {
         eprintln!("{l}");
     }
 }
+
+// ------------------------------------------------------------------------------- uzu.toml
+
+use crate::config::Config;
+
+/// A fixture app with the config the text gives.
+fn with_config(text: &str, now: Instant) -> App {
+    let mut app = fixture(now);
+    app.set_config(Config::parse(text), now);
+    app
+}
+
+#[test]
+fn no_config_and_an_empty_one_draw_exactly_what_the_defaults_draw() {
+    let now = Instant::now();
+    for (w, h) in [(140, 20), (100, 30), (60, 14), (40, 12), (80, 10)] {
+        let mut plain = fixture(now);
+        plain.resize(h);
+        let mut empty = with_config("# nothing here\n", now);
+        empty.resize(h);
+        assert_eq!(lines(&draw(&plain, now, w, h)), lines(&draw(&empty, now, w, h)), "{w}x{h}");
+        assert_eq!(draw(&plain, now, w, h), draw(&empty, now, w, h), "styles differ at {w}x{h}");
+    }
+}
+
+#[test]
+fn a_problem_in_the_file_shows_in_the_status_line_and_leaves_the_screen_whole() {
+    let now = Instant::now();
+    let mut app = with_config("[theme]\nacent = \"red\"\nbad line\n", now);
+    app.resize(20);
+    let text = lines(&draw(&app, now, 140, 20));
+    assert!(text[8].starts_with("│ uzu.toml line 2: unknown key 'acent' in [theme]; did you mean 'accent'?"), "{}", text[8]);
+    assert!(text[8].contains("(+1 more; 'uzu config' lists them)"), "{}", text[8]);
+    // The frame is intact: every row as wide as the terminal, borders where they belong.
+    assert!(text.iter().all(|l| text_width(l) == 140));
+    assert!(text[8].ends_with('│') && text[0].starts_with('╭') && text[19].starts_with('╰'));
+    // A narrow screen cuts it instead of breaking the box.
+    let narrow = lines(&draw(&app, now, 50, 20));
+    assert!(narrow.iter().all(|l| text_width(l) == 50), "{narrow:?}");
+    // It stays a while, then the usual line is back.
+    let later = now + Duration::from_secs(9);
+    assert!(lines(&draw(&app, later, 140, 20))[8].starts_with("│ Playing from: Anima"));
+}
+
+#[test]
+fn no_problems_means_no_message() {
+    let now = Instant::now();
+    let mut app = with_config("[format]\nstatus_idle = \"-\"\n", now);
+    app.resize(20);
+    assert!(lines(&draw(&app, now, 140, 20))[8].starts_with("│ Playing from: Anima"));
+}

@@ -495,6 +495,6 @@ pub fn run(inv: &Invocation, be: &mut dyn Backend, env: &Env, out: &mut dyn Writ
         Command::Pick { indices, action } => act(be, env, out, Request::Pick { indices: indices.clone(), action: *action }, *action == PickAction::Play, q),
         Command::Watch => watch(be, env, out),
         Command::Show => call(be, Request::Show).map(|_| ()),
-        Command::Start | Command::Quit | Command::Restart | Command::Help | Command::Version | Command::Screen | Command::CoverInfo => Ok(()), // handled by main
+        Command::Start | Command::Quit | Command::Restart | Command::Help | Command::Version | Command::Screen | Command::CoverInfo | Command::Config(_) => Ok(()), // handled by main
     }
 }

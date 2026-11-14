@@ -5,11 +5,14 @@ mod args;
 mod boot;
 mod cache;
 mod cli;
+mod config;
 mod fmt;
 mod last;
 mod list;
 mod run;
 mod tui;
+#[cfg(test)]
+mod config_tests;
 #[cfg(test)]
 mod tests;
 
@@ -83,6 +86,9 @@ fn execute(inv: &Invocation) -> Result<(), Fail> {
         println!("{}", tui::cover_info()?);
         return Ok(());
     }
+    if let Command::Config(show) = inv.cmd {
+        return show_config(show);
+    }
     let env = Env { term: Term::detect(), timing: Timing::default(), stop: &STOP, last: Some(uzumaki_ctl::last_path()) };
     // Not locked for the whole run: the screens' worker threads may write too (a held lock
     // made the cover's terminal query wait until uzu quit).
@@ -102,6 +108,32 @@ fn execute(inv: &Invocation) -> Result<(), Fail> {
     };
     let _ = out.flush();
     result
+}
+
+/// `uzu config`: no app needed. With problems in the file it exits 1, so it can be used as a check.
+fn show_config(show: cli::ConfigShow) -> Result<(), Fail> {
+    let Some(path) = config::default_path() else {
+        return Err(Fail::err("can't tell where the config file is (no HOME)"));
+    };
+    match show {
+        cli::ConfigShow::Path => println!("{}", path.display()),
+        cli::ConfigShow::Default => print!("{}", config::DEFAULT_FILE),
+        cli::ConfigShow::Check => {
+            let cfg = config::Config::load_from(&path);
+            println!("{}", path.display());
+            if !cfg.found {
+                println!("No file there, so uzu uses its built-in settings. 'uzu config --default' prints a commented file to start from.");
+            } else if cfg.warnings.is_empty() {
+                println!("No problems.");
+            } else {
+                for w in &cfg.warnings {
+                    println!("  {w}");
+                }
+                return Err(Fail { code: 1, msg: String::new() });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn dispatch(inv: &Invocation, mut client: Client, env: &Env, out: &mut dyn Write) -> Result<(), Fail> {

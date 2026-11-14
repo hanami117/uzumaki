@@ -70,6 +70,7 @@ pub fn run(client: Client, env: &Env) -> Result<(), Fail> {
 fn event_loop(terminal: &mut DefaultTerminal, be: &mut dyn Backend, env: &Env) -> io::Result<()> {
     let mut app = App::new(Instant::now(), Box::new(Threaded::new()));
     app.last = env.last.clone();
+    app.set_config(crate::config::Config::load(), Instant::now());
     app.cover = cover::Cover::new(cover::Mode::from_env());
     app.layout = showcase::Layout::from_env();
     if let Some(path) = sort::state_path() {

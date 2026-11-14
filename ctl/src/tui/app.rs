@@ -16,6 +16,7 @@ use super::search::Search;
 use super::showcase::{self, Layout};
 use super::sort::{self, Sort, View};
 use super::table::{Row, RowKind};
+use crate::config::Config;
 use crate::fmt::repeat_name;
 use crate::last::{self, Last};
 use crate::run::Backend;
@@ -26,6 +27,8 @@ const STATUS_EVERY: Duration = Duration::from_millis(500);
 const QUEUE_EVERY: Duration = Duration::from_secs(3);
 /// How long a message replaces the status line.
 const MESSAGE_FOR: Duration = Duration::from_secs(2);
+/// How long the config file's first problem shows at the start.
+const CONFIG_NOTICE_FOR: Duration = Duration::from_secs(8);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// Below this terminal height the player shrinks to two rows.
 pub const COMPACT_BELOW: u16 = 18;
@@ -142,7 +145,9 @@ pub struct App {
     /// The app can't be reached; keep retrying.
     pub away: bool,
     pub quit: bool,
-    message: Option<(String, Instant)>,
+    message: Option<(String, Instant, Duration)>,
+    /// What `uzu.toml` said (the defaults when there is no file).
+    pub config: Config,
     last_status: Option<Instant>,
     last_queue: Option<Instant>,
     queue_dirty: bool,
@@ -191,6 +196,7 @@ impl App {
             away: false,
             quit: false,
             message: None,
+            config: Config::default(),
             last_status: None,
             last_queue: None,
             queue_dirty: true,
@@ -448,11 +454,20 @@ impl App {
     }
 
     pub fn message(&self, now: Instant) -> Option<&str> {
-        self.message.as_ref().filter(|(_, at)| now.saturating_duration_since(*at) < MESSAGE_FOR).map(|(m, _)| m.as_str())
+        self.message.as_ref().filter(|(_, at, hold)| now.saturating_duration_since(*at) < *hold).map(|(m, _, _)| m.as_str())
     }
 
     pub fn set_message(&mut self, text: impl Into<String>, now: Instant) {
-        self.message = Some((text.into(), now));
+        self.message = Some((text.into(), now, MESSAGE_FOR));
+    }
+
+    /// Takes up what `uzu.toml` said. Its problems show in the status line for a while (and
+    /// `uzu config` lists them all), so a typo never leaves the screen broken or silent.
+    pub fn set_config(&mut self, config: Config, now: Instant) {
+        if let Some(text) = config.status_line() {
+            self.message = Some((text, now, CONFIG_NOTICE_FOR));
+        }
+        self.config = config;
     }
 
     // ------------------------------------------------------------------------------ selection
