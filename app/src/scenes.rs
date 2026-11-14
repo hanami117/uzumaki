@@ -1049,14 +1049,15 @@ fn update_scene(s: &mut State, install: crate::update::Install) {
 
 fn update_scene_with(s: &mut State, install: crate::update::Install, minimum: Option<&str>) {
     home(s);
+    // A made-up release far ahead of any real one, so the notice stays "newer" after every bump.
     let latest = crate::update::Latest {
-        version: "0.2.0".into(),
+        version: "99.1.0".into(),
         build: 1,
         date: "2026-12-01".into(),
-        notes_url: "https://github.com/hanami117/uzumaki/releases/tag/v0.2.0".into(),
+        notes_url: "https://github.com/hanami117/uzumaki/releases/tag/v99.1.0".into(),
         downloads: crate::update::Downloads {
-            macos_dmg: "https://github.com/hanami117/uzumaki/releases/download/v0.2.0/Uzumaki-0.2.0.dmg".into(),
-            linux_tarball: "https://github.com/hanami117/uzumaki/releases/download/v0.2.0/uzumaki-0.2.0.tar.gz".into(),
+            macos_dmg: "https://github.com/hanami117/uzumaki/releases/download/v99.1.0/Uzumaki-99.1.0.dmg".into(),
+            linux_tarball: "https://github.com/hanami117/uzumaki/releases/download/v99.1.0/uzumaki-99.1.0.tar.gz".into(),
             ..Default::default()
         },
         minimum_supported: minimum.map(str::to_string),
