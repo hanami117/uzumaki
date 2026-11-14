@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["cli", "app", "fx", "ctl", "fx-web"]
+members = ["cli", "app", "fx", "ctl", "fx-web", "airplay"]
 
 # The one version and license of every crate (and of the app: About, `--version`, Info.plist, the DMG
 # name). bridge/package.json carries the same version; a test checks they match.

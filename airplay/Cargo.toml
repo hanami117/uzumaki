@@ -1,0 +1,13 @@
+[package]
+name = "uzumaki-airplay"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+description = "Uzumaki AirPlay spike: sends the bridge's captured PCM to one AirPlay speaker through cliairplay"
+
+[dependencies]
+# Browse only (_airplay._tcp, _raop._tcp); MIT/Apache-2.0.
+mdns-sd = "0.13"
+# mkfifo, open(O_NONBLOCK), fcntl for cliairplay's command pipe.
+libc = "0.2"

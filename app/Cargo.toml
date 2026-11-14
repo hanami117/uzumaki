@@ -18,6 +18,8 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 uzumaki-fx = { path = "../fx" }
 # The `uzu` control protocol and socket (the app answers, `uzu` asks).
 uzumaki-ctl = { path = "../ctl" }
+# AirPlay spike (UZUMAKI_AIRPLAY_SPIKE=1 only): PCM socket for the bridge, cliairplay for one speaker.
+uzumaki-airplay = { path = "../airplay" }
 roxmltree = "0.20"
 # Local files: in-process playback and tags. rodio drives cpal (ALSA → PipeWire via
 # pipewire-alsa) and decodes with symphonia; lofty reads tags and embedded covers.

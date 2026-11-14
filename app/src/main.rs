@@ -342,4 +342,5 @@ fn main() {
     // The playback to resume, before Electron goes (the atexit handler writes it too).
     resume::flush();
     engine.shutdown();
+    uzumaki_airplay::shutdown(); // AirPlay spike: stop the speaker and its helper (no-op otherwise)
 }

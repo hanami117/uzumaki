@@ -8,3 +8,5 @@ description = "Test client for the Uzumaki Electron playback bridge"
 
 [dependencies]
 serde_json = "1"
+# AirPlay spike (UZUMAKI_AIRPLAY_SPIKE=1 only).
+uzumaki-airplay = { path = "../airplay" }

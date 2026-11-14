@@ -263,6 +263,8 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
         if running_from_appimage() {
             cmd.arg("--no-sandbox");
         }
+        // AirPlay spike: the PCM socket's path (nothing unless UZUMAKI_AIRPLAY_SPIKE=1).
+        cmd.envs(uzumaki_airplay::bridge_env());
         Self::spawn_command(cmd, log_path, sink)
     }
 

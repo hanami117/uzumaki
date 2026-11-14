@@ -255,3 +255,18 @@ media receiver plays the URL (Cider's way, but with Google's default receiver, s
 26. Roon AirPlay 2 / HomePod fallback: Roon community release notes 2.0.37
 27. Airfoil and AirPlay 2: https://weblog.rogueamoeba.com/2018/06/25/current-notes-on-airfoil-airplay-2/
 28. Spotify community, AirPlay on Mac: https://community.spotify.com/t5/Desktop-Mac/Airplay-devices-not-showing-up-in-mac-app/td-p/5496807
+
+## Spike results (2026-11-14, branch `airplay-spike`)
+
+Stages 1-2 are built behind `UZUMAKI_AIRPLAY_SPIKE=1`; how to run them: `scripts/airplay-spike/README.md`.
+
+- **Capture:** the AudioWorklet graph runs in castLabs Electron on macOS (the page allows a blob:
+  worklet module). Signed-out previews give zeros because they are cross-origin files without
+  `crossOrigin` (CORS taint, as section 3 predicts). With the test switch `UZUMAKI_AIRPLAY_PREVIEW_CORS=1`
+  they measure about -16 dBFS while the local output is muted. Full songs (same-origin `blob:`, Widevine)
+  need a signed-in run: that is the first thing the live test shows.
+- **Element volume:** MusicKit's volume scales the tapped audio (section 6's question), so casting
+  loudness = app volume × speaker volume.
+- **Transport and sender:** Unix socket → Rust (`airplay/` crate, `mdns-sd` discovery) → `cliairplay`
+  v0.5.10 (built from source on macOS arm64). Checked end to end with a stand-in helper and with the real
+  helper against a closed port (error lines, retries). No audio was sent to any AirPlay device by agents.
