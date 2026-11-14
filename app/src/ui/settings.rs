@@ -266,7 +266,7 @@ struct Rx<'a> {
 /// cover effect shows only with the Cover background; App icon only on Linux and the Mac).
 fn available(s: &State, row: Row) -> bool {
     match row {
-        Row::AppleMusic | Row::Quality | Row::Lyrics => !s.local_only(),
+        Row::AppleMusic | Row::Quality | Row::Lyrics | Row::AutoPlay => !s.local_only(),
         Row::NpCoverEffect => s.settings.appearance.np == NpBg::Cover,
         Row::AppIcon => cfg!(any(target_os = "linux", target_os = "macos")),
         Row::Binding(i) => i < super::keys::BINDINGS.len(),
@@ -318,6 +318,12 @@ fn row_el(r: &Rx, id: Row) -> El {
                 ),
             )
         }
+        Row::AutoPlay => setting(
+            narrow,
+            "AutoPlay",
+            Some("When the queue ends, similar music keeps playing. Also the \u{221e} button in Up Next. Not with Repeat or on radio stations.".to_string()),
+            switch("settings/autoplay", "AutoPlay", s.settings.autoplay, true, |s, on| s.set_autoplay(on)),
+        ),
         Row::Resume => setting(
             narrow,
             "Resume where you left off",
@@ -816,7 +822,7 @@ fn account(r: &Rx) -> Vec<El> {
 }
 
 fn playback(r: &Rx) -> Vec<El> {
-    rows(r, &[Row::Quality, Row::Lyrics, Row::Resume])
+    rows(r, &[Row::Quality, Row::Lyrics, Row::AutoPlay, Row::Resume])
 }
 
 fn appearance(r: &Rx) -> Vec<El> {

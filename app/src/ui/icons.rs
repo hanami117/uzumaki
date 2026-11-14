@@ -82,6 +82,8 @@ pub fn volume(v: f64) -> &'static Icon {
     }
 }
 stroke_icon!(REPEAT, "cad-repeat", "M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3");
+// AutoPlay (Apple's "infinity" symbol): two loops meeting in the middle.
+stroke_icon!(INFINITY, "cad-infinity", "M12 12c-2-2.6-3.8-4.6-6.2-4.6A4.3 4.3 0 0 0 1.5 12a4.3 4.3 0 0 0 4.3 4.6C8.2 16.6 10 14.6 12 12zm0 0c2 2.6 3.8 4.6 6.2 4.6a4.3 4.3 0 0 0 4.3-4.6 4.3 4.3 0 0 0-4.3-4.6C15.8 7.4 14 9.4 12 12z");
 stroke_icon!(LYRICS, "cad-lyrics", "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 8h8M8 12h5");
 stroke_icon!(QUEUE, "cad-queue", "M3 6h13M3 12h13M3 18h9M19 14v6M16 17h6");
 stroke_icon!(CHEVRON_DOWN, "cad-chevron-down", "M6 9l6 6 6-6");

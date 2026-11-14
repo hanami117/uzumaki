@@ -189,6 +189,14 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
         }
         MenuContext::NowPlaying => {}
     }
+    // Apple's "Create Station": a station seeded by this song (one Apple catalog song).
+    if let Some(song) = one.as_ref().filter(|x| !s.local_only() && x.catalog_ref().is_some()) {
+        let song = song.clone();
+        p.add(closes(item("menu-station".into(), "Create Station", false).on_press(move |s: &mut State| {
+            s.ui.menu = None;
+            s.create_song_station(&song);
+        })));
+    }
     p.sep();
 
     // The library.

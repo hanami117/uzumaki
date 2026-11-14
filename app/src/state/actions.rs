@@ -324,6 +324,7 @@ impl State {
     /// file plays there's nothing to tell: the next Apple song starts a fresh bridge queue.
     pub(super) fn sync_upcoming(&mut self) {
         self.queue.plan_lap(self.playback.repeat);
+        self.autoplay_check();
         self.resume_changed(false);
         if self.playback.local {
             return;

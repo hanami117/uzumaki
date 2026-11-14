@@ -17,6 +17,8 @@ pub enum Row {
     Lyrics,
     /// Resume where you left off (Settings → Playback; also in local only mode).
     Resume,
+    /// AutoPlay (Settings → Playback; Apple Music only), the ∞ in Up Next.
+    AutoPlay,
     Theme,
     AppIcon,
     Player,
@@ -60,6 +62,7 @@ impl Row {
             Row::Quality => "quality",
             Row::Lyrics => "lyrics",
             Row::Resume => "resume",
+            Row::AutoPlay => "autoplay",
             Row::Theme => "theme",
             Row::AppIcon => "app-icon",
             Row::Player => "player",
@@ -157,6 +160,7 @@ const SPECS: &[Spec] = &[
     spec(Row::AppleMusic, Tab::Account, "Apple Music", "Signed in, store.", "sign in sign out log in login logout apple id storefront country region store"),
     spec(Row::Quality, Tab::Playback, "Streaming quality", "Data saver uses about a quarter of the data. Lossless and Dolby Atmos aren't available in Apple Music on the web.", "bitrate kbps audio sound 256 64 mobile"),
     spec(Row::Lyrics, Tab::Playback, "Lyrics highlight", "Word by word when Apple has word timing, otherwise whole lines.", "karaoke words lines sync"),
+    spec(Row::AutoPlay, Tab::Playback, "AutoPlay", "When the queue ends, similar music keeps playing. Also the \u{221e} button in Up Next.", "auto play infinite endless continue similar songs radio station suggestions queue end infinity"),
     spec(Row::Resume, Tab::Playback, "Resume where you left off", "At start, the last song comes back paused where you stopped, with its queue. Nothing plays until you press Play.", "restore continue last song position queue startup launch remember session"),
     spec(Row::Theme, Tab::Appearance, "Theme", "System follows your computer's light or dark appearance.", "dark mode light mode colour color appearance night"),
     only(On::Linux, Row::AppIcon, Tab::Appearance, "App icon", "In the dock, taskbar and menu. The tray icon changes at the next start.", "icon logo dark light coral launcher"),

@@ -467,6 +467,15 @@ pub fn scene_menu_collection(s: &mut State, c: &crate::models::Collection, at: [
     ctx_menu::open_collection(s, c, at);
 }
 
+pub fn scene_menu_artist(s: &mut State, a: &crate::models::Artist, at: [f32; 2]) {
+    ctx_menu::open_artist(s, a, at);
+}
+
+/// A song row's menu (a page's list), as a right-click on one row opens it.
+pub fn scene_song_menu_list(s: &mut State, song: crate::models::Song, at: [f32; 2]) {
+    menu::open_song(s, song, menu::MenuContext::List, at);
+}
+
 pub fn scene_submenu(s: &mut State) {
     if let Some(m) = &mut s.ui.menu {
         m.sub = true;
