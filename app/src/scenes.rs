@@ -50,6 +50,11 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("now-playing", now_playing),
     ("now-playing-nolyrics", now_playing_nolyrics),
     ("now-playing-words", crate::ui::scene_np_words),
+    // Scene only: forces the AirPlay button on (picker closed), so Linux snaps show the macOS row.
+    ("now-playing-words-airplay", |s| {
+        crate::ui::scene_np_words(s);
+        crate::ui::scene_airplay(s, "closed");
+    }),
     ("now-playing-lines-only", crate::ui::scene_np_lines_only),
     ("now-playing-interlude", crate::ui::scene_np_interlude),
     ("now-playing-intro", crate::ui::scene_np_intro),
