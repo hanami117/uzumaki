@@ -125,6 +125,11 @@ pub fn want_page(f: &PageFacts) -> Want {
     }
 }
 
+/// The opacity of a Mac clip's layer before its first frame is drawn: Rune paints (and so pulls
+/// frames for) anything above 0.001; at 0.4 % nothing of it shows over the still.
+#[cfg(target_os = "macos")]
+const WARM_OPACITY: f32 = 0.004;
+
 /// How a clip is shown.
 enum Backend {
     #[cfg(target_os = "macos")]
@@ -162,12 +167,18 @@ fn force_frames() -> bool {
 }
 
 impl Playback {
-    /// Starts showing `clip`, playing. `report` hears the first frame and failures.
-    pub fn start(album: String, generation: u64, clip: &Clip, report: Report) -> Self {
+    /// Starts showing `clip`, playing. `report` hears the first frame and failures. `wait`
+    /// (a window): the Mac's player counts as shown only once a real frame of it is drawn, and
+    /// plays from then on (see `native`); headless runs and tests show it at once.
+    pub fn start(album: String, generation: u64, clip: &Clip, report: Report, wait: bool) -> Self {
         #[cfg(target_os = "macos")]
         if !force_frames() {
-            return Self { album, generation, backend: Backend::Native(native::Native::start(clip)), paused: false, shown: true };
+            let on_frame = Box::new(move || report(generation, Event::FirstFrame));
+            let n = native::Native::start(clip, wait, on_frame);
+            return Self { album, generation, backend: Backend::Native(n), paused: false, shown: !wait };
         }
+        #[cfg(not(target_os = "macos"))]
+        let _ = wait;
         let backend = Backend::Frames(frames::Frames::start(clip, generation, report));
         Self { album, generation, backend, paused: false, shown: false }
     }
@@ -184,8 +195,12 @@ impl Playback {
         if self.paused != paused {
             self.paused = paused;
             match &self.backend {
+                // Until its first frame is drawn the Mac's clip holds on its poster; it starts
+                // in `first_frame`.
                 #[cfg(target_os = "macos")]
-                Backend::Native(n) => n.set_paused(paused),
+                Backend::Native(n) if self.shown => n.set_paused(paused),
+                #[cfg(target_os = "macos")]
+                Backend::Native(_) => {}
                 Backend::Frames(f) => f.set_paused(paused),
             }
         }
@@ -201,8 +216,36 @@ impl Playback {
         self.shown
     }
 
+    /// The first frame is in: the layer fades in over the still, and a Mac clip that waited on
+    /// its poster plays (unless held). True when it changed.
     pub fn first_frame(&mut self) -> bool {
-        !std::mem::replace(&mut self.shown, true)
+        if std::mem::replace(&mut self.shown, true) {
+            return false;
+        }
+        #[cfg(target_os = "macos")]
+        if let Backend::Native(n) = &self.backend {
+            n.set_paused(self.paused);
+        }
+        true
+    }
+
+    /// A Mac clip waiting for its first drawn frame: the polls keep a timer frame coming, so
+    /// `catch_up` notices `native::PATIENCE` running out even on an idle page.
+    pub fn warming(&self) -> bool {
+        self.warm_layer().is_some()
+    }
+
+    /// Native only, before its first frame is drawn: the layer that makes Rune pull and draw
+    /// that frame, nearly transparent over the still (`native`). None once shown, and for the
+    /// ffmpeg path (its worker decodes without being drawn).
+    pub fn warm_layer(&self) -> Option<rune::El> {
+        match &self.backend {
+            #[cfg(target_os = "macos")]
+            Backend::Native(n) if !self.shown => Some(
+                rune::el().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).opacity(WARM_OPACITY).video(n.player(), rune::SurfaceFit::Fill),
+            ),
+            _ => None,
+        }
     }
 
     /// The first frame is in but not yet marked (its report may not have landed, or can't:
@@ -210,7 +253,7 @@ impl Playback {
     pub fn catch_up(&mut self) -> bool {
         let ready = match &self.backend {
             #[cfg(target_os = "macos")]
-            Backend::Native(_) => true,
+            Backend::Native(n) => n.has_frame(),
             Backend::Frames(f) => f.has_frame(),
         };
         ready && self.first_frame()

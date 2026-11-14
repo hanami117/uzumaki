@@ -24,6 +24,10 @@ pub struct MotionState {
     /// Master playlist URL → the clip on disk.
     pub clips: HashMap<String, Load<Clip>>,
     pub playback: Option<Playback>,
+    /// Now Playing's clip while its overlay slides away (`park`): held on its frame, so the
+    /// leaving overlay (which Rune keeps drawing as it was) shows a live video that moves with
+    /// it; dropped once the slide is over, or taken back if Now Playing reopens meanwhile.
+    closing: Option<(Playback, std::time::Instant)>,
     /// The clip in the cover of the album page being viewed.
     pub page: Option<Playback>,
     /// Library album id (`l.…`) → its catalog album, for its page's clip; pending and
@@ -36,6 +40,9 @@ pub struct MotionState {
     song_albums: HashMap<String, Load<Option<String>>>,
     /// Albums whose clip failed to play this session (no ffmpeg, a decode error).
     failed: HashMap<String, String>,
+    /// Lookups that failed (MusicKit not ready, offline, a timeout): asked again from this time
+    /// on, instead of keeping the album still for the whole session. Keys `a:`/`p:`/`s:` + id.
+    retry_at: HashMap<String, std::time::Instant>,
     generation: u64,
     /// The OS's Reduce Motion, as the view last saw it.
     pub reduced_motion: bool,
@@ -44,11 +51,64 @@ pub struct MotionState {
     downloads: Arc<motion::clips::Clips>,
 }
 
+/// How long Now Playing's clip stays parked after closing: longer than the overlay's slide out.
+pub const CLOSING: std::time::Duration = std::time::Duration::from_millis(900);
+
+/// How long a failed lookup waits before it is asked again.
+pub const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
 impl MotionState {
-    /// Stops the clip at once (Now Playing closing, the window hiding): the player and its
-    /// decoder go; the still cover shows. True when something stopped.
+    /// Whether the lookup `key` may be asked now (none failed lately).
+    fn may_ask(&self, key: &str) -> bool {
+        self.retry_at.get(key).is_none_or(|t| crate::clock::now() >= *t)
+    }
+
+    /// A lookup failed: forget it (so it is asked again) and wait `RETRY_AFTER` first.
+    fn failed_lookup(&mut self, key: String, error: &str) {
+        eprintln!("uzumaki: animated artwork: {key} failed ({error}), asking again in {} s", RETRY_AFTER.as_secs());
+        self.retry_at.insert(key, crate::clock::now() + RETRY_AFTER);
+    }
+
+    /// Time until the next failed lookup may be asked again, for a timer frame.
+    pub fn next_retry(&self) -> Option<std::time::Duration> {
+        let now = crate::clock::now();
+        self.retry_at.values().filter(|t| **t > now).map(|t| *t - now).min()
+    }
+
+    /// Stops the clip at once (the setting, the window hiding): the player and its decoder
+    /// go; the still cover shows. True when something stopped.
     pub fn stop(&mut self) -> bool {
-        self.playback.take().is_some()
+        let parked = self.closing.take().is_some();
+        self.playback.take().is_some() || parked
+    }
+
+    /// Now Playing closes: its clip holds its frame (no decoding) through the overlay's slide
+    /// out, then goes (`expire_closing`). Stopping it at once left the leaving overlay drawing
+    /// a video whose player was gone: on a quick Cmd+Shift+F its area was cut out mid-slide.
+    pub fn park(&mut self) {
+        if let Some(mut p) = self.playback.take() {
+            p.set_paused(true);
+            self.closing = Some((p, crate::clock::now() + CLOSING));
+        }
+    }
+
+    /// Drops the parked clip once the slide is over. True when it went.
+    fn expire_closing(&mut self) -> bool {
+        if self.closing.as_ref().is_some_and(|(_, until)| crate::clock::now() >= *until) {
+            self.closing = None;
+            return true;
+        }
+        false
+    }
+
+    /// Time left of the parked clip, for a timer frame that drops it.
+    pub fn closing_left(&self) -> Option<std::time::Duration> {
+        self.closing.as_ref().map(|(_, until)| until.saturating_duration_since(crate::clock::now()))
+    }
+
+    #[cfg(test)]
+    pub fn parked(&self) -> bool {
+        self.closing.is_some()
     }
 
     /// Stops the album page's clip (leaving the page, the window hiding). True when one stopped.
@@ -61,6 +121,18 @@ impl MotionState {
     pub fn page_layer_for(&self, album: Option<&str>) -> Option<rune::El> {
         let p = self.page.as_ref()?;
         (Some(p.album.as_str()) == album && p.shown()).then(|| p.layer())
+    }
+
+    /// The album page's clip before its first frame is drawn (`Playback::warm_layer`).
+    pub fn page_warm_layer_for(&self, album: Option<&str>) -> Option<rune::El> {
+        let p = self.page.as_ref()?;
+        if Some(p.album.as_str()) == album { p.warm_layer() } else { None }
+    }
+
+    /// Now Playing's clip before its first frame is drawn (`Playback::warm_layer`).
+    pub fn warm_layer_for(&self, album: Option<&str>) -> Option<rune::El> {
+        let p = self.playback.as_ref()?;
+        if Some(p.album.as_str()) == album { p.warm_layer() } else { None }
     }
 
     /// Changes when the page's layer comes or goes, for the page's `virtual_rows_version`.
@@ -122,6 +194,9 @@ impl State {
         if song.is_local() || album_of(song).is_some() || self.motion.song_albums.contains_key(&song.id) {
             return;
         }
+        if !self.motion_can_ask(&format!("s:{}", song.id)) {
+            return;
+        }
         // MusicKit's nowPlaying item may omit metadata already present in a loaded list.
         let mapped = self.library_songs.items.iter()
             .find(|other| song.same_track(other) && other.catalog_ref().is_some())
@@ -151,11 +226,23 @@ impl State {
     }
 
     pub(super) fn motion_song_album_known(&mut self, id: String, result: Result<Option<String>, String>) {
-        self.motion.song_albums.insert(id, match result {
-            Ok(album) => Load::Ready(album),
-            Err(e) => Load::Failed(e),
-        });
+        match result {
+            Ok(album) => {
+                self.motion.song_albums.insert(id, Load::Ready(album));
+            }
+            Err(e) => {
+                self.motion.song_albums.remove(&id);
+                self.motion.failed_lookup(format!("s:{id}"), &e);
+            }
+        }
         self.prefetch_motion();
+    }
+
+    /// Apple can be asked about `key`: the bridge is up (a request before MusicKit's page is
+    /// ready fails, and one before the bridge exists is dropped without a reply) and the
+    /// lookup hasn't failed lately.
+    fn motion_can_ask(&self, key: &str) -> bool {
+        self.session.bridge_up && self.motion.may_ask(key)
     }
 
     fn motion_facts(&self) -> Facts {
@@ -176,10 +263,15 @@ impl State {
         self.prefetch_motion();
         let want = motion::want(&self.motion_facts());
         let album = self.playback.song.as_ref().and_then(|song| self.motion_album(song)).map(String::from);
+        let expired = self.motion.expire_closing();
         let (Some(album), false) = (album, want == Want::Off) else {
-            return self.motion.stop();
+            return self.motion.playback.take().is_some() || expired;
         };
-        self.drive(Slot::NowPlaying, album, want)
+        // Reopened while the old overlay still slides away: the same clip, no new fade.
+        if self.motion.playback.is_none() && self.motion.closing.as_ref().is_some_and(|(p, _)| p.album == album) {
+            self.motion.playback = self.motion.closing.take().map(|(p, _)| p);
+        }
+        self.drive(Slot::NowPlaying, album, want) || expired
     }
 
     /// One step of `slot`'s clip towards `want` (not Off) for `album`: stop another album's,
@@ -207,7 +299,8 @@ impl State {
             }
             // A clip starts only to play; a paused one keeps its frame, but none is started.
             None if !paused => {
-                let p = Playback::start(album, next, &clip, report(handle));
+                let wait = handle.is_some() && !rune::is_headless();
+                let p = Playback::start(album, next, &clip, report(handle), wait);
                 changed |= p.shown();
                 *self.motion.slot(slot) = Some(p);
                 self.motion.generation = next;
@@ -232,6 +325,11 @@ impl State {
                 _ => false,
             },
         }
+    }
+
+    /// An album page is shown (its cover may want a clip).
+    pub fn page_facts_album_page(&self) -> bool {
+        matches!(&self.route, Route::Collection { kind: CollectionKind::Album, .. })
     }
 
     /// Before each frame, for the album page being viewed: its cover's clip (asked about, then
@@ -281,6 +379,9 @@ impl State {
             self.motion.page_albums.insert(id.to_string(), Load::Ready(Some(album)));
             return;
         }
+        if !self.motion_can_ask(&format!("p:{id}")) {
+            return;
+        }
         let path = match c.tracks.iter().find_map(Song::catalog_ref) {
             Some(song) => format!("/v1/catalog/{{{{storefrontId}}}}/songs/{song}"),
             None => format!("/v1/me/library/albums/{id}/catalog"),
@@ -311,10 +412,15 @@ impl State {
     /// the next step).
     pub(super) fn motion_page_album_known(&mut self, id: String, result: Result<Option<String>, String>) -> bool {
         let shown = matches!(&self.route, Route::Collection { id: r, .. } if *r == id);
-        self.motion.page_albums.insert(id, match result {
-            Ok(album) => Load::Ready(album),
-            Err(e) => Load::Failed(e),
-        });
+        match result {
+            Ok(album) => {
+                self.motion.page_albums.insert(id, Load::Ready(album));
+            }
+            Err(e) => {
+                self.motion.page_albums.remove(&id);
+                self.motion.failed_lookup(format!("p:{id}"), &e);
+            }
+        }
         shown
     }
 
@@ -348,7 +454,9 @@ impl State {
             Some(Load::Ready(Some(art))) => art.video.clone(),
             Some(_) => return None,
             None => {
-                self.ask_motion(album);
+                if self.motion_can_ask(&format!("a:{album}")) {
+                    self.ask_motion(album);
+                }
                 return None;
             }
         };
@@ -356,7 +464,9 @@ impl State {
             Some(Load::Ready(clip)) => Some(clip.clone()),
             Some(_) => None,
             None => {
-                self.download_clip(&video);
+                if self.motion.may_ask(&format!("c:{video}")) {
+                    self.download_clip(&video);
+                }
                 None
             }
         }
@@ -375,20 +485,30 @@ impl State {
         let key = master.to_string();
         self.motion.downloads.request(master.to_string(), move |result| {
             h.update(move |s: &mut State, _| {
-                s.motion.clips.insert(key, match result {
-                    Ok(c) => Load::Ready(c),
-                    Err(e) => Load::Failed(e),
-                });
+                match result {
+                    Ok(c) => {
+                        s.motion.clips.insert(key, Load::Ready(c));
+                    }
+                    Err(e) => {
+                        s.motion.clips.remove(&key);
+                        s.motion.failed_lookup(format!("c:{key}"), &e);
+                    }
+                }
             });
         });
     }
 
     /// An album's motion art arrived (its own request, or an album page asked with it).
     pub(super) fn motion_known(&mut self, album: String, result: Result<Option<MotionArt>, String>) {
-        self.motion.albums.insert(album, match result {
-            Ok(m) => Load::Ready(m),
-            Err(e) => Load::Failed(e),
-        });
+        match result {
+            Ok(m) => {
+                self.motion.albums.insert(album, Load::Ready(m));
+            }
+            Err(e) => {
+                self.motion.albums.remove(&album);
+                self.motion.failed_lookup(format!("a:{album}"), &e);
+            }
+        }
         // The download starts now, not at the next frame (none may come while Now Playing is closed).
         self.prefetch_motion();
     }
@@ -397,7 +517,13 @@ impl State {
     pub fn motion_event(&mut self, generation: u64, event: Event) -> bool {
         let slot = [Slot::NowPlaying, Slot::Page].into_iter()
             .find(|&slot| self.motion.slot(slot).as_ref().is_some_and(|p| p.generation == generation));
-        let Some(slot) = slot else { return false };
+        let Some(slot) = slot else {
+            // A parked clip failing: just let it go.
+            if matches!(event, Event::Failed(_)) && self.motion.closing.as_ref().is_some_and(|(p, _)| p.generation == generation) {
+                self.motion.closing = None;
+            }
+            return false;
+        };
         let p = self.motion.slot(slot).as_mut().expect("found above");
         match event {
             Event::FirstFrame => p.first_frame(),
@@ -513,6 +639,7 @@ mod tests {
         s.playback.song = Some(song("1", Some("594061854")));
         s.playback.state = PlayState::Playing;
         s.ui.now_playing = true;
+        s.session.bridge_up = true;
         s
     }
 
@@ -634,7 +761,42 @@ mod tests {
         assert!(!s.motion.playback.as_ref().unwrap().paused());
 
         crate::ui::close_now_playing(&mut s);
-        assert!(s.motion.playback.is_none(), "closing Now Playing stops it at once");
+        assert!(s.motion.playback.is_none(), "closing Now Playing takes it out of the slot at once");
+        assert!(s.motion.parked(), "held on its frame while the overlay slides away");
+    }
+
+    #[test]
+    fn a_closed_now_playing_clip_is_dropped_after_the_slide_or_taken_back() {
+        crate::clock::freeze();
+        let mut s = ready();
+        s.poll_motion();
+        let g = s.motion.playback.as_ref().unwrap().generation;
+        crate::ui::close_now_playing(&mut s);
+        s.poll_motion();
+        assert!(s.motion.parked(), "kept through the slide");
+        crate::ui::open_now_playing(&mut s);
+        s.poll_motion();
+        assert_eq!(s.motion.playback.as_ref().unwrap().generation, g, "reopened: the same clip");
+        assert!(!s.motion.parked());
+        assert!(!s.motion.playback.as_ref().unwrap().paused(), "and it plays on");
+
+        crate::ui::close_now_playing(&mut s);
+        crate::clock::advance(CLOSING);
+        assert!(s.poll_motion(), "the view changes");
+        assert!(!s.motion.parked() && s.motion.playback.is_none(), "gone after the slide");
+
+        // Hiding to the tray: gone at once.
+        let mut s = ready();
+        s.poll_motion();
+        s.background = true;
+        assert!(s.hide_on_close());
+        assert!(!s.motion.parked() && s.motion.playback.is_none());
+        // The setting too.
+        let mut s = ready();
+        s.poll_motion();
+        crate::ui::close_now_playing(&mut s);
+        s.set_animated_artwork(false);
+        assert!(!s.motion.parked());
     }
 
     #[test]
@@ -827,7 +989,7 @@ mod tests {
     }
 
     #[test]
-    fn unmatched_library_lookup_and_negative_or_failed_results_are_cached() {
+    fn unmatched_library_lookup_and_negative_or_failed_results_are_not_asked_at_once() {
         for result in [Ok(None), Err("offline".into())] {
             let mut s = playing_closed();
             s.playback.song = Some(song("i.library", None));
@@ -865,6 +1027,7 @@ mod tests {
         let mut s = State::offline();
         s.collections.insert(id.into(), Load::Ready(collection(id, Vec::new())));
         s.route = Route::Collection { kind: CollectionKind::Album, id: id.into() };
+        s.session.bridge_up = true;
         s
     }
 
@@ -1047,6 +1210,72 @@ mod tests {
         let mut s = on_page("local:album:x");
         s.poll_page_motion();
         assert!(s.sent.borrow().is_empty());
+    }
+
+    /// The CVLT regression (2026-11-14): the app restored an album page at launch and asked for
+    /// its motion art before MusicKit's page was ready. The bridge answered "MusicKit not ready
+    /// yet" (or, with no bridge yet, nothing), the album was then marked failed or loading for
+    /// the whole session, and neither the page nor Now Playing ever animated it.
+    #[test]
+    fn nothing_is_asked_before_the_bridge_is_up() {
+        let mut s = on_page("1712657863");
+        s.session.bridge_up = false;
+        s.poll_page_motion();
+        s.playback.song = Some(song("1712658168", Some("1712657863")));
+        s.playback.state = PlayState::Playing;
+        s.poll_motion();
+        assert!(s.sent.borrow().is_empty(), "asked before the bridge's ready: {:?}", s.sent.borrow());
+        assert!(s.motion.albums.is_empty(), "nothing marked: it is asked once the bridge is up");
+        s.session.bridge_up = true;
+        s.poll_page_motion();
+        s.poll_motion();
+        assert_eq!(albums_asked(&s), ["1712657863"], "asked once, for both slots");
+    }
+
+    /// A failed lookup (MusicKit not ready after a reload, offline, a timeout) is asked again
+    /// after `RETRY_AFTER`, not kept as "no clip" until the app restarts.
+    #[test]
+    fn a_failed_lookup_is_asked_again_later() {
+        crate::clock::freeze();
+        let mut s = on_page("1712657863");
+        s.poll_page_motion();
+        let not_ready = "MusicKit not ready yet (page still loading)";
+        s.apply_msg(Msg::Motion { album: "1712657863".into(), result: Err(not_ready.into()) });
+        s.poll_page_motion();
+        assert_eq!(albums_asked(&s).len(), 1, "not hammered");
+        assert!(s.motion.next_retry().is_some_and(|d| d <= RETRY_AFTER), "a timer frame is due");
+        crate::clock::advance(RETRY_AFTER - std::time::Duration::from_secs(1));
+        s.poll_page_motion();
+        assert_eq!(albums_asked(&s).len(), 1);
+        crate::clock::advance(std::time::Duration::from_secs(2));
+        s.poll_page_motion();
+        assert_eq!(albums_asked(&s).len(), 2, "asked again");
+        s.apply_msg(Msg::Motion { album: "1712657863".into(), result: Ok(Some(art())) });
+        s.poll_page_motion();
+        assert_eq!(s.motion.clips[MASTER], Load::Loading, "the clip is on its way");
+
+        // The same for a library page's catalog album and a playing song's album.
+        let mut s = on_page("l.lib");
+        let mut t = song("i.1", None);
+        t.catalog_id = Some("123".into());
+        s.collections.insert("l.lib".into(), Load::Ready(collection("l.lib", vec![t])));
+        s.poll_page_motion();
+        s.apply_msg(Msg::MotionPageAlbum { id: "l.lib".into(), result: Err(not_ready.into()) });
+        s.poll_page_motion();
+        assert_eq!(s.sent.borrow().len(), 1);
+        crate::clock::advance(RETRY_AFTER);
+        s.poll_page_motion();
+        assert_eq!(s.sent.borrow().len(), 2, "the song lookup again");
+
+        let mut s = playing_closed();
+        s.playback.song = Some(song("i.library", None));
+        s.poll_motion();
+        s.apply_msg(Msg::MotionSongAlbum { id: "i.library".into(), result: Err(not_ready.into()) });
+        s.poll_motion();
+        assert_eq!(s.sent.borrow().len(), 1);
+        crate::clock::advance(RETRY_AFTER);
+        s.poll_motion();
+        assert_eq!(s.sent.borrow().len(), 2);
     }
 
     #[test]

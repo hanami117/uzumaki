@@ -135,6 +135,13 @@ pub fn poll(s: &mut State, tx: &mut Tx) -> bool {
     if s.motion.covered && s.motion.page.is_some() {
         tx.wake_after(std::time::Duration::from_secs(1));
     }
+    if s.motion.page.as_ref().is_some_and(|p| p.warming()) {
+        tx.wake_after(std::time::Duration::from_millis(250));
+    }
+    // A lookup that failed is asked again later: a frame then, even if nothing else draws.
+    if let (true, Some(d)) = (s.page_facts_album_page(), s.motion.next_retry()) {
+        tx.wake_after(d);
+    }
     changed
 }
 
@@ -216,10 +223,13 @@ fn header(s: &State, c: &Collection, fit: Fit) -> El {
     } else {
         cover = cover.key("coll-art");
         // Animated artwork (`state::motion`): Apple's square loop over the still, in the same box,
-        // fading in once its first frame is in (as the Mac app's album page does).
-        if let Some(layer) = s.motion.page_layer_for(s.page_album_known(c).as_deref()) {
-            cover = cover.clip_rounded(12.0)
-                .child(layer.key("coll-motion").transition(Transition::opacity()).enter_delay(0.12));
+        // fading in once its first frame is drawn (as the Mac app's album page does); until then
+        // the Mac's clip draws nearly transparent so that frame gets drawn at all.
+        let album = s.page_album_known(c);
+        if let Some(layer) = s.motion.page_layer_for(album.as_deref()) {
+            cover = cover.clip_rounded(12.0).child(layer.key("coll-motion").transition(super::now_playing::motion_transition()));
+        } else if let Some(warm) = s.motion.page_warm_layer_for(album.as_deref()) {
+            cover = cover.clip_rounded(12.0).child(warm.key("coll-motion-warm").transition(Transition::none()));
         }
     }
     // The cover keeps its place at the top on every page. The info column is at least as tall
@@ -299,6 +309,42 @@ mod tests {
         let mut gone = false;
         rt.update(|s, _| gone = s.motion.page.is_none());
         assert!(gone, "no player left once the page is gone");
+    }
+
+    /// The album page's Mac clip waits for its first drawn frame too (the 2026-11-14 flash of an
+    /// empty box before the clip): nearly transparent until then, the still showing, then a fade.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_album_clip_fades_in_only_after_its_first_frame_is_drawn() {
+        if std::env::var("UZUMAKI_MOTION").as_deref() == Ok("ffmpeg") {
+            return;
+        }
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == "album-motion").unwrap().1)(&mut s);
+        let crate::state::Route::Collection { id, .. } = s.route.clone() else { panic!() };
+        let clip = s.motion.clips.values().find_map(crate::state::Load::ready).unwrap().clone();
+        s.motion.page = Some(crate::motion::Playback::start(id, 9, &clip, Box::new(|_, _| {}), true));
+        let mut rt = rune::Runtime::new(s, crate::ui::view, (1360.0, 860.0), rune::Env { system_dark: true, scale: 1.0 });
+        let step = |rt: &mut rune::Runtime<State>| {
+            rt.update_if(|s, tx| crate::ui::poll(s, 0.0, tx));
+            rt.frame(1.0 / 60.0);
+        };
+        for _ in 0..20 {
+            step(&mut rt);
+            assert!(rt.presented("coll-motion").is_none(), "the still until a frame is drawn");
+            let (_, o) = rt.presented("coll-motion-warm").expect("drawn, to pull its first frame");
+            assert!(o < 0.01, "invisible: {o}");
+        }
+        rt.update_if(|s, _| s.motion_event(9, crate::motion::Event::FirstFrame));
+        let mut seen = Vec::new();
+        for _ in 0..40 {
+            step(&mut rt);
+            if let Some((_, o)) = rt.presented("coll-motion") {
+                seen.push(o);
+            }
+        }
+        assert!(seen.iter().any(|o| *o > 0.05 && *o < 0.95), "a crossfade: {seen:?}");
+        assert!((seen.last().unwrap() - 1.0).abs() < 1e-3);
     }
 
     /// The header's cover and info column, settled, in the scene at `size`.
