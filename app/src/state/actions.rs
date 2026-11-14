@@ -702,6 +702,27 @@ impl State {
         }
     }
 
+    /// Share → Copy Link: copies the page of an item, asking Apple for the catalog twin of a
+    /// library album or artist first.
+    pub fn copy_link(&mut self, link: &crate::share::Link) {
+        use crate::share::Link;
+        match link {
+            Link::Url(u) => self.copied(u.clone()),
+            Link::Lookup { kind, id, title } => {
+                let Some(path) = crate::share::lookup_path(*kind, id) else { return };
+                let (kind, id, title) = (*kind, id.clone(), title.clone());
+                self.request((path, serde_json::json!({})), crate::share::parse_lookup, move |result| Msg::ShareLink { kind, id, title, result });
+            }
+            Link::Hidden => {}
+        }
+    }
+
+    /// Puts `url` on the clipboard (at the next frame, `ui::poll`) and says so.
+    pub(super) fn copied(&mut self, url: String) {
+        self.pending_copy = Some(url);
+        self.toast = Some("Link copied".into());
+    }
+
     /// A local song's artist page (local only mode).
     pub fn go_to_local_artist(&mut self, song: &Song) {
         let a = crate::local::view::artist_of(song);

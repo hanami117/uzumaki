@@ -73,6 +73,7 @@ impl Song {
 
     pub fn parse(v: &Value) -> Option<Self> {
         let a = &v["attributes"];
+        crate::share::note(crate::share::Kind::Song, v);
         Some(Self {
             id: v["id"].as_str()?.to_string(),
             catalog_id: a["playParams"]["catalogId"].as_str().map(String::from),
@@ -225,6 +226,7 @@ impl Collection {
             _ => return None,
         };
         let a = &v["attributes"];
+        crate::share::note(if kind == CollectionKind::Album { crate::share::Kind::Album } else { crate::share::Kind::Playlist }, v);
         let subtitle = match kind {
             CollectionKind::Album => str_of(&a["artistName"]),
             CollectionKind::Playlist => a["curatorName"].as_str().unwrap_or("Playlist").to_string(),
@@ -340,6 +342,7 @@ impl Station {
             return None;
         }
         let a = &v["attributes"];
+        crate::share::note(crate::share::Kind::Station, v);
         Some(Self {
             id: v["id"].as_str()?.to_string(),
             name: str_of(&a["name"]),
@@ -358,6 +361,7 @@ pub struct Artist {
 
 impl Artist {
     pub fn parse(v: &Value) -> Option<Self> {
+        crate::share::note(crate::share::Kind::Artist, v);
         Some(Self { id: v["id"].as_str()?.to_string(), name: str_of(&v["attributes"]["name"]) })
     }
 
