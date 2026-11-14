@@ -532,7 +532,6 @@ pub fn scene_np_cover_only(s: &mut State) {
 /// ffmpeg (which must be installed) decodes in real time beside the fast headless clock: the
 /// clip shows from about `--at 10`.
 pub fn scene_np_motion(s: &mut State, lyrics: bool) {
-    use crate::motion::{Clip, MotionArt};
     scene_base(s, synthetic_lyrics(false), 30.0);
     s.settings.now_playing_lyrics = lyrics;
     s.playback.state = crate::bridge::PlayState::Playing;
@@ -540,11 +539,17 @@ pub fn scene_np_motion(s: &mut State, lyrics: bool) {
     if let Some(song) = s.playback.song.as_mut() {
         song.album_id = Some(album.into());
     }
+    scene_clip(s, album);
+}
+
+/// Gives catalog `album` the local fixture clip (on disk, nothing fetched), for scenes.
+/// For measuring with a real clip: `UZUMAKI_SCENE_CLIP=<file>,<side>,<fps>` (a square one).
+pub fn scene_clip(s: &mut State, album: &str) {
+    use crate::motion::{Clip, MotionArt};
     let master = "https://example.invalid/motion/P1_default.m3u8";
     s.motion.albums.insert(album.into(), Load::Ready(Some(MotionArt { video: master.into(), preview: None })));
     let path = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/motion-clip.mp4"));
     let mut clip = Clip { path, width: 256, height: 256, fps: 24.0 };
-    // For measuring with a real clip: `UZUMAKI_SCENE_CLIP=<file>,<side>,<fps>` (a square one).
     if let Ok(v) = std::env::var("UZUMAKI_SCENE_CLIP") {
         let p: Vec<&str> = v.split(',').collect();
         if let [file, side, fps] = p.as_slice() {

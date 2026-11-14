@@ -1,6 +1,6 @@
 //! Album / playlist page: header, then a track table, as one virtual list.
 
-use rune::{Cursor, El, GrowthSpec, ScrollSpec, col, el, icon, row, text};
+use rune::{Cursor, El, GrowthSpec, ScrollPos, ScrollSpec, Transition, Tx, col, el, icon, row, text};
 
 use super::PAGE_PX;
 use super::{artist_link, filter, icons, lists, select};
@@ -96,6 +96,48 @@ fn row_artists(s: &State, c: &Collection, t: &Song) -> Vec<Artist> {
 /// The header's cover size.
 const COVER: f32 = 220.0;
 
+/// Scrolled further than this (points), the header's cover is off the page: its clip holds.
+const COVER_BOTTOM: f32 = 28.0 + COVER;
+
+thread_local! {
+    /// The page whose scroll offset was last reported, and whether it was past the cover.
+    static AWAY: std::cell::RefCell<(String, bool)> = const { std::cell::RefCell::new((String::new(), false)) };
+}
+
+/// The page scroller's offset: commits to the state only when it crosses the cover's bottom,
+/// so scrolling never runs the view, and pausing happens even if no other frame follows.
+fn track_scroll(handle: Option<crate::state::Handle>, id: String) -> impl Fn(ScrollPos) + 'static {
+    move |p: ScrollPos| {
+        let away = p.offset[1] > COVER_BOTTOM;
+        let changed = AWAY.with_borrow_mut(|(page, was)| {
+            let changed = *page != id || *was != away;
+            (*page, *was) = (id.clone(), away);
+            changed
+        });
+        if let (true, Some(h)) = (changed, &handle) {
+            let id = id.clone();
+            h.update_if(move |s: &mut State, _| {
+                let page = away.then_some(id);
+                if s.motion.scrolled_away == page {
+                    return false;
+                }
+                s.motion.scrolled_away = page;
+                s.poll_page_motion()
+            });
+        }
+    }
+}
+
+/// Before each frame (`ui::poll`): the album page's animated cover. While it holds because the
+/// window can't draw, a timer frame each second finds out when it can again.
+pub fn poll(s: &mut State, tx: &mut Tx) -> bool {
+    let changed = s.poll_page_motion();
+    if s.motion.covered && s.motion.page.is_some() {
+        tx.wake_after(std::time::Duration::from_secs(1));
+    }
+    changed
+}
+
 fn header(s: &State, c: &Collection, fit: Fit) -> El {
     let kind = match c.kind {
         CollectionKind::Album => "ALBUM",
@@ -173,6 +215,12 @@ fn header(s: &State, c: &Collection, fit: Fit) -> El {
             );
     } else {
         cover = cover.key("coll-art");
+        // Animated artwork (`state::motion`): Apple's square loop over the still, in the same box,
+        // fading in once its first frame is in (as the Mac app's album page does).
+        if let Some(layer) = s.motion.page_layer_for(s.page_album_known(c).as_deref()) {
+            cover = cover.clip_rounded(12.0)
+                .child(layer.key("coll-motion").transition(Transition::opacity()).enter_delay(0.12));
+        }
     }
     // The cover keeps its place at the top on every page. The info column is at least as tall
     // and sits at its bottom, so a short one lines up with the cover's bottom (the wide look)
@@ -204,6 +252,53 @@ mod tests {
         assert_eq!(fit(248.0 + 463.0, true, true), Fit::Wrap);
         assert_eq!(fit(248.0 + 300.0, false, true), Fit::Compact);
         assert_eq!(fit(248.0 + 290.0, false, true), Fit::Wrap);
+    }
+
+    /// Animated artwork on an album page: the clip fades in over the still in the cover's box
+    /// (nothing moves, the info column stays put), and leaving the page frees the player. The
+    /// Mac's player shows its poster at once; the ffmpeg path needs a handle for its report.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_album_cover_crossfades_to_its_clip_and_stops_off_the_page() {
+        if std::env::var("UZUMAKI_MOTION").as_deref() == Ok("ffmpeg") {
+            return;
+        }
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == "album-motion").unwrap().1)(&mut s);
+        s.settings.album_page_motion = false;
+        let mut rt = rune::Runtime::new(s, crate::ui::view, (1360.0, 860.0), rune::Env { system_dark: true, scale: 1.0 });
+        let step = |rt: &mut rune::Runtime<State>| {
+            rt.update_if(|s, tx| crate::ui::poll(s, 0.0, tx));
+            rt.frame(1.0 / 60.0);
+        };
+        for _ in 0..30 {
+            step(&mut rt);
+        }
+        assert!(rt.presented("coll-motion").is_none(), "album pages off: the still only");
+        let cover = rt.presented("coll-art").unwrap().0;
+        let info = rt.presented("coll-info").unwrap().0;
+
+        rt.update(|s, _| s.set_album_page_motion(true));
+        let mut seen = Vec::new();
+        for _ in 0..60 {
+            step(&mut rt);
+            if let Some((rect, opacity)) = rt.presented("coll-motion") {
+                assert_eq!(rect, cover, "the clip fills the cover's box exactly");
+                seen.push(opacity);
+            }
+            assert_eq!(rt.presented("coll-art").unwrap().0, cover, "the cover never moves");
+            assert_eq!(rt.presented("coll-info").unwrap().0, info, "nor the title");
+        }
+        assert!(seen.iter().any(|o| *o > 0.05 && *o < 0.95), "a crossfade, not a cut: {seen:?}");
+        assert!((seen.last().unwrap() - 1.0).abs() < 1e-3, "settles fully shown: {seen:?}");
+
+        rt.update(|s, _| s.navigate(crate::state::Route::Home));
+        for _ in 0..30 {
+            step(&mut rt);
+        }
+        let mut gone = false;
+        rt.update(|s, _| gone = s.motion.page.is_none());
+        assert!(gone, "no player left once the page is gone");
     }
 
     /// The header's cover and info column, settled, in the scene at `size`.
@@ -296,7 +391,8 @@ fn track_row(s: &State, c: &Collection, i: usize, t: &Song, list: &str) -> El {
 
 pub fn page(s: &State, id: &str, avail: f32) -> El {
     let key = format!("coll-{id}");
-    let scroller = |inner: El| col().key(key.clone()).grow(1.0).min_h(0.0).w_full().scroll(ScrollSpec { stick_bottom: false }).child(inner);
+    let scroller = |inner: El| col().key(key.clone()).grow(1.0).min_h(0.0).w_full().scroll(ScrollSpec { stick_bottom: false })
+        .on_scroll_offset(track_scroll(s.app_handle().cloned(), id.to_string())).child(inner);
     let c = match s.collections.get(id) {
         Some(Load::Ready(c)) => c,
         Some(Load::Failed(e)) => {
@@ -354,7 +450,7 @@ pub fn page(s: &State, id: &str, avail: f32) -> El {
                     }
                 },
             )
-            .virtual_rows_version((c.id.clone(), m, songs_view, sort, cols, query, s.ui.sel.rev, cur_id, fit, s.favourites_rev())),
+            .virtual_rows_version((c.id.clone(), m, songs_view, sort, cols, query, s.ui.sel.rev, cur_id, fit, s.favourites_rev(), s.motion.page_rev())),
     );
     let mut page = col().grow(1.0).min_h(0.0).w_full();
     if let Some(bar) = filter::bar(s, m, c.tracks.len()) {

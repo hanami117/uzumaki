@@ -1,7 +1,8 @@
 //! Animated artwork in the state: which albums have a clip (asked once a session), which clips
-//! are on disk, and the one `Playback` in the Now Playing cover. `ui::poll` calls `poll_motion`
-//! before each frame; it only compares, asks and starts or stops a player. Downloads run on the
-//! `motion::clips` worker, decoding on the player's own thread.
+//! are on disk, the `Playback` in the Now Playing cover and the one in the album page's cover.
+//! `ui::poll` calls `poll_motion` and `poll_page_motion` before each frame; they only compare,
+//! ask and start or stop a player. Downloads run on the `motion::clips` worker, decoding on the
+//! player's own thread. The page's clip is off while Now Playing shows, so one decodes at most.
 //!
 //! Nothing touches the network or spawns a player in headless runs and tests (no bridge, no
 //! handle), except a clip a scene puts in `clips` from a local fixture.
@@ -12,7 +13,9 @@ use std::sync::Arc;
 use super::{Load, Msg, State};
 use crate::bridge::PlayState;
 use crate::models::{api, Song};
-use crate::motion::{self, Clip, Event, Facts, MotionArt, Playback, Want};
+use crate::models::CollectionKind;
+use crate::motion::{self, Clip, Event, Facts, MotionArt, PageFacts, Playback, Want};
+use super::Route;
 
 #[derive(Default)]
 pub struct MotionState {
@@ -21,6 +24,14 @@ pub struct MotionState {
     /// Master playlist URL → the clip on disk.
     pub clips: HashMap<String, Load<Clip>>,
     pub playback: Option<Playback>,
+    /// The clip in the cover of the album page being viewed.
+    pub page: Option<Playback>,
+    /// Library album id (`l.…`) → its catalog album, for its page's clip; pending and
+    /// negative results are cached too.
+    page_albums: HashMap<String, Load<Option<String>>>,
+    /// The album page (its route id) scrolled past its cover (`ui::collection`, from the
+    /// scroll offset). Another page shown starts unscrolled.
+    pub scrolled_away: Option<String>,
     /// Playing song id → verified catalog album; pending/negative results are cached too.
     song_albums: HashMap<String, Load<Option<String>>>,
     /// Albums whose clip failed to play this session (no ffmpeg, a decode error).
@@ -40,11 +51,47 @@ impl MotionState {
         self.playback.take().is_some()
     }
 
+    /// Stops the album page's clip (leaving the page, the window hiding). True when one stopped.
+    pub fn stop_page(&mut self) -> bool {
+        self.page.take().is_some()
+    }
+
+    /// The clip layer for the cover of the album page `album` (catalog id), once its first
+    /// frame is in.
+    pub fn page_layer_for(&self, album: Option<&str>) -> Option<rune::El> {
+        let p = self.page.as_ref()?;
+        (Some(p.album.as_str()) == album && p.shown()).then(|| p.layer())
+    }
+
+    /// Changes when the page's layer comes or goes, for the page's `virtual_rows_version`.
+    pub fn page_rev(&self) -> Option<(u64, bool)> {
+        self.page.as_ref().map(|p| (p.generation, p.shown()))
+    }
+
+    fn slot(&mut self, slot: Slot) -> &mut Option<Playback> {
+        match slot {
+            Slot::NowPlaying => &mut self.playback,
+            Slot::Page => &mut self.page,
+        }
+    }
+
     /// The clip layer for the cover of a song on `album`, once its first frame is in.
     pub fn layer_for(&self, album: Option<&str>) -> Option<rune::El> {
         let p = self.playback.as_ref()?;
         (Some(p.album.as_str()) == album && p.shown()).then(|| p.layer())
     }
+}
+
+/// Where a clip shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Slot {
+    NowPlaying,
+    Page,
+}
+
+/// A catalog album id (digits only); library (`l.…`) and local ids are not.
+fn is_catalog_album(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_digit())
 }
 
 /// The catalog album whose clip a song would show: catalog songs know it from their URL (and
@@ -54,7 +101,7 @@ pub fn album_of(song: &crate::models::Song) -> Option<&str> {
     if song.is_local() {
         return None;
     }
-    song.album_id.as_deref().filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()))
+    song.album_id.as_deref().filter(|id| is_catalog_album(id))
 }
 
 impl State {
@@ -132,34 +179,149 @@ impl State {
         let (Some(album), false) = (album, want == Want::Off) else {
             return self.motion.stop();
         };
+        self.drive(Slot::NowPlaying, album, want)
+    }
+
+    /// One step of `slot`'s clip towards `want` (not Off) for `album`: stop another album's,
+    /// ask for this one's clip, then start, pause, resume or fall back. True when the view changes.
+    fn drive(&mut self, slot: Slot, album: String, want: Want) -> bool {
         let mut changed = false;
-        if self.motion.playback.as_ref().is_some_and(|p| p.album != album) {
-            changed |= self.motion.stop(); // another album now: back to its still
+        if self.motion.slot(slot).as_ref().is_some_and(|p| p.album != album) {
+            changed |= self.motion.slot(slot).take().is_some(); // another album now: back to its still
         }
         let Some(clip) = self.motion_clip(&album) else { return changed };
         if self.motion.failed.contains_key(&album) {
             return changed;
         }
         let paused = want == Want::Paused;
-        match &mut self.motion.playback {
+        let handle = self.handle.clone();
+        let next = self.motion.generation + 1;
+        match self.motion.slot(slot) {
             Some(p) => {
                 p.set_paused(paused);
                 changed |= p.catch_up();
                 #[cfg(target_os = "macos")]
-                if p.check_native(&clip, report(self.handle.clone())) {
+                if p.check_native(&clip, report(handle)) {
                     changed = true;
                 }
             }
             // A clip starts only to play; a paused one keeps its frame, but none is started.
             None if !paused => {
-                self.motion.generation += 1;
-                let p = Playback::start(album, self.motion.generation, &clip, report(self.handle.clone()));
+                let p = Playback::start(album, next, &clip, report(handle));
                 changed |= p.shown();
-                self.motion.playback = Some(p);
+                *self.motion.slot(slot) = Some(p);
+                self.motion.generation = next;
             }
             None => {}
         }
         changed
+    }
+
+    fn page_facts(&self) -> PageFacts {
+        PageFacts {
+            enabled: self.settings.animated_artwork,
+            album_pages: self.settings.album_page_motion,
+            reduced_motion: self.motion.reduced_motion,
+            local_only: self.local_only(),
+            album_page: matches!(&self.route, Route::Collection { kind: CollectionKind::Album, .. }),
+            now_playing: self.ui.now_playing,
+            hidden: self.handle.as_ref().is_some_and(|h| !h.is_visible()),
+            covered: self.motion.covered,
+            scrolled_away: match &self.route {
+                Route::Collection { id, .. } => self.motion.scrolled_away.as_ref() == Some(id),
+                _ => false,
+            },
+        }
+    }
+
+    /// Before each frame, for the album page being viewed: its cover's clip (asked about, then
+    /// downloaded, only for this page; never for lists or grids). True when the view must change.
+    pub fn poll_page_motion(&mut self) -> bool {
+        let want = motion::want_page(&self.page_facts());
+        let album = if want == Want::Off { None } else { self.page_album() };
+        match album {
+            Some(album) => self.drive(Slot::Page, album, want),
+            None => self.motion.stop_page(),
+        }
+    }
+
+    /// The catalog album of the album page shown: its own id, or for a library album the
+    /// catalog album it maps to (exact ids only, asked once a session).
+    pub fn page_album(&mut self) -> Option<String> {
+        let Route::Collection { kind: CollectionKind::Album, id } = &self.route else { return None };
+        if is_catalog_album(id) {
+            return Some(id.clone());
+        }
+        if !id.starts_with("l.") {
+            return None; // a local album
+        }
+        let id = id.clone();
+        if !self.motion.page_albums.contains_key(&id) {
+            self.resolve_page_album(&id); // known at once from loaded songs, or asked
+        }
+        match self.motion.page_albums.get(&id) {
+            Some(Load::Ready(album)) => album.clone(),
+            _ => None,
+        }
+    }
+
+    /// The catalog album a library album's page shows the clip of: a catalog album id one of
+    /// its loaded songs already carries, else asked: the catalog song of its first track that
+    /// has one (the album that exact song is on), else the library album's catalog link.
+    fn resolve_page_album(&mut self, id: &str) {
+        let Some(c) = self.collections.get(id).and_then(Load::ready) else { return }; // wait for the page
+        let known = c.tracks.iter().find_map(|t| album_of(t).map(String::from)).or_else(|| {
+            // The same songs in a loaded catalog album or playlist, by catalog id.
+            let ids: Vec<&str> = c.tracks.iter().filter_map(Song::catalog_ref).collect();
+            self.collections.values().filter_map(Load::ready).flat_map(|o| o.tracks.iter())
+                .find(|t| t.catalog_ref().is_some_and(|r| ids.contains(&r)) && album_of(t).is_some())
+                .and_then(album_of).map(String::from)
+        });
+        if let Some(album) = known {
+            self.motion.page_albums.insert(id.to_string(), Load::Ready(Some(album)));
+            return;
+        }
+        let path = match c.tracks.iter().find_map(Song::catalog_ref) {
+            Some(song) => format!("/v1/catalog/{{{{storefrontId}}}}/songs/{song}"),
+            None => format!("/v1/me/library/albums/{id}/catalog"),
+        };
+        self.motion.page_albums.insert(id.to_string(), Load::Loading);
+        let reply = id.to_string();
+        self.request((path, serde_json::json!({})), |v| {
+            let items = v["data"].as_array();
+            // A song: the album in its URL. The album link: the album's own id.
+            items.and_then(|items| items.iter().filter_map(Song::parse).find_map(|s| album_of(&s).map(String::from)))
+                .or_else(|| v["data"][0]["id"].as_str().filter(|_| v["data"][0]["type"] == "albums")
+                    .filter(|a| is_catalog_album(a)).map(String::from))
+        }, move |result| Msg::MotionPageAlbum { id: reply, result });
+    }
+
+    /// For the view (asks nothing): the catalog album whose clip album page `c` shows, if known.
+    pub fn page_album_known(&self, c: &crate::models::Collection) -> Option<String> {
+        if is_catalog_album(&c.id) {
+            return Some(c.id.clone());
+        }
+        match self.motion.page_albums.get(&c.id) {
+            Some(Load::Ready(album)) => album.clone(),
+            _ => None,
+        }
+    }
+
+    /// A library album's catalog album arrived. True when its page shows (a frame then takes
+    /// the next step).
+    pub(super) fn motion_page_album_known(&mut self, id: String, result: Result<Option<String>, String>) -> bool {
+        let shown = matches!(&self.route, Route::Collection { id: r, .. } if *r == id);
+        self.motion.page_albums.insert(id, match result {
+            Ok(album) => Load::Ready(album),
+            Err(e) => Load::Failed(e),
+        });
+        shown
+    }
+
+    /// Whether `album` (catalog id) is the album page's, so news about it needs a frame.
+    pub(super) fn page_shows(&self, album: &str) -> bool {
+        let Route::Collection { kind: CollectionKind::Album, id } = &self.route else { return false };
+        id == album || matches!(self.motion.page_albums.get(id), Some(Load::Ready(Some(a))) if a == album)
     }
 
     /// Gets clips onto the disk before Now Playing opens: while a song plays, the clip of its
@@ -233,13 +395,16 @@ impl State {
 
     /// A player's report (`motion::Event`) for playback `generation`. True when the view changes.
     pub fn motion_event(&mut self, generation: u64, event: Event) -> bool {
-        let Some(p) = self.motion.playback.as_mut().filter(|p| p.generation == generation) else { return false };
+        let slot = [Slot::NowPlaying, Slot::Page].into_iter()
+            .find(|&slot| self.motion.slot(slot).as_ref().is_some_and(|p| p.generation == generation));
+        let Some(slot) = slot else { return false };
+        let p = self.motion.slot(slot).as_mut().expect("found above");
         match event {
             Event::FirstFrame => p.first_frame(),
             Event::Failed(e) => {
                 let album = p.album.clone();
                 self.motion.failed.insert(album, e);
-                self.motion.stop()
+                self.motion.slot(slot).take().is_some()
             }
         }
     }
@@ -251,6 +416,18 @@ impl State {
             self.save_settings();
             if !on {
                 self.motion.stop();
+                self.motion.stop_page();
+            }
+        }
+    }
+
+    /// Settings → Appearance → Animated artwork → Also on album pages.
+    pub fn set_album_page_motion(&mut self, on: bool) {
+        if self.settings.album_page_motion != on {
+            self.settings.album_page_motion = on;
+            self.save_settings();
+            if !on {
+                self.motion.stop_page();
             }
         }
     }
@@ -292,7 +469,8 @@ pub fn frame_outcome(handle: &super::Handle, outcome: rune::FrameOutcome) {
     if covered != COVERED.replace(covered) {
         handle.update_if(move |s: &mut State, _| {
             s.motion.covered = covered;
-            s.poll_motion() || !covered
+            let np = s.poll_motion();
+            s.poll_page_motion() || np || !covered
         });
     }
 }
@@ -672,6 +850,203 @@ mod tests {
         s.apply_msg(Msg::MotionSongAlbum { id: "i.old".into(), result: Ok(Some("111".into())) });
         assert_eq!(s.motion_album(s.playback.song.as_ref().unwrap()), Some("222"));
         assert_eq!(albums_asked(&s), ["222"]);
+    }
+
+    fn collection(id: &str, tracks: Vec<Song>) -> crate::models::Collection {
+        let mut c = crate::models::Collection::parse(&serde_json::json!({
+            "id": id, "type": "albums", "attributes": {"name": "Rumours"}
+        })).unwrap();
+        c.tracks = tracks;
+        c
+    }
+
+    /// Album page 594061854 shown (its page loaded), nothing playing, Now Playing closed.
+    fn on_page(id: &str) -> State {
+        let mut s = State::offline();
+        s.collections.insert(id.into(), Load::Ready(collection(id, Vec::new())));
+        s.route = Route::Collection { kind: CollectionKind::Album, id: id.into() };
+        s
+    }
+
+    /// `on_page` with the album's clip known and on disk.
+    fn page_ready() -> State {
+        let mut s = on_page("594061854");
+        s.motion.albums.insert("594061854".into(), Load::Ready(Some(art())));
+        let clip = Clip { path: "/nonexistent/clip.mp4".into(), width: 768, height: 768, fps: 23.976 };
+        s.motion.clips.insert(MASTER.into(), Load::Ready(clip));
+        s
+    }
+
+    #[test]
+    fn an_album_page_asks_for_its_own_clip_once_and_plays_it_with_no_music() {
+        let mut s = on_page("594061854");
+        s.poll_page_motion();
+        s.poll_page_motion();
+        assert_eq!(albums_asked(&s), ["594061854"], "asked once (a cached page has no motion art yet)");
+        assert!(s.page_shows("594061854"), "its reply needs a frame");
+        let mut s = page_ready();
+        s.poll_page_motion();
+        let p = s.motion.page.as_ref().expect("plays with nothing playing");
+        assert_eq!(p.album, "594061854");
+        assert!(s.motion.playback.is_none(), "not the Now Playing slot");
+    }
+
+    #[test]
+    fn the_album_page_clip_follows_the_rules() {
+        type Case = (&'static str, fn(&mut State));
+        let off: [Case; 7] = [
+            ("setting off", |s| s.settings.animated_artwork = false),
+            ("album pages off", |s| s.settings.album_page_motion = false),
+            ("reduce motion", |s| s.motion.reduced_motion = true),
+            ("local only mode", |s| s.settings.music_source = crate::settings::MusicSource::LocalOnly),
+            ("Now Playing open", |s| s.ui.now_playing = true),
+            ("another page", |s| s.route = Route::Home),
+            ("a playlist page", |s| s.route = Route::Collection { kind: CollectionKind::Playlist, id: "594061854".into() }),
+        ];
+        for (what, f) in off {
+            let mut s = page_ready();
+            s.poll_page_motion();
+            assert!(s.motion.page.is_some());
+            f(&mut s);
+            assert!(s.poll_page_motion(), "{what}: the view goes back to the still");
+            assert!(s.motion.page.is_none(), "{what}: stopped, decoder gone");
+            // And nothing is asked from scratch.
+            let mut s = on_page("594061854");
+            f(&mut s);
+            s.poll_page_motion();
+            assert!(albums_asked(&s).is_empty(), "{what}");
+        }
+        let mut s = page_ready();
+        s.poll_page_motion();
+        s.motion.covered = true;
+        s.poll_page_motion();
+        assert!(s.motion.page.as_ref().unwrap().paused(), "minimised: holds");
+        s.motion.covered = false;
+        s.motion.scrolled_away = Some("594061854".into());
+        s.poll_page_motion();
+        assert!(s.motion.page.as_ref().unwrap().paused(), "scrolled past the cover: holds");
+        s.motion.scrolled_away = Some("other".into());
+        s.poll_page_motion();
+        assert!(!s.motion.page.as_ref().unwrap().paused(), "another page's scroll doesn't count");
+        // Scrolled away before it started: none starts.
+        let mut s = page_ready();
+        s.motion.scrolled_away = Some("594061854".into());
+        s.poll_page_motion();
+        assert!(s.motion.page.is_none());
+    }
+
+    #[test]
+    fn only_one_clip_decodes_and_the_page_resumes_after_now_playing() {
+        let mut s = page_ready();
+        s.playback.song = Some(song("1", Some("594061854")));
+        s.playback.state = PlayState::Playing;
+        s.poll_page_motion();
+        s.poll_motion();
+        assert!(s.motion.page.is_some() && s.motion.playback.is_none());
+        crate::ui::open_now_playing(&mut s);
+        s.poll_motion();
+        s.poll_page_motion();
+        assert!(s.motion.playback.is_some() && s.motion.page.is_none());
+        crate::ui::close_now_playing(&mut s);
+        s.poll_motion();
+        s.poll_page_motion();
+        assert!(s.motion.playback.is_none() && s.motion.page.is_some());
+    }
+
+    #[test]
+    fn closing_to_the_tray_stops_the_page_clip_at_once() {
+        let mut s = page_ready();
+        s.poll_page_motion();
+        s.background = true; // as when the window hides instead of closing
+        assert!(s.hide_on_close());
+        assert!(s.motion.page.is_none(), "no frame may follow to stop it");
+    }
+
+    #[test]
+    fn page_and_now_playing_reports_reach_their_own_clip() {
+        let mut s = page_ready();
+        s.poll_page_motion();
+        let g = s.motion.page.as_ref().unwrap().generation;
+        assert!(s.motion_event(g, Event::Failed("decode".into())));
+        assert!(s.motion.page.is_none());
+        s.poll_page_motion();
+        assert!(s.motion.page.is_none(), "not retried this session");
+        assert!(!s.motion_event(g, Event::FirstFrame), "gone");
+    }
+
+    #[test]
+    fn opening_another_album_page_swaps_the_clip() {
+        let mut s = page_ready();
+        s.poll_page_motion();
+        s.collections.insert("1440783617".into(), Load::Ready(collection("1440783617", Vec::new())));
+        s.route = Route::Collection { kind: CollectionKind::Album, id: "1440783617".into() };
+        assert!(s.poll_page_motion(), "the old clip stops");
+        assert!(s.motion.page.is_none());
+        assert_eq!(albums_asked(&s), ["1440783617"]);
+        assert!(s.motion.page_layer_for(Some("594061854")).is_none());
+    }
+
+    #[test]
+    fn a_library_album_page_maps_to_its_catalog_album_by_exact_ids() {
+        // A track already carries its catalog album: no lookup at all.
+        let mut s = on_page("l.lib");
+        let mut t = song("i.1", Some("594061854"));
+        t.catalog_id = Some("123".into());
+        s.collections.insert("l.lib".into(), Load::Ready(collection("l.lib", vec![t])));
+        s.poll_page_motion();
+        assert_eq!(s.page_album(), Some("594061854".into()));
+        assert_eq!(albums_asked(&s), ["594061854"]);
+
+        // Its song in a loaded catalog album, by catalog id (a same-titled edition never wins).
+        let mut s = on_page("l.lib");
+        let mut t = song("i.1", None);
+        t.catalog_id = Some("123".into());
+        s.collections.insert("l.lib".into(), Load::Ready(collection("l.lib", vec![t])));
+        s.collections.insert("456".into(), Load::Ready(collection("456", vec![song("999", Some("888")), song("123", Some("456"))])));
+        s.poll_page_motion();
+        assert_eq!(albums_asked(&s), ["456"]);
+        assert_eq!(s.sent.borrow().len(), 1);
+
+        // Else the catalog song of its first matched track, once, then that album.
+        let mut s = on_page("l.lib");
+        let mut t = song("i.1", None);
+        t.catalog_id = Some("123".into());
+        s.collections.insert("l.lib".into(), Load::Ready(collection("l.lib", vec![song("i.0", None), t])));
+        s.poll_page_motion();
+        s.poll_page_motion();
+        assert_eq!(s.sent.borrow().len(), 1);
+        assert!(s.sent.borrow()[0].starts_with("/v1/catalog/{{storefrontId}}/songs/123 "));
+        assert!(s.apply_msg(Msg::MotionPageAlbum { id: "l.lib".into(), result: Ok(Some("456".into())) }), "page shown: a frame");
+        s.poll_page_motion();
+        assert_eq!(albums_asked(&s), ["456"]);
+        assert!(s.page_shows("456"));
+
+        // No matched track: the library album's catalog link.
+        let mut s = on_page("l.lib");
+        s.collections.insert("l.lib".into(), Load::Ready(collection("l.lib", vec![song("i.0", None)])));
+        s.poll_page_motion();
+        assert!(s.sent.borrow()[0].starts_with("/v1/me/library/albums/l.lib/catalog "));
+    }
+
+    #[test]
+    fn library_page_lookups_wait_for_the_page_and_cache_misses() {
+        let mut s = State::offline();
+        s.route = Route::Collection { kind: CollectionKind::Album, id: "l.lib".into() };
+        s.poll_page_motion();
+        assert!(s.sent.borrow().is_empty(), "the page isn't loaded yet");
+        for result in [Ok(None), Err("offline".into())] {
+            let mut s = on_page("l.lib");
+            s.poll_page_motion();
+            s.apply_msg(Msg::MotionPageAlbum { id: "l.lib".into(), result });
+            s.poll_page_motion();
+            s.poll_page_motion();
+            assert_eq!(s.sent.borrow().len(), 1, "asked once a session");
+            assert!(s.motion.page.is_none());
+        }
+        // A local album page asks nothing.
+        let mut s = on_page("local:album:x");
+        s.poll_page_motion();
+        assert!(s.sent.borrow().is_empty());
     }
 
     #[test]
