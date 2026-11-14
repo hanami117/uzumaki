@@ -1,11 +1,25 @@
 /* Uzumaki in-browser demo: HTML/CSS replica of the main window (1100x690 design size).
    Colours, radii and spacing follow the real app (its theme and headless renders). */
-.demo-hero { padding: 0; overflow: clip; --fit: .5; }
+/* --fit scales the 1100x690 window: the head script seeds it (--fit0) before the first paint, demo.js sets
+   the exact value. The stage's size and place don't depend on it: CSS works them out from the viewport
+   the same way demo.js does, so nothing moves when the scripts run (no layout shift). */
+.demo-hero { padding: 0; overflow: clip; --fit: var(--fit0, .5); }
 .demo-hero .swirl { position: absolute; top: -10%; bottom: auto; }
-.demo-sticky { position: sticky; top: 0; padding: 56px 0 24px; }
+.demo-sticky { position: sticky; top: 0; padding: 56px 0 24px; container-type: inline-size; }
 .demo-hero .hero-in { width: min(1140px, 100% - 40px); }
 .demo-text { position: relative; z-index: 2; will-change: transform, opacity; }
-.demo-stage { position: relative; width: calc(1100px * var(--fit)); height: calc(690px * var(--fit)); margin: 36px auto 0; perspective: 1600px; perspective-origin: 50% 20%; }
+.demo-stage { --sw: min(1100px, 100cqw - 40px); position: relative; width: var(--sw); height: calc(var(--sw) * 690 / 1100); margin: 36px auto 0; perspective: 1600px; perspective-origin: 50% 20%; }
+/* The tall, scroll-driven hero (not .demo-flat in demo.js): the hero is 2.15 viewports tall, its sticky part
+   one viewport, and the window, kept inside the viewport height too, centred below the 64 px nav. */
+@media (min-width: 900px) and (prefers-reduced-motion: no-preference) {
+  .demo-hero { height: 215vh; height: round(215vh, 1px); }   /* whole pixels, as demo.js had it */
+  .demo-sticky { height: 100vh; }
+  .demo-stage {
+    --sw: min(1100px, 100cqw - 40px, (100vh - 96px) * 1100 / 690);
+    position: absolute; left: 0; right: 0; top: calc(64px + (100vh - 64px - var(--sw) * 690 / 1100) / 2); margin: 0 auto;
+  }
+  .demo-note { display: none; }
+}
 .demo-tilt { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: transform; }
 .demo-note { text-align: center; margin-top: 16px; }
 
@@ -89,8 +103,6 @@
 .demo-flat .demo-sticky { position: relative; height: auto; }
 .demo-flat .demo-tilt, .demo-flat .demo-text { transform: none !important; opacity: 1 !important; }
 @media (max-width: 899px) { .demo-sticky { padding-top: 40px; } .demo-stage { margin-top: 28px; } }
-
-.demo-hero:not(.demo-flat) .demo-note { display: none; }
 
 /* stage 2: playback */
 .dw-credit { position: absolute; right: 12px; font-size: 10.5px; color: #8a8a94; white-space: nowrap; }

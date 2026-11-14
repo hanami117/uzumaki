@@ -30,9 +30,10 @@
 <script>
 /* Before first paint: .intro-on plays the startup intro once per session (not for reduced motion, not when
    the page opens scrolled or on a #hash); .js lets sections fade in once site.js runs, .js-fail lifts that
-   if it never does. */
+   if it never does; --fit0 is the demo window's scale as demo.js will work it out, so it doesn't jump. */
 (function(d){try{
 var r=matchMedia("(prefers-reduced-motion: reduce)").matches;
+var f=Math.min(1,(d.clientWidth-40)/1100);if(!r&&!matchMedia("(max-width: 899px)").matches)f=Math.min(f,(innerHeight-96)/690);d.style.setProperty("--fit0",f.toFixed(4));
 if(!r&&!scrollY&&!location.hash&&!sessionStorage.getItem("uzu-intro")){sessionStorage.setItem("uzu-intro","1");d.classList.add("intro-on")}
 if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.classList.contains("rv")||d.classList.add("js-fail")},5000)}
 }catch(e){}})(document.documentElement)

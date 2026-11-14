@@ -18,19 +18,15 @@
     let fit = Math.min(1, (vw - 40) / W);
     if (!flat) fit = Math.min(fit, (vh - 96) / H);
     hero.style.setProperty('--fit', fit.toFixed(4));
-    if (flat) { hero.style.height = ''; sticky.style.height = ''; tilt.style.transform = ''; text.style.cssText = ''; stage.style.cssText = ''; return; }
+    if (flat) { tilt.style.transform = ''; text.style.cssText = ''; return; }
+    // The layout itself is in demo.css (hero 215vh, sticky 100vh, the stage centred below the nav), so the
+    // first paint already has it. Here: how far the window starts lower, just under the hero text.
     const navH = 64, winH = H * fit;
-    sticky.style.height = vh + 'px';
-    sticky.style.top = '0px';
-    hero.style.height = Math.round(vh * 2.15) + 'px';
     travel = hero.offsetHeight - vh;
-    // start: window sits just under the hero text; end: window centred in the viewport below the nav
     const endTop = navH + (vh - navH - winH) / 2;
     const textBottom = text.offsetTop + text.offsetHeight;
     const startTop = Math.max(endTop, textBottom + 24);
     startY = startTop - endTop;
-    stage.style.marginTop = '0px';
-    stage.style.position = 'absolute'; stage.style.left = '50%'; stage.style.top = endTop + 'px'; stage.style.marginLeft = (-W * fit / 2) + 'px';
     frame();
   };
 
