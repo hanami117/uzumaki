@@ -15,6 +15,7 @@ use uzumaki_airplay::{Cast, Need};
 use super::icons;
 use super::widgets::{slider, small_button};
 use crate::state::State;
+use crate::symbols::{self, Sym};
 use crate::state::airplay::Ask;
 use crate::theme::*;
 
@@ -48,14 +49,32 @@ line_icon!(APPLE_TV, "cad-out-appletv", "M5.5 8h13A2.5 2.5 0 0 1 21 10.500v3A2.5
 line_icon!(TV, "cad-out-tv", "M4 4.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5.500a1 1 0 0 1 1-1zM7.5 20h9");
 line_icon!(SPEAKER, "cad-out-speaker", "M7.5 3.500h9a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1zM12 17.500a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.400zM12 7.300h.01");
 
-fn kind_icon(kind: Kind) -> &'static Icon {
-    match kind {
-        Kind::HomePod => &HOMEPOD,
-        Kind::HomePodMini => &HOMEPOD_MINI,
-        Kind::AppleTv => &APPLE_TV,
-        Kind::Tv => &TV,
-        Kind::Speaker => &SPEAKER,
-        Kind::Computer => &COMPUTER,
+/// A device's glyph: its SF Symbol on the Mac (a stereo pair of HomePods gets the pair), else its line icon.
+#[derive(Clone, Copy)]
+struct Glyph {
+    sym: Sym,
+    line: &'static Icon,
+}
+
+fn kind_glyph(kind: Kind, pair: bool) -> Glyph {
+    let (sym, line) = match kind {
+        Kind::HomePod if pair => (Sym::HomePodPair, &HOMEPOD),
+        Kind::HomePodMini if pair => (Sym::HomePodPair, &HOMEPOD_MINI),
+        Kind::HomePod => (Sym::HomePod, &HOMEPOD),
+        Kind::HomePodMini => (Sym::HomePodMini, &HOMEPOD_MINI),
+        Kind::AppleTv => (Sym::AppleTv, &APPLE_TV),
+        Kind::Tv => (Sym::Tv, &TV),
+        Kind::Speaker => (Sym::Speaker, &SPEAKER),
+        Kind::Computer => (Sym::Computer, &COMPUTER),
+    };
+    Glyph { sym, line }
+}
+
+/// The glyph in `color`: the cached symbol, or the line icon (off the Mac, or before the cache is warm).
+fn glyph_el(g: Glyph, color: rune::Color, line_size: f32) -> El {
+    match symbols::get(g.sym, color) {
+        Some(px) => el().size(symbols::CANVAS, symbols::CANVAS).pixels_fit(&px, rune::SurfaceFit::Fit),
+        None => el().size(symbols::CANVAS, symbols::CANVAS).center().child(icon(g.line, line_size).color(color)),
     }
 }
 
@@ -127,7 +146,7 @@ pub fn button(s: &State, key: &'static str, idle: rune::Color) -> El {
     el().key(key).role("button").label(label).focusable(true).size(36.0, 36.0).radius(18.0).center()
         .hover(ov(0.08)).press(ov(0.12)).cursor(Cursor::Pointer)
         .on_press(move |s: &mut State| toggle(s, key))
-        .child(icon(&AIRPLAY, 18.0).color(if lit { PAL.accent } else { idle }))
+        .child(glyph_el(Glyph { sym: Sym::AirPlay, line: &AIRPLAY }, if lit { PAL.accent } else { idle }, 18.0))
 }
 
 /// What a row shows at its right end.
@@ -138,7 +157,7 @@ enum Mark {
     Spinner,
 }
 
-fn output_row(key: String, glyph: &'static Icon, name: &str, sub: Option<String>, mark: Mark) -> El {
+fn output_row(key: String, glyph: Glyph, name: &str, sub: Option<String>, mark: Mark) -> El {
     let on = mark == Mark::Tick;
     let mut words = col().grow(1.0).min_w(0.0).gap(1.0).justify_center()
         .child(text(name.to_string()).font(TextStyle::new(13.5, if on { 600.0 } else { 400.0 })).color(PAL.text).truncate());
@@ -152,7 +171,11 @@ fn output_row(key: String, glyph: &'static Icon, name: &str, sub: Option<String>
     };
     row().key(key).role("menuitemradio").label(name.to_string()).focusable(true).w_full().h(ROW_H).px(10.0).gap(10.0).center_y().radius(8.0)
         .hover(ov(0.09)).press(ov(0.14)).cursor(Cursor::Pointer)
-        .child(el().size(28.0, 28.0).center().child(icon(glyph, 21.0).color(if on { PAL.accent } else { PAL.text2 })))
+        // As Apple's picker: the device in a round badge, filled with the accent where the sound is.
+        .child(
+            el().size(32.0, 32.0).radius(16.0).center().fill(if on { PAL.accent } else { ov(0.10) })
+                .child(glyph_el(glyph, if on { rune::Color::WHITE } else { PAL.text }, 21.0)),
+        )
         .child(words)
         .child(mark)
 }
@@ -263,7 +286,8 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
             false
         })
         .on_press(|_s: &mut State| {});
-    let here = if cfg!(target_os = "macos") { &COMPUTER } else { &DESKTOP };
+    let here = if cfg!(target_os = "macos") { kind_glyph(Kind::Computer, false) } else { Glyph { sym: Sym::Computer, line: &DESKTOP } };
+    panel = panel.child(el().key("airplay-title").w_full().px(10.0).pt(4.0).pb(6.0).child(text("AirPlay").font(TextStyle::new(12.0, 600.0)).color(PAL.muted)));
     panel = panel.child(
         output_row("airplay-this".into(), here, this_computer(), None, if *cast == Cast::Off { Mark::Tick } else { Mark::None })
             .on_press(|s: &mut State| s.airplay_pick(None)),
@@ -294,7 +318,7 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
         };
         let id = out.id.clone();
         panel = panel.child(
-            output_row(format!("airplay-dev-{}", out.id), kind_icon(out.kind), &out.name, sub, mark)
+            output_row(format!("airplay-dev-{}", out.id), kind_glyph(out.kind, out.pair), &out.name, sub, mark)
                 .on_press(move |s: &mut State| s.airplay_pick(Some(&id))),
         );
         if mark == Mark::Tick {
@@ -342,6 +366,7 @@ fn scene_devices() -> Vec<Output> {
 /// The picker's states, over whatever the scene before set up. `what`: `closed`, `looking`,
 /// `list`, `connecting`, `on`, `pin`, `password`, `password-wrong`, `unavailable`, `failed`.
 pub fn scene(s: &mut State, what: &str) {
+    symbols::load_now();
     s.airplay.available = what != "unavailable";
     s.airplay.prefs.volume = Some(35);
     s.ui.airplay.open = !matches!(what, "closed" | "failed" | "on-closed");

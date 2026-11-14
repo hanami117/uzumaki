@@ -41,6 +41,7 @@ mod notify;
 mod nowplaying;
 mod scenes;
 mod settings;
+mod symbols;
 mod state;
 mod theme;
 mod tray;
@@ -70,6 +71,7 @@ use crate::local::LocalPlayer;
 use crate::state::{Msg, State};
 
 fn setup(s: &mut State, wake: Waker) {
+    symbols::warm();
     s.art.attach(ImageCache::new(wake));
 }
 

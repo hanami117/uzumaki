@@ -138,6 +138,11 @@ impl std::ops::Deref for PalRef {
 }
 pub static PAL: PalRef = PalRef;
 
+/// The colours the AirPlay glyphs are rasterised in (`symbols.rs`): text, secondary text and accent of every palette.
+pub fn symbol_colors() -> Vec<Color> {
+    [&*DARK, &*LIGHT, &*LIGHT_INK].into_iter().flat_map(|p| [p.text, p.text2, p.accent]).chain([Color::WHITE]).collect()
+}
+
 /// Puts the palette for the next build in force (`ui::view`, first thing). When the theme
 /// flipped, the native window's own background follows (macOS; see `main::sync_window_bg`).
 pub fn apply(light: bool) {
