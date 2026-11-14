@@ -529,7 +529,7 @@ fn overlays(f: &mut Frame, app: &App) {
 }
 
 pub fn draw(f: &mut Frame, app: &App, now: Instant) {
-    table::set_theme(app.config.theme);
+    table::set_look(app.config.theme, app.config.layout.columns);
     let area = f.area();
     let (w, h) = (area.width, area.height);
     // The screenshot views (`F`), on the queue screen; the showcase needs room, else this one.

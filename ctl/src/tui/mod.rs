@@ -10,7 +10,7 @@ mod lyrics;
 mod probe;
 mod search;
 mod showcase;
-mod sort;
+pub(crate) mod sort;
 mod table;
 mod view;
 #[cfg(test)]
@@ -76,6 +76,7 @@ fn event_loop(terminal: &mut DefaultTerminal, be: &mut dyn Backend, env: &Env) -
     if let Some(path) = sort::state_path() {
         app.use_sort_file(path);
     }
+    app.start(be, std::env::var_os("UZUMAKI_VIEW").is_some(), Instant::now());
     let result = screens(terminal, be, env, &mut app);
     // Take our kitty image out of the terminal before handing it back.
     app.cover.clear();

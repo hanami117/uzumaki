@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 
 use ratatui::style::Color;
 use keys::Keymap;
+use crate::tui::sort::{Prefs, View};
 use theme::Theme;
 use toml::{Document, Entry, Value};
 
@@ -49,6 +50,55 @@ impl fmt::Display for Warning {
     }
 }
 
+/// Where solo puts the lyrics (`[layout] lyrics`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Placement {
+    /// Beside the cover when there is room, else under the song (what `uzu` always did).
+    #[default]
+    Auto,
+    /// Beside the cover only; a terminal too narrow for that shows solo without lyrics.
+    Beside,
+    /// Always under the cover and the song.
+    Under,
+}
+
+/// The song table's columns: how the width is shared (relative weights) and which show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Columns {
+    pub artist: u16,
+    pub title: u16,
+    pub album: u16,
+    pub show_artist: bool,
+    pub show_album: bool,
+}
+
+impl Default for Columns {
+    fn default() -> Self {
+        Columns { artist: 3, title: 5, album: 3, show_artist: true, show_album: true }
+    }
+}
+
+/// `[layout]`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayoutCfg {
+    /// 0-based index into the screens (queue, playlists, search, albums, lyrics).
+    pub start_screen: usize,
+    /// `normal`, `showcase` or `solo` (the queue screen's view); `None` is normal.
+    pub start_view: Option<String>,
+    pub lyrics: Placement,
+    pub columns: Columns,
+}
+
+impl Default for LayoutCfg {
+    fn default() -> Self {
+        LayoutCfg { start_screen: 0, start_view: None, lyrics: Placement::Auto, columns: Columns::default() }
+    }
+}
+
+pub const SCREEN_NAMES: &[&str] = &["queue", "playlists", "search", "albums", "lyrics"];
+pub const VIEW_NAMES: &[&str] = &["normal", "showcase", "solo"];
+pub const PLACEMENTS: &[&str] = &["auto", "beside", "under"];
+
 /// What the file says. `Config::default()` is what no file means.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -59,6 +109,11 @@ pub struct Config {
     pub warnings: Vec<Warning>,
     pub theme: Theme,
     pub keys: Keymap,
+    pub layout: LayoutCfg,
+    /// `[defaults] sort_*`: the sort a view starts with when none was remembered.
+    pub sorts: Prefs,
+    /// `[defaults] notifications`: the short messages ("Paused", "Cover: on"…) show.
+    pub notifications: bool,
     /// `[format] status_format` (`None`: [`format::DEFAULT`]) and `status_idle`.
     pub status_format: Option<String>,
     pub status_idle: String,
@@ -81,7 +136,7 @@ pub fn path_in(xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>
 
 impl Default for Config {
     fn default() -> Self {
-        Config { path: None, found: false, warnings: Vec::new(), theme: Theme::default(), keys: Keymap::default(), status_format: None, status_idle: String::new(), respect_no_color: true }
+        Config { path: None, found: false, warnings: Vec::new(), theme: Theme::default(), keys: Keymap::default(), layout: LayoutCfg::default(), sorts: Prefs::default(), notifications: true, status_format: None, status_idle: String::new(), respect_no_color: true }
     }
 }
 
@@ -180,6 +235,11 @@ impl Config {
                 _ => {}
             }
         }
+        match e.section.as_str() {
+            "layout" => self.take_layout(e, w),
+            "defaults" => self.take_defaults(e, w),
+            _ => {}
+        }
         if e.section == "theme" {
             if e.key == "respect_no_color" {
                 if let Some(b) = want_bool(e, w) {
@@ -188,6 +248,80 @@ impl Config {
             } else {
                 theme.take(e, w);
             }
+        }
+    }
+
+    fn take_layout(&mut self, e: &Entry, w: &mut Warnings) {
+        let l = &mut self.layout;
+        match e.key.as_str() {
+            "start_screen" => {
+                // A screen's number works too.
+                let by_number = matches!(&e.value, Value::Int(n) if (1..=5).contains(n));
+                if let Value::Int(n) = &e.value {
+                    if by_number {
+                        l.start_screen = *n as usize - 1;
+                        return;
+                    }
+                }
+                if let Some(i) = want_choice(e, w, SCREEN_NAMES) {
+                    l.start_screen = i;
+                }
+            }
+            "start_view" => {
+                if let Some(i) = want_choice(e, w, VIEW_NAMES) {
+                    l.start_view = (i > 0).then(|| VIEW_NAMES[i].to_string());
+                }
+            }
+            "lyrics" => {
+                if let Some(i) = want_choice(e, w, PLACEMENTS) {
+                    l.lyrics = [Placement::Auto, Placement::Beside, Placement::Under][i];
+                }
+            }
+            "artist_width" | "title_width" | "album_width" => {
+                let Some(n) = want_int(e, w) else { return };
+                if !(1..=20).contains(&n) {
+                    w.add(e.line, format!("'{}' is a share of the width, a whole number from 1 to 20 (got {n})", e.key));
+                    return;
+                }
+                let n = n as u16;
+                match e.key.as_str() {
+                    "artist_width" => l.columns.artist = n,
+                    "title_width" => l.columns.title = n,
+                    _ => l.columns.album = n,
+                }
+            }
+            "show_artist" => {
+                if let Some(b) = want_bool(e, w) {
+                    l.columns.show_artist = b;
+                }
+            }
+            "show_album" => {
+                if let Some(b) = want_bool(e, w) {
+                    l.columns.show_album = b;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn take_defaults(&mut self, e: &Entry, w: &mut Warnings) {
+        let view = match e.key.as_str() {
+            "sort_playlists" => View::Playlists,
+            "sort_albums" => View::Albums,
+            "sort_songs" => View::Songs,
+            "sort_search" => View::Search,
+            "notifications" => {
+                if let Some(b) = want_bool(e, w) {
+                    self.notifications = b;
+                }
+                return;
+            }
+            _ => return,
+        };
+        let Some(text) = want_str(e, w) else { return };
+        match crate::tui::sort::parse_default(view, text) {
+            Ok(sort) => self.sorts.set(view, sort),
+            Err(message) => w.add(e.line, message),
         }
     }
 
@@ -300,20 +434,27 @@ pub fn did_you_mean<'a>(word: &str, candidates: &[&'a str]) -> Option<&'a str> {
     best.map(|(c, _)| c)
 }
 
-/// Levenshtein distance, in chars.
+/// Edit distance in chars: insert, delete, change, or swap two neighbours (a typo like
+/// `yaer`), each one step.
 pub fn edit_distance(a: &str, b: &str) -> usize {
     let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
-    let mut row: Vec<usize> = (0..=b.len()).collect();
-    for (i, ca) in a.iter().enumerate() {
-        let mut prev = row[0];
-        row[0] = i + 1;
-        for (j, cb) in b.iter().enumerate() {
-            let cur = row[j + 1];
-            row[j + 1] = (prev + usize::from(ca != cb)).min(row[j] + 1).min(cur + 1);
-            prev = cur;
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for j in 0..=b.len() {
+        d[0][j] = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            d[i][j] = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                d[i][j] = d[i][j].min(d[i - 2][j - 2] + 1);
+            }
         }
     }
-    row[b.len()]
+    d[a.len()][b.len()]
 }
 
 // ---------------------------------------------------------------------------- value helpers
@@ -327,6 +468,21 @@ pub fn want_str<'a>(e: &'a Entry, w: &mut Warnings) -> Option<&'a str> {
             None
         }
     }
+}
+
+/// One of `choices` (case-insensitive), or a warning that lists them with a hint.
+pub fn want_choice(e: &Entry, w: &mut Warnings, choices: &[&str]) -> Option<usize> {
+    let text = want_str(e, w)?;
+    let lower = text.trim().to_lowercase();
+    if let Some(i) = choices.iter().position(|c| *c == lower) {
+        return Some(i);
+    }
+    let hint = match did_you_mean(&lower, choices) {
+        Some(c) => format!("did you mean \"{c}\"?"),
+        None => format!("use {}", list_of(choices, "\"", "\"")),
+    };
+    w.add(e.line, format!("'{text}' is not a choice for '{}'; {hint}", e.key));
+    None
 }
 
 pub fn want_bool(e: &Entry, w: &mut Warnings) -> Option<bool> {

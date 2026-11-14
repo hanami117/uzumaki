@@ -3399,3 +3399,123 @@ fn a_keymap_works_in_every_view_and_a_popup_still_takes_any_key() {
     rig.press(&[ch('S')]);
     assert!(rig.app.sorting.is_some());
 }
+
+// ------------------------------------------------------- uzu.toml: layout and defaults
+
+use crate::config::Placement;
+
+#[test]
+fn the_start_screen_and_view_come_from_the_file() {
+    let mut rig = rig_with("start-playlists", "[layout]\nstart_screen = \"playlists\"\n");
+    rig.app.start(&mut rig.client, false, rig.now);
+    assert_eq!(rig.app.screen, Screen::Playlists);
+    assert!(rig.requests().contains(&Request::Playlists), "the list loads as when 2 is pressed");
+    // No `[layout]`: the queue, as always, and nothing asked.
+    let mut rig = Rig::new("start-default");
+    let before = rig.requests().len();
+    rig.app.start(&mut rig.client, false, rig.now);
+    assert_eq!(rig.app.screen, Screen::Queue);
+    assert_eq!(rig.requests().len(), before);
+    // A view on the queue; UZUMAKI_VIEW beats the file.
+    let mut rig = rig_with("start-solo", "[layout]\nstart_view = \"solo\"\n");
+    rig.app.start(&mut rig.client, false, rig.now);
+    assert!(rig.app.solo());
+    let mut rig = rig_with("start-solo-env", "[layout]\nstart_view = \"solo\"\n");
+    rig.app.start(&mut rig.client, true, rig.now);
+    assert!(!rig.app.solo());
+    // Another screen than the queue has no view.
+    let mut rig = rig_with("start-lyrics", "[layout]\nstart_screen = 5\nstart_view = \"showcase\"\n");
+    rig.app.start(&mut rig.client, false, rig.now);
+    assert_eq!(rig.app.screen, Screen::Lyrics);
+    assert!(!rig.app.solo());
+}
+
+#[test]
+fn lyrics_beside_or_under_the_cover() {
+    use super::showcase::solo_lyrics_in;
+    let caps = None;
+    // Auto is what it always was: beside when it fits, else under, else nothing.
+    assert!(solo_lyrics_in(120, 34, caps, Placement::Auto).is_some_and(|g| g.lyrics.unwrap().x > 40));
+    assert!(solo_lyrics_in(60, 40, caps, Placement::Auto).is_some_and(|g| g.lyrics.unwrap().x == 2));
+    // Under: under even where there is room beside.
+    assert!(solo_lyrics_in(120, 34, caps, Placement::Under).is_some_and(|g| g.lyrics.unwrap().x == 2));
+    // Beside: beside where it fits; a narrow terminal has no lyrics in solo.
+    assert!(solo_lyrics_in(120, 34, caps, Placement::Beside).is_some_and(|g| g.lyrics.unwrap().x > 40));
+    assert!(solo_lyrics_in(60, 40, caps, Placement::Beside).is_none());
+}
+
+#[test]
+fn column_shares_and_hidden_columns() {
+    let now = Instant::now();
+    let head = |text: &str| {
+        let mut app = with_config(text, now);
+        app.resize(20);
+        lines(&draw(&app, now, 140, 20))[10].clone()
+    };
+    let col = |line: &str, name: &str| line.find(name).unwrap();
+    let plain = head("");
+    // A heavier Title pushes the Album column right; the order stays Artist, #, Title, Album, Time.
+    let heavy = head("[layout]\ntitle_width = 20\n");
+    assert!(col(&heavy, "Album") > col(&plain, "Album"), "{plain}\n{heavy}");
+    let light = head("[layout]\nartist_width = 1\n");
+    assert!(col(&light, "#") < col(&plain, "#"), "{plain}\n{light}");
+    // Hiding.
+    let no_album = head("[layout]\nshow_album = false\n");
+    assert!(!no_album.contains("Album") && no_album.contains("Artist") && no_album.contains("Time"), "{no_album}");
+    let neither = head("[layout]\nshow_album = false\nshow_artist = false\n");
+    assert!(!neither.contains("Album") && !neither.contains("Artist") && neither.contains("Title"), "{neither}");
+    // Every row of every size still fits the screen.
+    let mut app = with_config("[layout]\nartist_width = 7\ntitle_width = 1\nshow_artist = false\n", now);
+    app.resize(20);
+    for w in [140, 100, 60, 40] {
+        assert!(lines(&draw(&app, now, w, 20)).iter().all(|l| text_width(l) == w as usize));
+    }
+}
+
+#[test]
+fn a_default_sort_applies_until_the_user_picks_one_and_is_never_saved() {
+    let path = sort_file("config-default");
+    let mut rig = rig_with("sort-default", "[defaults]\nsort_playlists = \"name desc\"\nsort_songs = \"duration\"\n");
+    rig.app.use_sort_file(path.clone());
+    assert_eq!(rig.app.sort_of(View::Playlists), Some(Sort { key: Key::Name, desc: true }));
+    rig.press(&[ch('2')]);
+    rig.advance(300);
+    let text = rig.frame(100, 24);
+    assert!(text[8].starts_with("│ Playlists (4) · by name ↓") && text[11].contains("Road Trip Two"), "{}", text[11]);
+    // Picking a sort for another view saves only that pick, not the defaults.
+    rig.press(&[ch('l'), ch(','), ch('T')]);
+    let saved = crate::tui::sort::load(&path);
+    assert_eq!(saved.songs, Some(Sort { key: Key::Title, desc: true }));
+    assert_eq!(saved.playlists, None, "the config's default is not written to uzu.json");
+    // A pick beats the default on the next run; the default still fills the other views.
+    let mut next = rig_with("sort-default-2", "[defaults]\nsort_playlists = \"name desc\"\nsort_songs = \"duration\"\n");
+    next.app.use_sort_file(path.clone());
+    assert_eq!(next.app.sort_of(View::Songs), Some(Sort { key: Key::Title, desc: true }));
+    assert_eq!(next.app.sort_of(View::Playlists), Some(Sort { key: Key::Name, desc: true }));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
+fn notifications_off_hides_the_short_messages_but_not_errors() {
+    let mut rig = rig_with("notify-off", "[defaults]\nnotifications = false\n");
+    rig.press(&[ch(' ')]);
+    assert_eq!(rig.app.message(rig.now), None, "'Paused' stays quiet");
+    rig.press(&[ch('d')]);
+    assert_eq!(rig.app.message(rig.now), None, "so does a refusal");
+    // An error answer from the app still shows.
+    let mut rig = Rig::serving("notify-error", Arc::default(), |req| match req {
+        Request::Next => uzumaki_ctl::Reply::Error { message: "nothing to skip to".into() },
+        other => fake_handler_logged(Arc::default())(other),
+    });
+    rig.app.set_config(Config::parse("[defaults]\nnotifications = false\n"), rig.now);
+    rig.press(&[ch('n')]);
+    assert_eq!(rig.app.message(rig.now), Some("nothing to skip to"));
+    // On (the default), the messages show as they did.
+    let mut rig = Rig::new("notify-on");
+    rig.press(&[ch(' ')]);
+    assert_eq!(rig.app.message(rig.now), Some("Paused"));
+    // And a problem in the file shows even with notifications off.
+    let mut app = fixture(rig.now);
+    app.set_config(Config::parse("[defaults]\nnotifications = false\nbad line\n"), rig.now);
+    assert!(app.message(rig.now).is_some_and(|m| m.contains("line 3")));
+}

@@ -20,6 +20,7 @@ use ratatui_image::Image;
 use uzumaki_ctl::RepeatMode;
 
 use super::app::{App, COMPACT_BELOW};
+use crate::config::Placement;
 use super::cover::Caps;
 use super::table::{bold, coral, dim, frame};
 use super::view::{self, bar_spans, help_rect, hline, hint_text, playing_song, put, render_line, song_lines, state_word, time_text};
@@ -176,8 +177,19 @@ pub fn solo(w: u16, h: u16, caps: Option<Caps>) -> Solo {
 /// cover is the biggest square in pixels, from `caps`, that fits its column). Only when that
 /// doesn't fit (narrow terminals) the lyrics go under the song, with the cover at most a third
 /// of the height. `None` when there is no room for them (the plain solo shows then).
+#[cfg(test)]
 pub fn solo_lyrics(w: u16, h: u16, caps: Option<Caps>) -> Option<Solo> {
-    if h >= LYRICS_WIDE_MIN_H && w >= LYRICS_LEFT_MIN + 4 + LYRICS_MIN_COLS {
+    solo_lyrics_in(w, h, caps, Placement::Auto)
+}
+
+/// [`solo_lyrics`] with `[layout] lyrics` of the config: `Under` never goes beside the cover,
+/// `Beside` never goes under it (a narrow terminal then has no lyrics in solo).
+pub fn solo_lyrics_in(w: u16, h: u16, caps: Option<Caps>, place: Placement) -> Option<Solo> {
+    let fits_beside = h >= LYRICS_WIDE_MIN_H && w >= LYRICS_LEFT_MIN + 4 + LYRICS_MIN_COLS;
+    if place == Placement::Beside && !fits_beside {
+        return None;
+    }
+    if fits_beside && place != Placement::Under {
         let left = (w * 2 / 5).clamp(LYRICS_LEFT_MIN, w - 4 - LYRICS_MIN_COLS);
         let lyrics = Rect { x: left + 2, y: 1, width: w - left - 4, height: h - 2 };
         let col = Rect { x: 0, y: 0, width: left, height: h };

@@ -78,6 +78,16 @@ impl View {
         }
     }
 
+    /// What it sorts, for messages.
+    pub fn what(self) -> &'static str {
+        match self {
+            View::Playlists => "playlists",
+            View::Albums => "albums",
+            View::Songs => "songs",
+            View::Search => "search results",
+        }
+    }
+
     /// The keys (lowercase; the uppercase one reverses) and what they sort by.
     pub fn modes(self) -> &'static [(char, Key)] {
         match self {
@@ -99,6 +109,33 @@ impl View {
         let lower = c.to_ascii_lowercase();
         self.modes().iter().find(|(k, _)| *k == lower).map(|&(_, key)| Some(Sort { key, desc }))
     }
+}
+
+/// A sort as `uzu.toml` writes it: a key's name (`name`, `artist`, `song count`, …) and
+/// optionally `asc` or `desc` (`"year desc"`); `original` is the original order and `newest
+/// first` its reverse. `Ok(None)` is the original order.
+pub fn parse_default(view: View, text: &str) -> Result<Option<Sort>, String> {
+    let lower = text.trim().to_lowercase();
+    let (name, desc) = match lower.rsplit_once(' ') {
+        Some((n, "desc" | "descending")) => (n.trim(), true),
+        Some((n, "asc" | "ascending")) => (n.trim(), false),
+        _ => (lower.as_str(), false),
+    };
+    match name {
+        "original" | "original order" | "none" if !desc => return Ok(None),
+        "newest first" | "newest" => return Ok(Some(Sort { key: Key::Original, desc: true })),
+        _ => {}
+    }
+    let name = if name == "count" { "song count" } else { name };
+    if let Some(&(_, key)) = view.modes().iter().find(|(_, k)| k.label() == name) {
+        return Ok(Some(Sort { key, desc }));
+    }
+    let valid: Vec<&str> = view.modes().iter().map(|(_, k)| k.label()).collect();
+    let hint = match crate::config::did_you_mean(name, &valid) {
+        Some(k) => format!("did you mean \"{k}\"?"),
+        None => format!("use {}, with asc or desc after it, or \"original\"", crate::config::list_of(&valid, "\"", "\"")),
+    };
+    Err(format!("'{}' is not a way to sort {}; {hint}", text.trim(), view.what()))
 }
 
 /// The remembered choice of each view.

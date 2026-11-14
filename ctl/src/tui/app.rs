@@ -139,7 +139,10 @@ pub struct App {
     pub help: bool,
     /// The sort popup (`,`) is open for this view.
     pub sorting: Option<View>,
+    /// The sort each view uses: what was picked, else the config's default.
     sorts: sort::Prefs,
+    /// What the user picked (what `uzu.json` holds); the config's defaults are not saved there.
+    picked: sort::Prefs,
     /// Where the sort choices are remembered (`None`: nowhere).
     sort_file: Option<PathBuf>,
     /// The app can't be reached; keep retrying.
@@ -192,6 +195,7 @@ impl App {
             help: false,
             sorting: None,
             sorts: sort::Prefs::default(),
+            picked: sort::Prefs::default(),
             sort_file: None,
             away: false,
             quit: false,
@@ -210,12 +214,18 @@ impl App {
 
     /// Remembers sort choices in `path` from now on, and takes up the ones saved there.
     pub fn use_sort_file(&mut self, path: PathBuf) {
-        let prefs = sort::load(&path);
+        self.picked = sort::load(&path);
         self.sort_file = Some(path);
+        self.refresh_sorts();
+    }
+
+    /// Each view's sort: the remembered pick, else `[defaults] sort_*` of the config.
+    fn refresh_sorts(&mut self) {
         for view in [View::Playlists, View::Albums, View::Songs, View::Search] {
-            self.apply_sort(view, prefs.get(view));
+            let sort = self.picked.get(view).or(self.config.sorts.get(view));
+            self.sorts.set(view, sort);
+            self.apply_sort(view, sort);
         }
-        self.sorts = prefs;
     }
 
     pub fn sort_of(&self, view: View) -> Option<Sort> {
@@ -233,9 +243,10 @@ impl App {
 
     fn set_sort(&mut self, view: View, sort: Option<Sort>) {
         self.sorts.set(view, sort);
+        self.picked.set(view, sort);
         self.apply_sort(view, sort);
         if let Some(path) = &self.sort_file {
-            sort::save(path, &self.sorts);
+            sort::save(path, &self.picked);
         }
     }
 
@@ -385,7 +396,7 @@ impl App {
             return None;
         }
         let caps = self.cover.caps();
-        let with = if self.solo_lyrics_shown() { showcase::solo_lyrics(self.width, self.height, caps) } else { None };
+        let with = if self.solo_lyrics_shown() { showcase::solo_lyrics_in(self.width, self.height, caps, self.config.layout.lyrics) } else { None };
         Some(with.unwrap_or_else(|| showcase::solo(self.width, self.height, caps)))
     }
 
@@ -457,7 +468,15 @@ impl App {
         self.message.as_ref().filter(|(_, at, hold)| now.saturating_duration_since(*at) < *hold).map(|(m, _, _)| m.as_str())
     }
 
+    /// A short message in the status line (`[defaults] notifications = false` hides these).
     pub fn set_message(&mut self, text: impl Into<String>, now: Instant) {
+        if self.config.notifications {
+            self.message = Some((text.into(), now, MESSAGE_FOR));
+        }
+    }
+
+    /// An error from the app: shown whatever the notifications setting is.
+    fn set_error(&mut self, text: impl Into<String>, now: Instant) {
         self.message = Some((text.into(), now, MESSAGE_FOR));
     }
 
@@ -468,6 +487,23 @@ impl App {
             self.message = Some((text, now, CONFIG_NOTICE_FOR));
         }
         self.config = config;
+        self.refresh_sorts();
+    }
+
+    /// Where the screens start, as `[layout]` says: the screen and, on the queue, its view.
+    /// `UZUMAKI_VIEW` (`env_view`) still beats the file.
+    pub fn start(&mut self, be: &mut dyn Backend, env_view: bool, now: Instant) {
+        if !env_view {
+            if let Some(view) = &self.config.layout.start_view {
+                self.layout = Layout::parse(Some(view));
+            }
+        }
+        let screen = Screen::ALL[self.config.layout.start_screen.min(Screen::ALL.len() - 1)];
+        if screen != Screen::Queue {
+            // A view only shows on the queue; the screen asked for wins.
+            self.layout = Layout::Normal;
+            self.goto(screen, be, now);
+        }
     }
 
     // ------------------------------------------------------------------------------ selection
@@ -628,7 +664,7 @@ impl App {
     fn send(&mut self, be: &mut dyn Backend, req: Request, now: Instant) -> Option<Reply> {
         match be.request(&req) {
             Ok(Reply::Error { message }) => {
-                self.set_message(message, now);
+                self.set_error(message, now);
                 None
             }
             Ok(reply) => {

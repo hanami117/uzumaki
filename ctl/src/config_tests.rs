@@ -644,3 +644,74 @@ fn status_line_takes_the_files_format_unless_the_command_line_has_one() {
     let cmd = crate::line_with(&crate::cli::parse(&["status".to_string(), "-l".to_string()]).unwrap().cmd, &plain);
     assert_eq!(cmd, Command::Line { format: Some(format::DEFAULT.into()), idle: Some(String::new()) });
 }
+
+// ------------------------------------------------------------------- layout and defaults
+
+use crate::config::{Columns, LayoutCfg, Placement};
+use crate::tui::sort::{Key, Sort, View};
+
+#[test]
+fn no_layout_or_defaults_is_today_s_behaviour() {
+    let cfg = Config::parse("");
+    assert_eq!(cfg.layout, LayoutCfg::default());
+    assert_eq!(cfg.layout.start_screen, 0);
+    assert_eq!(cfg.layout.start_view, None);
+    assert_eq!(cfg.layout.lyrics, Placement::Auto);
+    assert_eq!(cfg.layout.columns, Columns { artist: 3, title: 5, album: 3, show_artist: true, show_album: true });
+    assert!(cfg.notifications);
+    for v in [View::Playlists, View::Albums, View::Songs, View::Search] {
+        assert_eq!(cfg.sorts.get(v), None);
+    }
+}
+
+#[test]
+fn layout_keys() {
+    let cfg = Config::parse("[layout]\nstart_screen = \"Albums\"\nstart_view = \"solo\"\nlyrics = \"under\"\nartist_width = 2\ntitle_width = 8\nalbum_width = 1\nshow_album = false\n");
+    assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    assert_eq!(cfg.layout, LayoutCfg { start_screen: 3, start_view: Some("solo".into()), lyrics: Placement::Under, columns: Columns { artist: 2, title: 8, album: 1, show_artist: true, show_album: false } });
+    // A screen by number, and "normal" is no view.
+    let cfg = Config::parse("[layout]\nstart_screen = 5\nstart_view = \"normal\"\n");
+    assert_eq!((cfg.layout.start_screen, cfg.layout.start_view), (4, None));
+}
+
+#[test]
+fn layout_mistakes_say_what_is_allowed() {
+    let cfg = Config::parse("[layout]\nstart_screen = \"playlist\"\nstart_view = \"big\"\nlyrics = \"left\"\nartist_width = 0\ntitle_width = 99\nalbum_width = \"wide\"\nshow_artist = \"no\"\nstart_screen = 6\n");
+    let w = lines(&cfg);
+    assert!(w[0].contains("'playlist' is not a choice for 'start_screen'; did you mean \"playlists\"?"), "{}", w[0]);
+    assert!(w[1].contains("'big' is not a choice for 'start_view'; use \"normal\", \"showcase\", \"solo\""), "{}", w[1]);
+    assert!(w[2].contains("'left' is not a choice for 'lyrics'; use \"auto\", \"beside\", \"under\""), "{}", w[2]);
+    assert!(w[3].contains("a whole number from 1 to 20 (got 0)"), "{}", w[3]);
+    assert!(w[4].contains("(got 99)"), "{}", w[4]);
+    assert!(w[5].contains("'album_width' needs a whole number (got a string)"), "{}", w[5]);
+    assert!(w[6].contains("'show_artist' needs true or false"), "{}", w[6]);
+    // Every bad value left the default alone.
+    assert_eq!(cfg.layout, LayoutCfg::default());
+}
+
+#[test]
+fn default_sorts() {
+    let cfg = Config::parse("[defaults]\nsort_playlists = \"name\"\nsort_albums = \"Year desc\"\nsort_songs = \"artist\"\nsort_search = \"duration descending\"\nnotifications = false\n");
+    assert!(cfg.warnings.is_empty(), "{:?}", lines(&cfg));
+    assert_eq!(cfg.sorts.get(View::Playlists), Some(Sort { key: Key::Name, desc: false }));
+    assert_eq!(cfg.sorts.get(View::Albums), Some(Sort { key: Key::Year, desc: true }));
+    assert_eq!(cfg.sorts.get(View::Songs), Some(Sort { key: Key::Artist, desc: false }));
+    assert_eq!(cfg.sorts.get(View::Search), Some(Sort { key: Key::Duration, desc: true }));
+    assert!(!cfg.notifications);
+    let cfg = Config::parse("[defaults]\nsort_playlists = \"count desc\"\nsort_albums = \"newest first\"\nsort_songs = \"original\"\n");
+    assert_eq!(cfg.sorts.get(View::Playlists), Some(Sort { key: Key::Count, desc: true }));
+    assert_eq!(cfg.sorts.get(View::Albums), Some(Sort { key: Key::Original, desc: true }));
+    assert_eq!(cfg.sorts.get(View::Songs), None);
+}
+
+#[test]
+fn bad_default_sorts_list_what_the_view_can_sort_by() {
+    let cfg = Config::parse("[defaults]\nsort_playlists = \"artist\"\nsort_albums = \"yaer\"\nsort_songs = \"year\"\nsort_search = 3\nnotifications = \"off\"\n");
+    let w = lines(&cfg);
+    assert!(w[0].contains("'artist' is not a way to sort playlists; use \"name\", \"song count\""), "{}", w[0]);
+    assert!(w[1].contains("'yaer' is not a way to sort albums; did you mean \"year\"?"), "{}", w[1]);
+    assert!(w[2].contains("not a way to sort songs; use \"title\", \"artist\", \"album\", \"duration\""), "{}", w[2]);
+    assert!(w[3].contains("'sort_search' needs text in quotes"), "{}", w[3]);
+    assert!(w[4].contains("'notifications' needs true or false"), "{}", w[4]);
+    assert_eq!(cfg.sorts.get(View::Albums), None);
+}

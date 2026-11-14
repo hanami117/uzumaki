@@ -12,21 +12,26 @@ use crate::fmt::{fmt_time, pad_left, pad_right, truncate};
 
 #[cfg(test)]
 pub use crate::config::theme::CORAL;
+use crate::config::Columns;
 use crate::config::theme::Theme;
 use std::cell::Cell;
 
 thread_local! {
-    /// The colours drawing uses: `view::draw` sets them from the config at the start of each
-    /// frame (drawing is one thread; a test's frames are its own thread's).
-    static THEME: Cell<Theme> = Cell::new(Theme::default());
+    /// The colours and column shares drawing uses: `view::draw` sets them from the config at the
+    /// start of each frame (drawing is one thread; a test's frames are its own thread's).
+    static LOOK: Cell<(Theme, Columns)> = Cell::new((Theme::default(), Columns::default()));
 }
 
-pub fn set_theme(theme: Theme) {
-    THEME.with(|t| t.set(theme));
+pub fn set_look(theme: Theme, columns: Columns) {
+    LOOK.with(|l| l.set((theme, columns)));
 }
 
 pub fn theme() -> Theme {
-    THEME.with(Cell::get)
+    LOOK.with(|l| l.get().0)
+}
+
+fn column_setup() -> Columns {
+    LOOK.with(|l| l.get().1)
 }
 
 /// A foreground colour for a role; no colour is the terminal's own foreground.
@@ -136,18 +141,21 @@ enum Col {
 
 /// The columns that fit `width` and their widths (they add up to `width`).
 fn columns(width: usize, num_w: usize, time_w: usize) -> Vec<(Col, usize)> {
+    let setup = column_setup();
     let mut cols = vec![Col::Num, Col::Title, Col::Time];
-    if width >= MIN_ARTIST_WIDTH {
+    if setup.show_artist && width >= MIN_ARTIST_WIDTH {
         cols.insert(0, Col::Artist);
     }
-    if width >= MIN_ALBUM_WIDTH {
-        cols.insert(3, Col::Album);
+    if setup.show_album && width >= MIN_ALBUM_WIDTH {
+        let at = cols.iter().position(|c| *c == Col::Title).map_or(cols.len(), |i| i + 1);
+        cols.insert(at, Col::Album);
     }
     let fixed = num_w + time_w + GAP * (cols.len() - 1);
     let flex = width.saturating_sub(fixed);
     let weight = |c: Col| match c {
-        Col::Artist | Col::Album => 3,
-        _ => 5,
+        Col::Artist => usize::from(setup.artist),
+        Col::Album => usize::from(setup.album),
+        _ => usize::from(setup.title),
     };
     let total: usize = cols.iter().filter(|c| matches!(c, Col::Artist | Col::Title | Col::Album)).map(|c| weight(*c)).sum();
     let mut left = flex;
