@@ -1,5 +1,6 @@
 //! Animated album artwork ("motion art"): Apple's square video loop of an album, played in the
-//! full-screen Now Playing cover in place of the still.
+//! full-screen Now Playing cover in place of the still, and in the cover at the top of an album
+//! page (as Apple's Mac and iPad apps do: the square clip, the size of the cover).
 //!
 //! - `MotionArt` is what the catalog says (`extend=editorialVideo`): the master playlist URL.
 //! - `hls` picks the variant (768 H.264) and its one `.mp4`; `clips` keeps those on disk and
@@ -9,7 +10,8 @@
 //!   else (and as the Mac's fallback) `frames`, a spawned `ffmpeg` writing RGBA into
 //!   `rune::Pixels` from a worker thread. No ffmpeg: the still cover stays.
 //!
-//! `state/motion.rs` drives it from `poll`; `ui/now_playing` draws the layer.
+//! `state/motion.rs` drives it from `poll`; `ui/now_playing` and `ui/collection` draw the layer.
+//! At most one clip decodes at a time: the album page's stops while Now Playing covers it.
 
 pub mod clips;
 mod frames;
@@ -85,6 +87,38 @@ pub fn want(f: &Facts) -> Want {
     if !f.enabled || f.reduced_motion || !f.now_playing || f.hidden {
         Want::Off
     } else if f.covered || !f.playing {
+        Want::Paused
+    } else {
+        Want::Playing
+    }
+}
+
+/// What decides whether an album page's cover moves.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PageFacts {
+    /// Settings → Appearance → Animated artwork.
+    pub enabled: bool,
+    /// Its "Also on album pages".
+    pub album_pages: bool,
+    pub reduced_motion: bool,
+    /// Local only mode: no Apple requests at all.
+    pub local_only: bool,
+    /// An album page is the page shown.
+    pub album_page: bool,
+    /// Full-screen Now Playing covers the page (its own clip may play).
+    pub now_playing: bool,
+    pub hidden: bool,
+    pub covered: bool,
+    /// The page is scrolled down past the cover.
+    pub scrolled_away: bool,
+}
+
+/// The album page's cover. Unlike Now Playing it loops whether or not music plays, as Apple's
+/// does; it holds its frame while it can't be seen, and is gone off the page.
+pub fn want_page(f: &PageFacts) -> Want {
+    if !f.enabled || !f.album_pages || f.reduced_motion || f.local_only || !f.album_page || f.now_playing || f.hidden {
+        Want::Off
+    } else if f.covered || f.scrolled_away {
         Want::Paused
     } else {
         Want::Playing
@@ -267,5 +301,20 @@ mod tests {
         assert_eq!(want(&Facts { covered: true, ..on }), Want::Paused, "minimised or covered: holds");
         assert_eq!(want(&Facts { playing: false, ..on }), Want::Paused, "music paused: holds");
         assert_eq!(want(&Facts { hidden: true, covered: true, playing: false, ..on }), Want::Off);
+    }
+
+    #[test]
+    fn an_album_page_plays_while_its_cover_can_be_seen() {
+        let on = PageFacts { enabled: true, album_pages: true, album_page: true, ..PageFacts::default() };
+        assert_eq!(want_page(&on), Want::Playing, "music paused or stopped: still loops");
+        assert_eq!(want_page(&PageFacts { enabled: false, ..on }), Want::Off, "the setting");
+        assert_eq!(want_page(&PageFacts { album_pages: false, ..on }), Want::Off, "Also on album pages");
+        assert_eq!(want_page(&PageFacts { reduced_motion: true, ..on }), Want::Off, "Reduce Motion");
+        assert_eq!(want_page(&PageFacts { local_only: true, ..on }), Want::Off, "local only mode");
+        assert_eq!(want_page(&PageFacts { album_page: false, ..on }), Want::Off, "another page");
+        assert_eq!(want_page(&PageFacts { now_playing: true, ..on }), Want::Off, "Now Playing covers it");
+        assert_eq!(want_page(&PageFacts { hidden: true, ..on }), Want::Off, "hidden: stopped");
+        assert_eq!(want_page(&PageFacts { covered: true, ..on }), Want::Paused, "minimised: holds");
+        assert_eq!(want_page(&PageFacts { scrolled_away: true, ..on }), Want::Paused, "scrolled past: holds");
     }
 }

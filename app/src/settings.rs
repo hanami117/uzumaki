@@ -256,6 +256,9 @@ pub struct Settings {
     /// Apple's video loop of the album in the full-screen Now Playing cover, when it has one
     /// (Settings → Appearance; `motion`). Never with Reduce Motion.
     pub animated_artwork: bool,
+    /// The same loop in place of the cover at the top of an album page (Settings → Appearance,
+    /// under Animated artwork; `motion::want_page`). Only counts while `animated_artwork` is on.
+    pub album_page_motion: bool,
     /// A desktop notification (title, artist and album, cover) when a new song starts while
     /// the window isn't in front (Settings → General; `notify.rs`). Off by default.
     pub notify_song_change: bool,
@@ -320,6 +323,7 @@ impl Default for Settings {
             appearance: Default::default(),
             startup_animation: true,
             animated_artwork: true,
+            album_page_motion: true,
             notify_song_change: false,
             check_updates: true,
             resume_playback: true,

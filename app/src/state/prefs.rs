@@ -268,6 +268,8 @@ impl State {
         if hide {
             // Synced lyrics keep `poll` running every frame; nobody can see them now.
             crate::ui::close_now_playing(self);
+            // The album page's animated cover too: no frame may come to stop it.
+            self.motion.stop_page();
             // macOS: no window and a menu bar icon to get back in, so the Dock icon goes too.
             // `tray::show_window` brings it back. On a Quit/Cmd-Q the app is already ending
             // (Rune runs this hook then too), so the request is never applied.

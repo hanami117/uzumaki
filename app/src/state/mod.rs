@@ -373,6 +373,8 @@ pub enum Msg {
     LyricsRetry { id: String },
     /// The playing song's verified catalog album for animated artwork.
     MotionSongAlbum { id: String, result: Result<Option<String>, String> },
+    /// A library album's catalog album, for its page's animated cover (`state::motion`).
+    MotionPageAlbum { id: String, result: Result<Option<String>, String> },
     /// A catalog album's motion art (`api::album_motion`); Ok(None) when it has none.
     Motion { album: String, result: Result<Option<crate::motion::MotionArt>, String> },
     /// A catalog album's page asked with its motion art: both land.
@@ -561,7 +563,7 @@ pub struct State {
     favs: favourites::Favourites,
     /// The picture chosen in the New Playlist dialog, for the playlist Apple is creating.
     new_playlist_picture: Option<std::path::PathBuf>,
-    /// Animated artwork in Now Playing (`motion.rs`).
+    /// Animated artwork in Now Playing and album pages (`motion.rs`).
     pub motion: motion::MotionState,
     /// View-only state owned by the UI module (text field contents, scroll, …).
     pub ui: crate::ui::UiState,
@@ -917,9 +919,12 @@ impl State {
                 self.motion_song_album_known(id, result);
                 return false;
             }
+            Msg::MotionPageAlbum { id, result } => return self.motion_page_album_known(id, result),
             Msg::Motion { album, result } => {
+                // The album page shown needs a frame for `poll_page_motion` to take the next step.
+                let page = self.page_shows(&album);
                 self.motion_known(album, result);
-                return false; // `poll_motion` takes it from here
+                return page; // else `poll_motion` takes it from here
             }
             Msg::AlbumPage { id, motion, result } => {
                 if result.is_ok() {
