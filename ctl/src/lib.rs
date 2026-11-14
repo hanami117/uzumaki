@@ -436,6 +436,14 @@ pub struct Queue {
     /// Confirmed session history, oldest first, excluding current.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<SongInfo>,
+    /// AutoPlay: similar songs Apple suggested to play after `up_next` (repeat off, not a station).
+    /// Numbered on after `up_next` and `next_lap` (entry `up_next.len() + next_lap.len() + k`);
+    /// only `Jump` takes those numbers. Empty from an older app or with AutoPlay off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub autoplay: Vec<SongInfo>,
+    /// The AutoPlay setting (∞), when the app says. `None` from an older app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autoplay_on: Option<bool>,
 }
 
 // ------------------------------------------------------------------------------------ transport
@@ -580,6 +588,24 @@ mod tests {
         assert!(!json.contains("station"), "nothing to say, so an old uzu sees the queue it knows");
         let song = |id: &str| SongInfo { id: id.into(), title: id.into(), ..Default::default() };
         let q = Queue { station: Some("Stazione di Thomas".into()), station_played: vec![song("a"), song("b")], ..Default::default() };
+        let json = serde_json::to_string(&q).unwrap();
+        assert_eq!(serde_json::from_str::<Queue>(&json).unwrap(), q);
+        #[derive(Deserialize)]
+        struct OldQueue {
+            queued: usize,
+        }
+        assert_eq!(serde_json::from_str::<OldQueue>(&json).unwrap().queued, 0);
+    }
+
+    /// An old app sends no AutoPlay fields; an old `uzu` ignores them.
+    #[test]
+    fn autoplay_is_an_optional_part_of_the_queue() {
+        let old = r#"{"current":null,"up_next":[],"queued":0,"source":"","shuffle":false,"repeat":"off"}"#;
+        let q: Queue = serde_json::from_str(old).unwrap();
+        assert_eq!((q.autoplay.len(), q.autoplay_on), (0, None));
+        assert!(!serde_json::to_string(&q).unwrap().contains("autoplay"));
+        let song = |id: &str| SongInfo { id: id.into(), title: id.into(), ..Default::default() };
+        let q = Queue { autoplay: vec![song("a")], autoplay_on: Some(true), ..Default::default() };
         let json = serde_json::to_string(&q).unwrap();
         assert_eq!(serde_json::from_str::<Queue>(&json).unwrap(), q);
         #[derive(Deserialize)]

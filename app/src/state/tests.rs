@@ -2983,3 +2983,206 @@ done
         assert!(pump(&mut s, &f, |s| shows_lyrics(s, &a)), "{:?}", s.lyrics_of(&a));
     }
 }
+
+// ------------------------------------------------------------------------ AutoPlay, Create Station
+
+fn ap_state() -> State {
+    let mut s = State::offline();
+    s.session.authorized = true;
+    s
+}
+
+fn suggested(n: usize) -> Vec<Song> {
+    (0..n).map(|i| song(&format!("ap{i}"))).collect()
+}
+
+fn autoplay_posts(s: &State) -> Vec<String> {
+    s.sent.borrow().iter().filter(|p| p.contains("/v1/me/stations/")).cloned().collect()
+}
+
+/// Plays `ids` from the first, MusicKit confirms it, Apple makes the station and sends `n` songs.
+fn playing_with_autoplay(ids: &[&str], n: usize) -> State {
+    let mut s = ap_state();
+    let list: Vec<Song> = ids.iter().map(|i| song(i)).collect();
+    s.play_songs(&list, 0);
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(list[0].clone()))));
+    let run = s.queue.run;
+    s.apply_msg(Msg::AutoplayStation { run, result: Ok("st.1".into()) });
+    s.apply_msg(Msg::AutoplayTracks { run, result: Ok(suggested(n)) });
+    s
+}
+
+#[test]
+fn autoplay_seeds_a_station_from_the_end_of_the_list_and_keeps_ten_songs_after_it() {
+    let mut s = ap_state();
+    let list: Vec<Song> = (0..14).map(|i| song(&i.to_string())).collect();
+    s.play_songs(&list, 0);
+    assert!(autoplay_posts(&s).is_empty(), "nothing is asked before the song really plays");
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(list[0].clone()))));
+    let posts = autoplay_posts(&s);
+    assert_eq!(posts.len(), 1);
+    // Apple's seeds: the last 10 songs of the queue, typed as MusicKit types them.
+    assert!(posts[0].starts_with("POST /v1/me/stations/continuous "), "{posts:?}");
+    assert!(posts[0].contains(r#"{"id":"4","type":"songs"}"#) && posts[0].contains(r#"{"id":"13","type":"songs"}"#), "{posts:?}");
+    assert!(!posts[0].contains(r#""id":"3""#), "only the last 10: {posts:?}");
+    let run = s.queue.run;
+    s.apply_msg(Msg::AutoplayStation { run, result: Ok("st.1".into()) });
+    assert_eq!(autoplay_posts(&s).last().unwrap(), "POST /v1/me/stations/next-tracks/st.1?limit=10");
+    s.apply_msg(Msg::AutoplayTracks { run, result: Ok(suggested(10)) });
+    assert_eq!(s.queue.autoplay.len(), 10);
+    // The bridge gets them after the list, so MusicKit plays on by itself.
+    let ids = s.queue.upcoming_ids();
+    assert_eq!((ids[12].as_str(), ids[13].as_str(), ids.len()), ("13", "ap0", 23));
+    // Uzu sees them, numbered after Up Next.
+    let q = s.ctl_queue();
+    assert_eq!((q.autoplay.len(), q.autoplay_on), (10, Some(true)));
+}
+
+#[test]
+fn the_end_of_the_list_plays_into_autoplay_and_asks_for_more_when_few_are_left() {
+    let mut s = playing_with_autoplay(&["a", "b"], 6);
+    assert!(s.queue.bridge_has_next(Repeat::Off));
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("b")))));
+    // MusicKit moves on into the first suggestion: it joins the list and plays.
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("ap0")))));
+    assert_eq!(s.queue.current().map(|x| x.id.as_str()), Some("ap0"));
+    assert_eq!(s.queue.autoplay.len(), 5);
+    assert_eq!(s.history.tracks.iter().map(|(_, x)| x.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    // Previous goes back into the list.
+    assert_eq!(s.queue.context.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["a", "b", "ap0"]);
+    // Next song: four left, below the refill mark: the same station is asked for six more.
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("ap1")))));
+    assert_eq!(autoplay_posts(&s).last().unwrap(), "POST /v1/me/stations/next-tracks/st.1?limit=6");
+    let run = s.queue.run;
+    s.apply_msg(Msg::AutoplayTracks { run, result: Ok((0..8).map(|i| song(&format!("more{i}"))).chain([song("ap2")]).collect()) });
+    assert_eq!(s.queue.autoplay.len(), 12, "new ones join the end, a repeat of one listed is dropped");
+}
+
+#[test]
+fn next_and_a_click_go_into_autoplay_like_any_song() {
+    let mut s = playing_with_autoplay(&["a"], 4);
+    // The local-file path (the app decides): `advance` takes the first suggestion.
+    assert_eq!(s.queue.clone().advance(Repeat::Off).map(|x| x.id), Some("ap0".into()));
+    // A click on the third suggestion skips the two before it.
+    let i = s.queue.autoplay_offset() + 2;
+    s.play_up_next(i);
+    assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("ap2"));
+    assert_eq!(s.queue.autoplay.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["ap3"]);
+    // Removing a suggestion with its button.
+    s.remove_autoplay(0);
+    assert!(s.queue.autoplay.is_empty());
+}
+
+#[test]
+fn repeat_turns_autoplay_off_and_off_again_brings_it_back() {
+    let mut s = playing_with_autoplay(&["a", "b"], 10);
+    s.set_repeat(Repeat::All);
+    assert!(s.queue.autoplay.is_empty(), "Apple removes the suggestions when repeat goes on");
+    assert!(!s.queue.upcoming_ids().iter().any(|id| id.starts_with("ap")));
+    let asked = autoplay_posts(&s).len();
+    s.set_repeat(Repeat::One);
+    assert_eq!(autoplay_posts(&s).len(), asked, "nothing asked under repeat");
+    s.set_repeat(Repeat::Off);
+    assert_eq!(autoplay_posts(&s).last().unwrap(), "POST /v1/me/stations/next-tracks/st.1?limit=10", "the same station again");
+}
+
+#[test]
+fn the_switch_is_one_setting_saved_with_the_others_and_on_by_default() {
+    let mut s = playing_with_autoplay(&["a"], 10);
+    assert!(Settings::default().autoplay);
+    assert!(Settings::from_json(br#"{"shuffle": true}"#).autoplay, "older settings files get it on");
+    s.toggle_autoplay();
+    assert!(!s.settings.autoplay && s.queue.autoplay.is_empty());
+    let saved = serde_json::to_vec(&s.settings).unwrap();
+    assert!(!Settings::from_json(&saved).autoplay);
+    assert_eq!(s.ctl_queue().autoplay_on, Some(false));
+    // On again: a new station (Apple drops its station when AutoPlay goes off).
+    s.toggle_autoplay();
+    assert!(autoplay_posts(&s).last().unwrap().starts_with("POST /v1/me/stations/continuous"));
+}
+
+#[test]
+fn autoplay_stays_out_of_long_queues_stations_local_only_and_old_queues() {
+    // More than 50 songs left: nothing asked (Apple's limit).
+    let mut s = ap_state();
+    let list: Vec<Song> = (0..60).map(|i| song(&i.to_string())).collect();
+    s.play_songs(&list, 0);
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(list[0].clone()))));
+    assert!(autoplay_posts(&s).is_empty());
+    // An answer for a queue that has been replaced is dropped.
+    let mut s = playing_with_autoplay(&["a"], 0);
+    let old = s.queue.run;
+    s.play_songs(&[song("x")], 0);
+    s.apply_msg(Msg::AutoplayTracks { run: old, result: Ok(suggested(3)) });
+    assert!(s.queue.autoplay.is_empty());
+    // Signed out: nothing asked.
+    let mut s = State::offline();
+    s.play_songs(&[song("a")], 0);
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("a")))));
+    assert!(autoplay_posts(&s).is_empty());
+    // A station never ends: no AutoPlay, no ∞.
+    let mut s = playing_with_autoplay(&["a"], 3);
+    s.play_station(&station());
+    assert!(s.queue.autoplay.is_empty() && !s.autoplay_offered());
+    // Local only mode: nothing to seed it, and no switch.
+    let mut s = playing_with_autoplay(&["a"], 3);
+    s.set_music_source(crate::settings::MusicSource::LocalOnly);
+    assert!(s.queue.autoplay.is_empty() && !s.autoplay_offered() && !s.autoplay_applies());
+}
+
+#[test]
+fn shuffle_reorders_the_list_but_not_autoplay() {
+    let mut s = playing_with_autoplay(&["a", "b", "c", "d"], 5);
+    s.set_shuffle(true);
+    assert_eq!(s.queue.autoplay.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["ap0", "ap1", "ap2", "ap3", "ap4"]);
+    s.set_shuffle(false);
+    assert_eq!(s.queue.autoplay.len(), 5);
+}
+
+#[test]
+fn a_failed_station_is_not_asked_again_for_the_same_queue() {
+    let mut s = ap_state();
+    s.play_songs(&[song("a"), song("b")], 0);
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("a")))));
+    let run = s.queue.run;
+    s.apply_msg(Msg::AutoplayStation { run, result: Err("HTTP 403".into()) });
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("b")))));
+    assert_eq!(autoplay_posts(&s).len(), 1);
+}
+
+#[test]
+fn create_station_on_a_song_or_an_artist_plays_apples_seeded_station() {
+    let mut s = ap_state();
+    let mut lib = song("i.abc");
+    lib.title = "Blinding Lights".into();
+    lib.catalog_id = Some("1488408568".into());
+    s.play_songs(&[song("x")], 0);
+    s.create_song_station(&lib);
+    let run = s.queue.station.clone().expect("a station");
+    assert_eq!((run.id.as_str(), run.name.as_str(), run.one_off), ("ra.1488408568", "Blinding Lights Station", false));
+    assert_eq!(s.queue.source, "Blinding Lights Station");
+    assert!(s.queue.autoplay.is_empty() && s.queue.up_next_len() == 0);
+    // The station's songs land in its Up Next history like any station's.
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("s1")))));
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("s2")))));
+    assert_eq!(played_ids(&s), ["s1"]);
+    // A library song Apple never matched has no station.
+    let mut s = ap_state();
+    s.create_song_station(&song("i.only"));
+    assert!(s.queue.station.is_none() && s.toast.is_some());
+    // An artist: "<name> & Similar Artists Station".
+    let mut s = ap_state();
+    s.create_artist_station("479756766", "The Weeknd");
+    let run = s.queue.station.clone().unwrap();
+    assert_eq!((run.id.as_str(), run.name.as_str()), ("ra.479756766", "The Weeknd & Similar Artists Station"));
+}
+
+#[test]
+fn previous_to_a_song_that_autoplay_also_suggests_stays_in_the_list() {
+    let mut s = playing_with_autoplay(&["a", "b"], 0);
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("b")))));
+    s.queue.add_autoplay(vec![song("x"), song("a")]);
+    // Previous on the last song: MusicKit reports "a" again, which AutoPlay also lists.
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("a")))));
+    assert_eq!((s.queue.pos, s.queue.context.len(), s.queue.autoplay.len()), (0, 2, 2));
+}

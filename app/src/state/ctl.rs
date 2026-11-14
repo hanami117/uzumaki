@@ -168,6 +168,8 @@ impl State {
             next_lap: self.queue.next_lap_songs().iter().map(song_info).collect(),
             station: self.queue.station.as_ref().map(|r| r.name.clone()),
             station_played: self.queue.station_played().iter().map(song_info).collect(),
+            autoplay: self.queue.autoplay.iter().map(song_info).collect(),
+            autoplay_on: self.autoplay_offered().then_some(self.settings.autoplay),
         }
     }
 

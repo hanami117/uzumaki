@@ -5,8 +5,16 @@
 //! first, then the rest of the list playback was started from ("context"), shuffled or not.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::models::Song;
+
+/// Numbers each queue started (`PlayQueue::run`): AutoPlay's station belongs to one.
+static RUNS: AtomicU64 = AtomicU64::new(1);
+
+fn next_run() -> u64 {
+    RUNS.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Repeat {
@@ -117,6 +125,14 @@ pub struct PlayQueue {
     /// (Play Next of a song that is also further down the list used to move the position there and
     /// drop the songs in between). Cleared whenever playback lands on any other song.
     pub user_playing: Option<Song>,
+    /// AutoPlay: similar songs Apple suggested to follow the end of the list (`state/autoplay.rs`),
+    /// in play order. Shown under "AutoPlay" after the list, given to MusicKit after it, and
+    /// moved into `context` one by one as they start (so Previous, History and the position work
+    /// as for any song). Only with repeat off and off stations.
+    pub autoplay: Vec<Song>,
+    /// Which queue this is: a new number for each list or station started (`start`,
+    /// `for_station`); edits keep it. AutoPlay's station is made for one run.
+    pub run: u64,
 }
 
 impl PlayQueue {
@@ -124,7 +140,7 @@ impl PlayQueue {
     /// of the same session over (the station picking up again after a one-off song).
     pub fn for_station(id: &str, name: &str, keep: Option<StationRun>) -> Self {
         let run = StationRun { id: id.into(), name: name.into(), one_off: false, ..keep.unwrap_or_default() };
-        Self { source: name.into(), station: Some(run), ..Self::default() }
+        Self { source: name.into(), station: Some(run), run: next_run(), ..Self::default() }
     }
 
     /// The station says (via MusicKit) that `song` plays now. The song that played before it goes
@@ -209,6 +225,7 @@ impl PlayQueue {
         self.base = 0;
         self.drop_lap();
         self.looping = false;
+        self.autoplay.clear();
         Some(song)
     }
 
@@ -225,7 +242,22 @@ impl PlayQueue {
         } else {
             (original.clone(), index)
         };
-        Self { original, context, pos, base: pos, user, source: source.to_string(), shuffled: shuffle, next_lap: None, looping: false, lap_gen: 0, station: None, user_playing: None }
+        Self {
+            original,
+            context,
+            pos,
+            base: pos,
+            user,
+            source: source.to_string(),
+            shuffled: shuffle,
+            next_lap: None,
+            looping: false,
+            lap_gen: 0,
+            station: None,
+            user_playing: None,
+            autoplay: Vec::new(),
+            run: next_run(),
+        }
     }
 
     pub fn current(&self) -> Option<&Song> {
@@ -257,7 +289,8 @@ impl PlayQueue {
         if self.station_live() {
             return Vec::new(); // MusicKit's queue is the station; queued songs are the app's
         }
-        self.up_next().take_while(|s| !s.is_local()).filter(|s| s.playable).map(|s| s.play_id().to_string()).collect()
+        let after = self.up_next().chain(&self.autoplay);
+        after.take_while(|s| !s.is_local()).filter(|s| s.playable).map(|s| s.play_id().to_string()).collect()
     }
 
     /// The next lap, for repeat all, when the bridge can loop into it on its own (no local
@@ -279,7 +312,7 @@ impl PlayQueue {
         match self.context.get(self.pos + 1) {
             Some(s) => Some(s),
             None if repeat == Repeat::All && !self.one_off() => self.lap().unwrap_or(&self.context).first(),
-            None => None,
+            None => self.autoplay.first(),
         }
     }
 
@@ -353,7 +386,7 @@ impl PlayQueue {
             None => false,
             Some(s) if s.is_local() => false,
             Some(_) => {
-                let wraps = self.user.is_empty() && self.pos + 1 >= self.context.len();
+                let wraps = self.user.is_empty() && self.pos + 1 >= self.context.len() && self.autoplay.is_empty();
                 !(wraps && self.cycle_ids().is_none())
             }
         }
@@ -377,6 +410,9 @@ impl PlayQueue {
         } else if repeat == Repeat::All && !self.context.is_empty() && !self.one_off() {
             self.plan_lap(repeat);
             self.promote_lap();
+            return self.current().cloned();
+        } else if !self.autoplay.is_empty() {
+            self.enter_autoplay(0);
             return self.current().cloned();
         } else {
             return None;
@@ -407,6 +443,11 @@ impl PlayQueue {
             self.promote_lap();
             return true;
         }
+        // MusicKit played on past the end of the list into AutoPlay's first song.
+        if self.at_end() && self.autoplay.first().is_some_and(|a| a.same_track(song)) {
+            self.enter_autoplay_by_musickit(0);
+            return true;
+        }
         let n = self.context.len();
         // Forward first (normal play), then from the start (repeat all wrapped, or Previous).
         let found = (self.pos + 1..n).chain(0..self.pos).find(|&i| self.context[i].same_track(song));
@@ -418,8 +459,22 @@ impl PlayQueue {
                 self.pos = i;
                 true
             }
-            None => false,
+            // A later AutoPlay song (one went missing on the way).
+            None => match self.autoplay.iter().position(|s| s.same_track(song)) {
+                Some(k) => {
+                    self.enter_autoplay_by_musickit(k);
+                    true
+                }
+                None => false,
+            },
         }
+    }
+
+    /// `enter_autoplay` when MusicKit moved on by itself: its queue still starts where it did.
+    fn enter_autoplay_by_musickit(&mut self, k: usize) {
+        let base = self.base;
+        self.enter_autoplay(k);
+        self.base = base;
     }
 
     /// Shuffle turned on or off mid-list: reorder what hasn't played yet. The current song stays.
@@ -480,6 +535,7 @@ impl PlayQueue {
         self.context.retain(Song::is_local);
         self.original.retain(Song::is_local);
         self.user.retain(Song::is_local);
+        self.autoplay.clear();
         self.pos = self.pos.min(self.context.len().saturating_sub(1));
         self.base = self.pos;
         self.drop_lap();
@@ -502,9 +558,18 @@ impl PlayQueue {
         let rest = self.context.len().saturating_sub(self.pos + 1);
         let k = i - self.user.len();
         if k >= rest {
-            // Past this lap: the next lap, then (on a station) the songs it already played.
+            // Past this lap: the next lap, AutoPlay, then (on a station) the songs it already played.
             let lap = self.next_lap_songs().len();
-            return if k - rest < lap { self.jump_into_next_lap(k - rest) } else { self.replay_from_station(k - rest - lap) };
+            let auto = self.autoplay.len();
+            return match k - rest {
+                a if a < lap => self.jump_into_next_lap(a),
+                a if a < lap + auto => {
+                    self.user.clear();
+                    self.enter_autoplay(a - lap);
+                    self.current().cloned()
+                }
+                a => self.replay_from_station(a - lap - auto),
+            };
         }
         let j = self.pos + 1 + k;
         self.user.clear();
@@ -540,6 +605,45 @@ impl PlayQueue {
         self.pos -= 1;
         self.base = self.pos;
         self.current().cloned()
+    }
+
+    /// AutoPlay song `k` starts: it joins the end of the list (the ones before it are skipped and
+    /// dropped) and becomes the current song, MusicKit's queue starting there (`base`).
+    fn enter_autoplay(&mut self, k: usize) {
+        let Some(song) = self.autoplay.drain(..=k).next_back() else { return };
+        self.user_playing = None;
+        self.original.push(song.clone());
+        self.context.push(song);
+        self.pos = self.context.len() - 1;
+        self.base = self.pos;
+        self.drop_lap();
+    }
+
+    /// Where AutoPlay's songs are numbered in `jump` (after Up Next and the next lap).
+    pub fn autoplay_offset(&self) -> usize {
+        self.up_next_len() + self.next_lap_songs().len()
+    }
+
+    /// Takes AutoPlay song `k` off the list (its remove button). False when out of range.
+    pub fn remove_autoplay(&mut self, k: usize) -> bool {
+        if k < self.autoplay.len() {
+            self.autoplay.remove(k);
+            return true;
+        }
+        false
+    }
+
+    /// AutoPlay's new songs: added after those already listed, without the playing song or one
+    /// listed twice. Returns how many were added.
+    pub fn add_autoplay(&mut self, songs: Vec<Song>) -> usize {
+        let before = self.autoplay.len();
+        for s in songs {
+            let known = self.current().is_some_and(|c| c.same_track(&s)) || self.autoplay.iter().any(|a| a.same_track(&s));
+            if s.playable && !s.is_local() && !known {
+                self.autoplay.push(s);
+            }
+        }
+        self.autoplay.len() - before
     }
 
     pub fn remove_up_next(&mut self, i: usize) {

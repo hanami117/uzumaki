@@ -51,6 +51,12 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("now-playing-queue-no-history", now_playing_queue_no_history),
     ("up-next-repeat", up_next_repeat),
     ("up-next-repeat-end", up_next_repeat_end),
+    ("up-next-autoplay", up_next_autoplay),
+    ("up-next-autoplay-playing", up_next_autoplay_playing),
+    ("up-next-autoplay-off", up_next_autoplay_off),
+    ("now-playing-queue-autoplay", now_playing_queue_autoplay),
+    ("menu-song-station", menu_song_station),
+    ("menu-artist-station", menu_artist_station),
     ("right-panel-lyrics", right_panel_lyrics),
     ("right-panel-queue", up_next),
     ("bg-right-panel", bg_right_panel),
@@ -635,6 +641,64 @@ fn up_next_repeat_end(s: &mut State) {
     up_next_repeat(s);
     s.queue.pos = s.queue.context.len() - 1;
     s.queue.plan_lap(crate::state::Repeat::All);
+}
+
+/// AutoPlay on, near the end of the list (two songs left, one queued by hand): the "AutoPlay"
+/// header and Apple's suggestions follow the list, dimmed; ∞ is lit on the Now Playing label.
+fn up_next_autoplay(s: &mut State) {
+    up_next(s);
+    s.session.authorized = true;
+    s.queue.user.truncate(1);
+    let n = s.queue.context.len();
+    s.queue.pos = n - 3;
+    s.playback.song = s.queue.current().cloned();
+    let suggested: Vec<Song> = (0..8).map(|i| {
+        let mut t = song((i + 3) % 8, 20 + i as u32);
+        t.id = format!("auto-{i}");
+        t
+    }).collect();
+    s.queue.add_autoplay(suggested);
+}
+
+/// The list has played out: an AutoPlay song plays, more suggestions follow it.
+fn up_next_autoplay_playing(s: &mut State) {
+    up_next_autoplay(s);
+    s.queue.user.clear();
+    let mut q = s.queue.clone();
+    q.pos = q.context.len() - 1;
+    s.queue = q;
+    // MusicKit reports the first suggestion: it joins the list and plays.
+    let first = s.queue.autoplay[0].clone();
+    s.queue.advance_to(&first);
+    s.playback.song = Some(first);
+}
+
+/// AutoPlay switched off with ∞: no suggestions, the switch unlit.
+fn up_next_autoplay_off(s: &mut State) {
+    up_next_autoplay(s);
+    s.settings.autoplay = false;
+    s.queue.autoplay.clear();
+}
+
+fn now_playing_queue_autoplay(s: &mut State) {
+    up_next_autoplay(s);
+    s.settings.right_panel = false;
+    s.settings.now_playing_queue = true;
+    s.ui.now_playing = true;
+}
+
+/// Right-click on one song of a playlist: "Create Station" ends the playing group.
+fn menu_song_station(s: &mut State) {
+    playlist_page(s);
+    let song = song(1, 4);
+    crate::ui::scene_song_menu_list(s, song, [420.0, 330.0]);
+}
+
+/// A catalog artist page's ••• menu: Create Station, then Pin.
+fn menu_artist_station(s: &mut State) {
+    artist_full(s);
+    let a = crate::models::Artist { id: "28673423".into(), name: "Mara Quell".into() };
+    crate::ui::scene_menu_artist(s, &a, [560.0, 330.0]);
 }
 
 /// A radio station playing, one song queued by hand, and five songs the station already played.
