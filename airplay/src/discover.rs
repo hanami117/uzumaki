@@ -5,9 +5,10 @@
 //! Two ways in: [`discover`] browses once for a fixed time (the command line tool, reconnecting by
 //! name), and [`Browser`] keeps browsing and reports every change, for the picker while it is open.
 //! [`outputs`] turns the raw devices into the picker's rows: audio devices only, this computer
-//! hidden, a stereo pair shown once.
+//! hidden, a stereo pair shown once. [`Settle`] keeps a possible pair member out of the list until
+//! its pair is known, so the picker never shows two HomePods that then merge into one row.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -160,6 +161,9 @@ impl Browser {
                 let mut found: BTreeMap<String, Device> = BTreeMap::new();
                 // A speaker's two records land a few milliseconds apart: report once they settle.
                 let mut dirty: Option<Instant> = None;
+                let mut settle = Settle::default();
+                let mut recheck: Option<Instant> = None;
+                let mut shown: Option<Vec<Device>> = None;
                 while !quit.load(Ordering::SeqCst) {
                     let mut got = false;
                     for (rx, ty) in [(&rx_airplay, AIRPLAY), (&rx_raop, RAOP)] {
@@ -170,9 +174,15 @@ impl Browser {
                             }
                         }
                     }
-                    if dirty.is_some_and(|t| t.elapsed() >= Duration::from_millis(120)) {
+                    let now = Instant::now();
+                    if dirty.is_some_and(|t| now.duration_since(t) >= Duration::from_millis(120)) || recheck.is_some_and(|t| now >= t) {
                         dirty = None;
-                        on_change(found.values().cloned().collect());
+                        let (visible, next) = settle.visible(&found, now);
+                        recheck = next;
+                        if shown.as_ref() != Some(&visible) {
+                            on_change(visible.clone());
+                            shown = Some(visible);
+                        }
                     }
                     if !got {
                         std::thread::sleep(Duration::from_millis(50));
@@ -192,6 +202,56 @@ impl Browser {
 impl Drop for Browser {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// How long a possible stereo pair member waits for its pair to be known before it shows alone.
+pub const MEMBER_SETTLE: Duration = Duration::from_millis(400);
+
+/// Which devices the picker may show yet. mDNS records come in pieces: a HomePod's `_raop` record
+/// (no pair information) or one member's `_airplay` record can land before the rest, and showing
+/// them would show "Living Room" and "Living Room (2)" that a moment later merge into one row.
+/// So a HomePod waits until its `_airplay` TXT is known and, when it is in a pair (`tsid`), until
+/// the pair is: its partner is resolved too, or the pair's leader (`igl=1`) is (the leader's row
+/// is the pair's, and the other member is folded into it when it comes). After
+/// [`MEMBER_SETTLE`] from its first record a device shows anyway (a pair whose other half is
+/// off, a speaker with one record). Other devices show at once. Nothing is asked of the network:
+/// this only delays what is reported.
+#[derive(Default)]
+pub struct Settle {
+    first_seen: HashMap<String, Instant>,
+}
+
+impl Settle {
+    /// The devices to show now (keys as in `found`), and when to look again for one still held.
+    pub fn visible(&mut self, found: &BTreeMap<String, Device>, now: Instant) -> (Vec<Device>, Option<Instant>) {
+        self.first_seen.retain(|k, _| found.contains_key(k));
+        let resolved = |d: &Device| d.airplay.is_some();
+        let mut out = Vec::new();
+        let mut next: Option<Instant> = None;
+        for (key, d) in found {
+            let first = *self.first_seen.entry(key.clone()).or_insert(now);
+            let ready = if !matches!(d.kind(), Kind::HomePod | Kind::HomePodMini) {
+                true
+            } else if !resolved(d) {
+                false
+            } else {
+                match d.pair_id() {
+                    None => true,
+                    Some(pair) => {
+                        let mates: Vec<&Device> = found.values().filter(|o| resolved(o) && o.pair_id() == Some(pair)).collect();
+                        mates.len() >= 2 || mates.iter().any(|o| o.leads())
+                    }
+                }
+            };
+            let due = first + MEMBER_SETTLE;
+            if ready || now >= due {
+                out.push(d.clone());
+            } else {
+                next = Some(next.map_or(due, |n| n.min(due)));
+            }
+        }
+        (out, next)
     }
 }
 
@@ -281,6 +341,11 @@ impl Device {
         Kind::of(self.model(), self.features())
     }
 
+    /// It leads its group (`igl=1`): for a stereo pair, the member whose row is the pair's.
+    fn leads(&self) -> bool {
+        self.txt("igl") == Some("1")
+    }
+
     /// The id two HomePods of a stereo pair share (`tsid`), if this is one of them.
     fn pair_id(&self) -> Option<&str> {
         matches!(self.kind(), Kind::HomePod | Kind::HomePodMini).then(|| self.txt("tsid")).flatten().filter(|v| !v.is_empty())
@@ -314,7 +379,7 @@ pub fn outputs(devices: &[Device], own: &[IpAddr]) -> Vec<(Output, Device)> {
         {
             first.pair = true;
             // The row is the pair's leader (`igl=1`), else the member with the plain name.
-            let leads = |x: &Device| x.txt("igl") == Some("1");
+            let leads = Device::leads;
             if (leads(d) && !leads(first_dev)) || (leads(d) == leads(first_dev) && d.name.len() < first_dev.name.len()) {
                 *first = Output { pair: true, ..out };
                 *first_dev = d.clone();
@@ -322,6 +387,9 @@ pub fn outputs(devices: &[Device], own: &[IpAddr]) -> Vec<(Output, Device)> {
             first.name = plain_name(&first.name).to_string();
             continue;
         }
+        // A pair's leader seen before the other member already is the pair's row (same id, name and
+        // icon once the other member comes): the row doesn't change then.
+        let out = if d.pair_id().is_some() && d.leads() { Output { pair: true, name: plain_name(&d.name).to_string(), ..out } } else { out };
         rows.push((out, d.clone()));
     }
     rows.sort_by(|a, b| a.0.name.to_lowercase().cmp(&b.0.name.to_lowercase()).then(a.0.id.cmp(&b.0.id)));
@@ -477,6 +545,91 @@ mod tests {
         let rows = outputs(&devices, &[]);
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].0.name.as_str(), rows[0].0.id.as_str(), rows[0].0.pair), ("Den", "bb", true));
+    }
+
+    /// One mDNS record, as the daemon hands it over.
+    fn record(ty: &str, instance: &str, ip: &str, txt: &[(&str, &str)]) -> mdns_sd::ServiceEvent {
+        let host = format!("{}.local.", instance.rsplit('@').next().unwrap().replace(' ', "-"));
+        mdns_sd::ServiceEvent::ServiceResolved(mdns_sd::ServiceInfo::new(ty, instance, &host, ip, 7000, txt).unwrap())
+    }
+
+    /// Feeds the records in order, `gap` apart, as the browser does (absorb, then `Settle`), and
+    /// returns the picker's row names after each record and at the settle checks in between.
+    fn picker_over(records: Vec<mdns_sd::ServiceEvent>, types: &[&str], gap: Duration) -> Vec<Vec<(String, bool)>> {
+        let mut found = BTreeMap::new();
+        let mut settle = Settle::default();
+        let t0 = Instant::now();
+        let mut lists = Vec::new();
+        let mut now = t0;
+        let look = |found: &BTreeMap<String, Device>, settle: &mut Settle, now: Instant, lists: &mut Vec<Vec<(String, bool)>>| {
+            let (visible, _) = settle.visible(found, now);
+            let rows: Vec<(String, bool)> = outputs(&visible, &[]).into_iter().map(|(o, _)| (o.name, o.pair)).collect();
+            if lists.last() != Some(&rows) {
+                lists.push(rows);
+            }
+        };
+        for (event, ty) in records.into_iter().zip(types) {
+            absorb(&mut found, event, ty);
+            look(&found, &mut settle, now, &mut lists);
+            now += gap;
+            look(&found, &mut settle, now, &mut lists);
+        }
+        look(&found, &mut settle, t0 + Duration::from_secs(5), &mut lists);
+        lists
+    }
+
+    const PAIR_A: &[(&str, &str)] = &[("features", "0x4A7FCA00,0x3C356BD0"), ("model", "AudioAccessory6,1"), ("deviceid", "AA:AA"), ("tsid", "TS-1")];
+    const PAIR_B: &[(&str, &str)] = &[("features", "0x4A7FCA00,0x3C356BD0"), ("model", "AudioAccessory6,1"), ("deviceid", "BB:BB"), ("tsid", "TS-1"), ("igl", "1")];
+    const RAOP_TXT: &[(&str, &str)] = &[("am", "AudioAccessory6,1"), ("ft", "0x4A7FCA00,0x3C356BD0")];
+
+    #[test]
+    fn a_stereo_pair_whose_records_come_in_pieces_shows_once_and_never_as_two() {
+        // The members' RAOP records first (no pair information), then each one's AirPlay TXT, 60 ms apart.
+        let records = vec![
+            record(RAOP, "AAAAAAAAAAAA@Living Room", "192.168.1.10", RAOP_TXT),
+            record(RAOP, "BBBBBBBBBBBB@Living Room (2)", "192.168.1.11", RAOP_TXT),
+            record(AIRPLAY, "Living Room", "192.168.1.10", PAIR_A),
+            record(AIRPLAY, "Living Room (2)", "192.168.1.11", PAIR_B),
+        ];
+        let lists = picker_over(records, &[RAOP, RAOP, AIRPLAY, AIRPLAY], Duration::from_millis(60));
+        let pair = vec![("Living Room".to_string(), true)];
+        assert_eq!(lists, vec![vec![], pair.clone()], "nothing, then the pair: never the members");
+        // The leader's AirPlay record before the other member's: the pair's row at once, unchanged after.
+        let records = vec![
+            record(AIRPLAY, "Living Room (2)", "192.168.1.11", PAIR_B),
+            record(RAOP, "AAAAAAAAAAAA@Living Room", "192.168.1.10", RAOP_TXT),
+            record(AIRPLAY, "Living Room", "192.168.1.10", PAIR_A),
+        ];
+        assert_eq!(picker_over(records, &[AIRPLAY, RAOP, AIRPLAY], Duration::from_millis(60)), vec![pair.clone()]);
+        // The non-leader alone waits for the leader.
+        let records = vec![record(AIRPLAY, "Living Room", "192.168.1.10", PAIR_A), record(AIRPLAY, "Living Room (2)", "192.168.1.11", PAIR_B)];
+        assert_eq!(picker_over(records, &[AIRPLAY, AIRPLAY], Duration::from_millis(100)), vec![vec![], pair]);
+    }
+
+    #[test]
+    fn other_speakers_show_at_once_and_a_lone_member_after_the_settle() {
+        let sonos = record(AIRPLAY, "Kitchen", "192.168.1.20", &[("features", "0x200,0x0"), ("model", "Sonos One")]);
+        let half = record(AIRPLAY, "Den", "192.168.1.30", &[("features", "0x200,0x0"), ("model", "AudioAccessory6,1"), ("tsid", "TS-2")]);
+        let solo = record(AIRPLAY, "Bedroom", "192.168.1.38", &[("features", "0x200,0x0"), ("model", "AudioAccessory5,1"), ("igl", "1"), ("gcgl", "1")]);
+        let mut found = BTreeMap::new();
+        for (e, ty) in [(sonos, AIRPLAY), (half, AIRPLAY), (solo, AIRPLAY)] {
+            absorb(&mut found, e, ty);
+        }
+        let mut settle = Settle::default();
+        let t0 = Instant::now();
+        let (now, next) = settle.visible(&found, t0);
+        let names: Vec<&str> = now.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["Bedroom", "Kitchen"], "a single HomePod (no tsid) and other speakers: at once");
+        assert_eq!(next, Some(t0 + MEMBER_SETTLE), "look again for the held member");
+        let (later, next) = settle.visible(&found, t0 + MEMBER_SETTLE);
+        assert_eq!(later.len(), 3, "the other half never came: the member shows alone");
+        assert_eq!(next, None);
+        // A RAOP-only HomePod (no AirPlay 2 record) shows after the settle too.
+        let mut found = BTreeMap::new();
+        absorb(&mut found, record(RAOP, "CCCCCCCCCCCC@Office", "192.168.1.40", RAOP_TXT), RAOP);
+        let mut settle = Settle::default();
+        assert!(settle.visible(&found, t0).0.is_empty());
+        assert_eq!(settle.visible(&found, t0 + MEMBER_SETTLE).0.len(), 1);
     }
 
     #[test]
