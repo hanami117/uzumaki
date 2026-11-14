@@ -35,6 +35,9 @@ pub struct AirPlay {
     pub ctl_browsing: bool,
     /// The helper program is installed. False: no AirPlay button, no speaker search, `uzu airplay` says so.
     pub available: bool,
+    /// The bridge's last word on its capture (`Event::AirPlayCapture`): it taps MusicKit's player.
+    /// Until it does, the controller keeps the speaker "Connecting".
+    pub capture_ready: bool,
     pub prefs: Prefs,
     /// How late the speaker plays, from the last start (for a later lyrics and progress offset).
     pub latency_ms: Option<u32>,
@@ -113,9 +116,27 @@ impl State {
     }
 
     /// Tells the bridge whether to capture (when there is one; a later one is told at `Ready`).
-    pub(super) fn airplay_capture(&self) {
+    pub(super) fn airplay_capture(&mut self) {
+        self.airplay.capture_ready = false; // the (new) capture says when it is ready
+        self.airplay_bridge_changed();
         if let Some(b) = &self.bridge {
             b.airplay(self.airplay.capture);
+        }
+    }
+
+    /// The bridge started or stopped: without one (local only mode) there is nothing to capture,
+    /// so the controller doesn't wait for the bridge's word.
+    pub(super) fn airplay_bridge_changed(&self) {
+        if let Some(c) = crate::airplay::controller() {
+            c.set_bridge(self.bridge.is_some());
+        }
+    }
+
+    /// The bridge's capture is ready (or not): the speaker shows as playing only while it is.
+    pub(super) fn airplay_capture_ready(&mut self, ready: bool, error: Option<&str>) {
+        self.airplay.capture_ready = ready;
+        if let Some(c) = crate::airplay::controller() {
+            c.capture_ready(ready, error);
         }
     }
 
@@ -312,6 +333,18 @@ mod tests {
         assert_eq!(s.airplay_connect("dd").auth, None);
         assert!(!s.airplay_event(Event::Capture(true)), "nothing to draw");
         assert!(s.airplay.capture, "a bridge that starts later is told at Ready");
+    }
+
+    #[test]
+    fn the_bridge_says_when_its_capture_is_ready_and_each_capture_starts_unready() {
+        let mut s = State::offline();
+        s.airplay_event(Event::Capture(true));
+        assert!(!s.airplay.capture_ready);
+        assert!(!s.apply_msg(crate::state::Msg::Bridge(crate::bridge::Event::AirPlayCapture { ready: true, error: None })), "nothing to draw");
+        assert!(s.airplay.capture_ready);
+        s.airplay_event(Event::Capture(false));
+        s.airplay_event(Event::Capture(true));
+        assert!(!s.airplay.capture_ready, "the next session waits for its own word");
     }
 
     #[test]

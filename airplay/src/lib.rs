@@ -15,8 +15,11 @@
 //! - [`Controller::connect`] / [`Controller::connect_named`]: one session at a time; a new one
 //!   ends the old one first. Order inside a session: start the helper → `[STATUS] connected` →
 //!   bind the PCM socket and ask for the bridge's capture ([`Event::Capture`]) → `[STATUS] audio
-//!   buffered_ms` → `ACTION=START` on the command pipe → `[STATUS] started`: the speaker plays
-//!   ([`Cast::On`]).
+//!   buffered_ms` → `ACTION=START` on the command pipe → `[STATUS] started`. The speaker plays
+//!   ([`Cast::On`]) once it started *and* the audio source is ready: the bridge is connected to
+//!   the socket and said its capture taps MusicKit's player ([`Controller::capture_ready`]), or
+//!   the local player is in charge. Until then the state stays [`Cast::Connecting`]; a source
+//!   that isn't ready within `Config::capture_timeout` ends the session ([`Why::NoAudio`]).
 //! - [`Controller::flush`]: on a seek or a song the user picked, the audio still on its way is
 //!   dropped (`ACTION=FLUSH`, then a new START), so the change is heard at once.
 //! - A session that ends on its own reports why ([`Event::Failed`]) and the audio is back on
@@ -83,6 +86,9 @@ pub struct Config {
     pub discover_timeout: Duration,
     /// A speaker that doesn't answer our clock plays silence: after this long the session ends.
     pub stall_grace: Duration,
+    /// Connected, but the audio source (the bridge's capture, or the local player) isn't ready
+    /// for this long: the session ends (`Why::NoAudio`) instead of claiming to play.
+    pub capture_timeout: Duration,
     /// Devices to show instead of browsing (tests: no network).
     pub fake: Vec<Device>,
 }
@@ -112,6 +118,7 @@ impl Config {
             connect_timeout: Duration::from_secs(15),
             discover_timeout: Duration::from_secs(8),
             stall_grace: Duration::from_secs(6),
+            capture_timeout: Duration::from_secs(8),
             fake,
         }
     }
@@ -164,6 +171,8 @@ pub enum Why {
     Slept,
     /// The speaker never answered our clock (a firewall, usually).
     Clock,
+    /// The player's audio could not be captured for the speaker (the bridge's tap never got ready).
+    NoAudio,
 }
 
 impl Why {
@@ -179,6 +188,7 @@ impl Why {
             Why::Lost => format!("The connection to “{name}” was lost."),
             Why::Slept => format!("AirPlay to “{name}” stopped while the computer slept."),
             Why::Clock => format!("“{name}” didn't answer. A firewall may be blocking AirPlay (UDP ports 319 and 320)."),
+            Why::NoAudio => format!("Couldn't send the music to “{name}”: the player's audio could not be captured."),
         }
     }
 }
@@ -230,6 +240,12 @@ struct Shared {
     casting: AtomicBool,
     /// The local player has a song loaded: its audio (or silence) goes to the speaker, the bridge's doesn't.
     local_active: AtomicBool,
+    /// The bridge said its capture taps the player (`Controller::capture_ready`). Reset for each session.
+    bridge_ready: AtomicBool,
+    /// The bridge is connected to the PCM socket.
+    bridge_linked: AtomicBool,
+    /// The app runs no bridge (local only mode): there is nothing to capture (`Controller::set_bridge`).
+    no_bridge: AtomicBool,
     keep_local: bool,
     /// The local player's way in, while a session runs.
     local_tx: Mutex<Option<mpsc::SyncSender<Vec<i16>>>>,
@@ -249,6 +265,12 @@ impl Shared {
 
     fn dropping(&self) -> bool {
         self.now_ms() < self.drop_until.load(Ordering::Relaxed)
+    }
+
+    /// What the speaker gets is what the user hears: the local player is in charge, or the
+    /// bridge is connected and its capture taps MusicKit's player.
+    fn source_ready(&self) -> bool {
+        self.local_active.load(Ordering::SeqCst) || self.no_bridge.load(Ordering::SeqCst) || (self.bridge_ready.load(Ordering::SeqCst) && self.bridge_linked.load(Ordering::SeqCst))
     }
 
     /// Whole frames to the helper. Fails when there is none or it stopped reading.
@@ -514,6 +536,22 @@ impl Controller {
 
     pub fn volume(&self) -> u8 {
         self.inner.volume.load(Ordering::Relaxed)
+    }
+
+    /// The bridge's capture taps the player (true), or doesn't (any more): the page is loading, an
+    /// `<audio>` couldn't be tapped, the audio context is suspended (`error` says which). An app
+    /// with no bridge calls `set_bridge(false)` instead. The state shows `Cast::On` only while this
+    /// holds (or the local player is in charge).
+    pub fn capture_ready(&self, ready: bool, error: Option<&str>) {
+        if self.inner.shared.bridge_ready.swap(ready, Ordering::SeqCst) != ready || error.is_some() {
+            log(format!("bridge capture {}{}", if ready { "ready" } else { "not ready" }, error.map(|e| format!(": {e}")).unwrap_or_default()));
+        }
+    }
+
+    /// Whether the app runs a bridge (default: it does). Without one (local only mode) there is
+    /// nothing to capture, and the speaker plays the local player's audio or silence.
+    pub fn set_bridge(&self, present: bool) {
+        self.inner.shared.no_bridge.store(!present, Ordering::SeqCst);
     }
 
     /// The user seeked or picked another song: drop the audio still on its way to the speaker.
@@ -881,6 +919,10 @@ fn run(inner: &Arc<Inner>, tx: &mpsc::Sender<Ev>, rx: &mpsc::Receiver<Ev>, helpe
     let mut start_sent = false;
     let mut start_tries = 0u32;
     let mut started = false;
+    // `Cast::On` was announced (and not taken back since).
+    let mut shown = false;
+    // Connected, but the audio source isn't ready since then.
+    let mut waiting: Option<Instant> = None;
     let mut latency: Option<u32> = None;
     let mut error: Option<String> = None;
     let mut user = false;
@@ -931,6 +973,34 @@ fn run(inner: &Arc<Inner>, tx: &mpsc::Sender<Ev>, rx: &mpsc::Receiver<Ev>, helpe
             kill_at = None;
             kill(None, &mut failed);
         }
+        // "Playing on <speaker>" only while the speaker gets what the user hears.
+        if connected && !user && failed.is_none() {
+            let ready = shared.source_ready();
+            if ready {
+                waiting = None;
+                if started && !shown {
+                    shown = true;
+                    inner.emit(Event::State(Cast::On { id: out.id.clone(), name: out.name.clone(), latency_ms: latency }));
+                }
+            } else {
+                if shown {
+                    shown = false;
+                    log("the audio source is gone (page reloading?): connecting again");
+                    inner.emit(Event::State(Cast::Connecting { id: out.id.clone(), name: out.name.clone() }));
+                }
+                let since = *waiting.get_or_insert_with(Instant::now);
+                if since.elapsed() > cfg.capture_timeout {
+                    log(format!(
+                        "the player's audio isn't reaching \"{}\" after {} s (bridge capture {}, bridge {}connected to the PCM socket)",
+                        out.name,
+                        cfg.capture_timeout.as_secs(),
+                        if shared.bridge_ready.load(Ordering::SeqCst) { "ready" } else { "not ready" },
+                        if shared.bridge_linked.load(Ordering::SeqCst) { "" } else { "not " }
+                    ));
+                    kill(Some(Why::NoAudio), &mut failed);
+                }
+            }
+        }
         let Some(ev) = ev else { continue };
         match ev {
             Ev::Cmd(Cmd::Stop) => {
@@ -964,7 +1034,10 @@ fn run(inner: &Arc<Inner>, tx: &mpsc::Sender<Ev>, rx: &mpsc::Receiver<Ev>, helpe
             Ev::Line(Status::Route(r)) => log(format!("route: {r}")),
             Ev::Line(Status::Connected) => {
                 connected = true;
+                waiting = Some(Instant::now());
                 log(format!("connected to \"{}\" in {} ms; opening the PCM socket for the bridge", out.name, began.elapsed().as_millis()));
+                // This session's capture says when it's ready (an earlier session's word doesn't count).
+                shared.bridge_ready.store(false, Ordering::SeqCst);
                 shared.first_audio.store(0, Ordering::Relaxed);
                 let (ltx, lrx) = mpsc::sync_channel::<Vec<i16>>(LOCAL_QUEUE);
                 *shared.local_tx.lock().unwrap() = Some(ltx);
@@ -1010,8 +1083,11 @@ fn run(inner: &Arc<Inner>, tx: &mpsc::Sender<Ev>, rx: &mpsc::Receiver<Ev>, helpe
                 ));
                 start_tries = 0;
                 started = true;
-                if !user {
+                if !user && shared.source_ready() {
+                    shown = true;
                     inner.emit(Event::State(Cast::On { id: out.id.clone(), name: out.name.clone(), latency_ms: latency }));
+                } else if !user {
+                    log("waiting for the player's audio before showing the speaker as playing");
                 }
             }
             Ev::Line(Status::Flushed) => log("flushed"),
@@ -1047,6 +1123,7 @@ fn run(inner: &Arc<Inner>, tx: &mpsc::Sender<Ev>, rx: &mpsc::Receiver<Ev>, helpe
     }
     alive.store(false, Ordering::SeqCst);
     shared.casting.store(false, Ordering::SeqCst);
+    shared.bridge_ready.store(false, Ordering::SeqCst);
     let status = shared.child.lock().unwrap().take().map(|mut c| c.wait());
     *shared.stdin.lock().unwrap() = None;
     *shared.cmd.lock().unwrap() = None;
@@ -1178,6 +1255,7 @@ impl Pump {
                 }
                 let Ok(mut s) = conn else { continue };
                 *cur.lock().unwrap() = s.try_clone().ok();
+                shared.bridge_linked.store(true, Ordering::SeqCst);
                 log("the bridge is connected to the PCM socket: Apple Music's audio goes to the speaker");
                 let mut frames = Frames::default(); // a new connection starts on a frame
                 let mut ok = true;
@@ -1200,6 +1278,7 @@ impl Pump {
                     }
                 }
                 *cur.lock().unwrap() = None;
+                shared.bridge_linked.store(false, Ordering::SeqCst);
                 log(format!("the bridge's PCM stream ended after {:.1} s of audio{}", this as f64 / BYTES_PER_SECOND as f64, if ok { "" } else { " (helper input closed)" }));
                 if !ok || q.load(Ordering::SeqCst) {
                     break;

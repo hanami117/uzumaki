@@ -699,6 +699,7 @@ mod tests {
                 on.store(true, Ordering::SeqCst);
             }
         });
+        ctl.set_bridge(false); // the local player only: no bridge capture to wait for
         ctl.connect_named("Bedroom", Connect { volume: 30, password: None, auth: None });
         let t = Instant::now();
         while !playing.load(Ordering::SeqCst) {

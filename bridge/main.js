@@ -369,7 +369,10 @@ function createWindow(show) {
     sendSignInCss(); // sign-in redirects load the page again
     // The account's storefront setter (signin.js), for the page bridge's `setStorefront`.
     win.webContents.executeJavaScript(`window.__uzumakiApplyStorefront = ${signin.applyStorefront};`).catch(() => {});
-    if (capturing) airplayToPage(); // a new document needs its capture graph again
+    if (capturing) {
+      captureReady(false, 'page reloaded'); // a new document has no graph until it builds one
+      airplayToPage(); // a new document needs its capture graph again
+    }
   });
   win.loadURL(START_URL);
 }
@@ -405,6 +408,7 @@ let capturing = false; // the app wants the capture
 let pcmLink = null;
 let casting = false; // the PCM socket is connected
 let meterTimer = null;
+let readySent = null; // the last `airplayCapture` told to the app
 const meter = { chunks: 0, frames: 0, sum: 0, n: 0, peak: 0, status: null, silent: false, lastLog: 0 };
 
 function airplayToPage() {
@@ -417,10 +421,22 @@ function airplayToPage() {
   });
 }
 
+// Tells the app whether the speaker gets what MusicKit plays (the page's tap is connected, its
+// context runs, every <audio> is tapped). Until it is, the app shows "Connecting", and gives up
+// after a few seconds.
+function captureReady(ready, error) {
+  const key = `${ready}|${error ?? ''}`;
+  if (key === readySent) return;
+  readySent = key;
+  log(`airplay: capture ${ready ? 'ready' : 'not ready'}${error ? ` (${error})` : ''}`);
+  send({ event: 'airplayCapture', ready: !!ready, ...(error ? { error: String(error).slice(0, 200) } : {}) });
+}
+
 function airplaySet(on) {
   on = !!on;
   if (on === capturing) return;
   capturing = on;
+  readySent = null;
   if (!on) {
     pcmLink?.close();
     pcmLink = null;
@@ -488,6 +504,10 @@ ipcMain.on('uzumaki:pcm', (e, data) => {
 ipcMain.on('uzumaki:airplay-status', (e, st) => {
   if (!airplay || !win || e.sender !== win.webContents || !st) return;
   if (st.note) return log(`airplay capture: ${String(st.note).slice(0, 300)}`);
+  if (st.capture) {
+    if (capturing) captureReady(!!st.capture.ready, st.capture.error);
+    return;
+  }
   meter.status = st;
 });
 

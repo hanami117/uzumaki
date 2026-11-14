@@ -49,6 +49,7 @@ fn rig(test: &str, mode: &str, devices: Vec<Device>) -> Rig {
         connect_timeout: Duration::from_secs(2),
         discover_timeout: Duration::from_secs(1),
         stall_grace: Duration::from_millis(600),
+        capture_timeout: Duration::from_millis(1500),
         fake: devices,
     };
     let (tx, events) = mpsc::channel();
@@ -56,7 +57,16 @@ fn rig(test: &str, mode: &str, devices: Vec<Device>) -> Rig {
     let ctl = Controller::new(cfg, move |e| {
         let _ = tx.lock().unwrap().send(e);
     });
+    // Most tests play an app without a bridge (nothing to capture); `with_bridge` is the app with one.
+    ctl.set_bridge(false);
     Rig { ctl, events, dir, seen: Vec::new() }
+}
+
+/// A rig whose app runs a bridge: the speaker plays only once the bridge's capture is ready.
+fn with_bridge(test: &str, devices: Vec<Device>) -> Rig {
+    let r = rig(test, "", devices);
+    r.ctl.set_bridge(true);
+    r
 }
 
 impl Rig {
@@ -85,8 +95,15 @@ impl Rig {
         std::fs::read(self.dir.join("pcm.bin")).unwrap_or_default().as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect()
     }
 
-    /// The bridge: connects to the PCM socket once it is there.
+    /// The bridge: connects to the PCM socket once it is there, and says its capture is ready.
     fn bridge(&self) -> UnixStream {
+        let s = self.socket();
+        self.ctl.capture_ready(true, None);
+        s
+    }
+
+    /// Connects to the PCM socket only (the capture hasn't said it's ready).
+    fn socket(&self) -> UnixStream {
         let socket = self.ctl.socket();
         let mut s = None;
         wait_for("the PCM socket", || {
@@ -125,7 +142,7 @@ fn opts() -> Connect {
 
 #[test]
 fn picking_a_speaker_plays_and_picking_this_computer_stops() {
-    let mut r = rig("basic", "", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
+    let mut r = with_bridge("basic", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
     // Nothing exists until asked.
     assert!(!r.ctl.socket().exists());
     r.ctl.browse(true);
@@ -163,7 +180,7 @@ fn picking_a_speaker_plays_and_picking_this_computer_stops() {
 
 #[test]
 fn a_seek_flushes_and_drops_the_audio_on_its_way() {
-    let mut r = rig("flush", "", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
+    let mut r = with_bridge("flush", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
     r.ctl.flush(); // no speaker: nothing
     r.ctl.connect_named("bedroom", opts());
     r.wait("the capture request", |e| *e == Event::Capture(true));
@@ -188,7 +205,7 @@ fn a_seek_flushes_and_drops_the_audio_on_its_way() {
 
 #[test]
 fn one_session_serves_the_bridge_and_the_local_player_in_turn() {
-    let mut r = rig("turns", "", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
+    let mut r = with_bridge("turns", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
     let local = r.ctl.local_feed();
     assert!(!local.mute_local(), "no speaker yet: this computer plays");
     r.ctl.connect_named("Bedroom", opts());
@@ -260,6 +277,66 @@ fn switching_speakers_ends_the_first_session_before_the_second() {
     assert_eq!(j.matches("args ").count(), 2, "{j}");
     assert_eq!(j.matches("cmd ACTION=STOP").count(), 1, "{j}");
     assert!(!r.seen.iter().any(|e| matches!(e, Event::Failed { .. })));
+    r.end();
+}
+
+#[test]
+fn the_speaker_shows_as_playing_only_once_the_bridge_captures() {
+    // The first-try bug: the helper started and the bridge sent (silent) PCM, but its tap had not
+    // caught MusicKit's <audio>, so the music played on this computer while the picker said "Bedroom".
+    let mut r = with_bridge("ready-late", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
+    r.ctl.connect_named("Bedroom", opts());
+    r.wait("the capture request", |e| *e == Event::Capture(true));
+    let mut bridge = r.socket();
+    bridge.write_all(&pcm(0, 4096)).unwrap();
+    wait_for("the helper to start", || r.journal().contains("cmd ACTION=START"));
+    std::thread::sleep(Duration::from_millis(500));
+    while let Ok(e) = r.events.try_recv() {
+        r.seen.push(e);
+    }
+    assert!(!r.seen.iter().any(|e| matches!(e, Event::State(Cast::On { .. }))), "started, but the capture isn't ready: still connecting; {:?}", r.seen);
+    // The page tapped the element.
+    r.ctl.capture_ready(true, None);
+    r.on();
+    // The page reloads: connecting again until its new graph is ready, then playing again.
+    r.ctl.capture_ready(false, Some("page reloaded"));
+    r.wait("connecting again", |e| matches!(e, Event::State(Cast::Connecting { .. })));
+    r.ctl.capture_ready(true, None);
+    r.on();
+    assert!(!r.seen.iter().any(|e| matches!(e, Event::Failed { .. })), "{:?}", r.seen);
+    assert_eq!(r.journal().matches("args ").count(), 1, "the same session throughout");
+    r.end();
+}
+
+#[test]
+fn a_capture_that_never_gets_ready_falls_back_to_this_computer_with_an_error() {
+    let mut r = with_bridge("never-ready", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
+    r.ctl.connect_named("Bedroom", opts());
+    r.wait("the capture request", |e| *e == Event::Capture(true));
+    let mut bridge = r.socket();
+    bridge.write_all(&pcm(0, 4096)).unwrap();
+    r.ctl.capture_ready(false, Some("could not tap <audio id=apple-music-player>"));
+    let Event::Failed { why, name } = r.wait("the failure", |e| matches!(e, Event::Failed { .. })) else { unreachable!() };
+    assert_eq!((why, name.as_str()), (Why::NoAudio, "Bedroom"));
+    r.wait("off", |e| *e == Event::State(Cast::Off));
+    assert!(r.seen.contains(&Event::Capture(false)), "the bridge stops capturing: {:?}", r.seen);
+    assert!(!r.seen.iter().any(|e| matches!(e, Event::State(Cast::On { .. }))), "never shown as playing: {:?}", r.seen);
+    let feed = r.ctl.local_feed();
+    assert!(!feed.casting() && !feed.mute_local(), "back on this computer");
+    assert!(Why::NoAudio.message("Bedroom").contains("Bedroom"));
+    r.end();
+}
+
+#[test]
+fn ready_without_the_socket_is_not_enough_and_a_new_session_waits_for_its_own_word() {
+    let mut r = with_bridge("ready-no-socket", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
+    // A word from before the session doesn't count.
+    r.ctl.capture_ready(true, None);
+    r.ctl.connect_named("Bedroom", opts());
+    r.wait("the capture request", |e| *e == Event::Capture(true));
+    let Event::Failed { why, .. } = r.wait("the failure", |e| matches!(e, Event::Failed { .. })) else { unreachable!() };
+    assert_eq!(why, Why::NoAudio, "no bridge on the socket and no fresh word");
+    assert!(!r.seen.iter().any(|e| matches!(e, Event::State(Cast::On { .. }))), "{:?}", r.seen);
     r.end();
 }
 

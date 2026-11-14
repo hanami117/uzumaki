@@ -1203,6 +1203,10 @@ impl State {
             }
             // Stopped on purpose (`stop_bridge` already did what the app needs).
             Event::Stopped => return false,
+            Event::AirPlayCapture { ready, error } => {
+                self.airplay_capture_ready(ready, error.as_deref());
+                return false;
+            }
             Event::Exited => {
                 self.session.bridge_up = false;
                 if self.session.error.is_none() {

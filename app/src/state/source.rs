@@ -63,6 +63,7 @@ impl State {
         match engine.start(show_login) {
             Ok(b) => {
                 self.bridge = Some(b);
+                self.airplay_bridge_changed();
                 self.session.error = None;
                 self.session.bridge_up = false;
                 self.session.login_window = show_login;
@@ -86,6 +87,7 @@ impl State {
                 None => drop(b),
             }
         }
+        self.airplay_bridge_changed();
         let ses = &mut self.session;
         ses.bridge_up = false;
         ses.login_window = false;

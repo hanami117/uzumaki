@@ -72,6 +72,9 @@ pub enum Event {
     Volume(f64),
     /// The sign-in window was shown or hidden. `closed`: the user closed it (not the app's `hide`).
     Window { visible: bool, closed: bool },
+    /// AirPlay: the page's capture taps MusicKit's player (`ready`), or doesn't (yet, or any
+    /// more; `error` says why). Sent only while capturing, on every change.
+    AirPlayCapture { ready: bool, error: Option<String> },
     Error(String),
     /// The Electron process is gone.
     Exited,
@@ -603,6 +606,7 @@ fn parse_event(name: &str, msg: &Value) -> Option<Event> {
         },
         "volume" => Event::Volume(msg["value"].as_f64()?),
         "window" => Event::Window { visible: flag("visible"), closed: msg["reason"].as_str() == Some("closed") },
+        "airplayCapture" => Event::AirPlayCapture { ready: flag("ready"), error: msg["error"].as_str().map(String::from) },
         "error" => Event::Error(msg["message"].as_str().unwrap_or("unknown error").to_string()),
         _ => return None,
     })
@@ -639,6 +643,13 @@ mod protocol_tests {
         // An older bridge sends no reason: not a close.
         assert!(!closed(r#"{"event":"window","visible":false}"#));
         assert!(matches!(event(r#"{"event":"window","visible":true}"#), Some(Event::Window { visible: true, closed: false })));
+    }
+
+    #[test]
+    fn the_airplay_capture_says_whether_it_is_ready_and_why_not() {
+        assert!(matches!(event(r#"{"event":"airplayCapture","ready":true}"#), Some(Event::AirPlayCapture { ready: true, error: None })));
+        let not = event(r#"{"event":"airplayCapture","ready":false,"error":"audio context suspended"}"#);
+        assert!(matches!(not, Some(Event::AirPlayCapture { ready: false, error: Some(ref e) }) if e == "audio context suspended"));
     }
 
     #[test]
