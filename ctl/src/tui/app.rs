@@ -28,6 +28,14 @@ const QUEUE_EVERY: Duration = Duration::from_secs(3);
 /// How long a message replaces the status line.
 const MESSAGE_FOR: Duration = Duration::from_secs(2);
 /// How long the config file's first problem shows at the start.
+/// What a status-line message is, for its colour (`[theme]` status_fg, warning, error).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Level {
+    Note,
+    Warning,
+    Error,
+}
+
 const CONFIG_NOTICE_FOR: Duration = Duration::from_secs(8);
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// Below this terminal height the player shrinks to two rows.
@@ -150,7 +158,7 @@ pub struct App {
     /// The app can't be reached; keep retrying.
     pub away: bool,
     pub quit: bool,
-    message: Option<(String, Instant, Duration)>,
+    message: Option<(String, Instant, Duration, Level)>,
     /// What `uzu.toml` said (the defaults when there is no file).
     pub config: Config,
     last_status: Option<Instant>,
@@ -482,26 +490,40 @@ impl App {
     }
 
     pub fn message(&self, now: Instant) -> Option<&str> {
-        self.message.as_ref().filter(|(_, at, hold)| now.saturating_duration_since(*at) < *hold).map(|(m, _, _)| m.as_str())
+        self.live_message(now).map(|(m, _, _, _)| m.as_str())
+    }
+
+    fn live_message(&self, now: Instant) -> Option<&(String, Instant, Duration, Level)> {
+        self.message.as_ref().filter(|(_, at, hold, _)| now.saturating_duration_since(*at) < *hold)
+    }
+
+    /// How the message shows: the status colours, and `warning` or `error` on top of them.
+    pub fn message_style(&self, now: Instant) -> ratatui::style::Style {
+        let level = match self.live_message(now) {
+            Some((_, _, _, Level::Warning)) => super::table::warning(),
+            Some((_, _, _, Level::Error)) => super::table::error(),
+            _ => ratatui::style::Style::default(),
+        };
+        super::table::status().patch(level)
     }
 
     /// A short message in the status line (`[defaults] notifications = false` hides these).
     pub fn set_message(&mut self, text: impl Into<String>, now: Instant) {
         if self.config.notifications {
-            self.message = Some((text.into(), now, MESSAGE_FOR));
+            self.message = Some((text.into(), now, MESSAGE_FOR, Level::Note));
         }
     }
 
     /// An error from the app: shown whatever the notifications setting is.
-    fn set_error(&mut self, text: impl Into<String>, now: Instant) {
-        self.message = Some((text.into(), now, MESSAGE_FOR));
+    pub(super) fn set_error(&mut self, text: impl Into<String>, now: Instant) {
+        self.message = Some((text.into(), now, MESSAGE_FOR, Level::Error));
     }
 
     /// Takes up what `uzu.toml` said. Its problems show in the status line for a while (and
     /// `uzu config` lists them all), so a typo never leaves the screen broken or silent.
     pub fn set_config(&mut self, config: Config, now: Instant) {
         if let Some(text) = config.status_line() {
-            self.message = Some((text, now, CONFIG_NOTICE_FOR));
+            self.message = Some((text, now, CONFIG_NOTICE_FOR, Level::Warning));
         }
         self.config = config;
         self.refresh_sorts();

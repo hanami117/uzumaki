@@ -2133,6 +2133,28 @@ mod lyrics_screen {
     }
 
     #[test]
+    fn lyrics_current_and_lyrics_other_come_from_the_theme() {
+        let mut lab = Lab::new(12.5);
+        lab.app.set_config(Config::parse("[theme]\nlyrics_current = \"#aa0000\"\nlyrics_other = \"#0000aa\"\n"), lab.now);
+        let (text, buf) = lab.frame();
+        let sung = style_of(&buf, &text, "one");
+        assert_eq!(sung.fg, Some(Color::Rgb(0xaa, 0, 0)));
+        assert!(sung.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(style_of(&buf, &text, "second line here").fg, Some(Color::Rgb(0, 0, 0xaa)), "the next line");
+        // The unsung words of the current line are the other colour, in bold.
+        let row = Lab::row_of(&text, "one two three four");
+        let x = column_of(&text[row], "four");
+        assert_eq!(buf[(x, row as u16)].fg, Color::Rgb(0, 0, 0xaa));
+        // A line already sung: the other colour, dimmed.
+        let mut lab = Lab::new(15.0);
+        lab.app.set_config(Config::parse("[theme]\nlyrics_other = \"#0000aa\"\n"), lab.now);
+        let (text, buf) = lab.frame();
+        let past = style_of(&buf, &text, "one two three four");
+        assert_eq!(past.fg, Some(Color::Rgb(0, 0, 0xaa)));
+        assert!(past.add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
     fn lines_before_the_current_one_are_dim() {
         let mut lab = Lab::new(15.0); // line 1 is being sung
         let (text, buf) = lab.frame();
@@ -3276,6 +3298,167 @@ fn the_paused_state_and_every_screen_follow_the_theme() {
     let mut plain = fixture(now);
     plain.resize(20);
     assert!(colours(&draw(&plain, now, 140, 20)).contains("Rgb(255, 122, 138)"));
+}
+
+/// The cell of the first `needle` on a frame, looking from row `from` down.
+fn find_cell(buf: &Buffer, needle: &str, from: usize) -> (u16, u16) {
+    let text = lines(buf);
+    let row = (from..text.len()).find(|&r| text[r].contains(needle)).unwrap_or_else(|| panic!("no {needle:?} in {text:?}"));
+    let x = text[row].find(needle).map(|b| text[row][..b].chars().count()).unwrap();
+    (x as u16, row as u16)
+}
+
+/// The fixture with the cursor on up-next row 2 (screen row 13), as `row_styles` does.
+fn with_cursor_down(config: &str, now: Instant) -> App {
+    let mut app = with_config(config, now);
+    app.resize(20);
+    let mut be = NoApp;
+    for _ in 0..2 {
+        app.handle_key(key(KeyCode::Down), &mut be, now);
+    }
+    app
+}
+
+#[test]
+fn a_selection_colour_replaces_the_reversed_row() {
+    let now = Instant::now();
+    let app = with_cursor_down("[theme]\nselection_bg = \"#434c5e\"\nselection_fg = \"#eceff4\"\n", now);
+    let buf = draw(&app, now, 140, 20);
+    let st = buf[(2, 13)].style();
+    assert_eq!((st.fg, st.bg), (Some(Color::Rgb(0xec, 0xef, 0xf4)), Some(Color::Rgb(0x43, 0x4c, 0x5e))));
+    assert!(!st.add_modifier.contains(Modifier::REVERSED), "the colour is the mark now");
+    // The whole row is one block: the gaps between the cells have the background too.
+    // (The row of the Japanese song: the second cell of a wide character has no style of its own.)
+    let missing: Vec<u16> = (2..137u16).filter(|&x| buf[(x, 13)].bg != Color::Rgb(0x43, 0x4c, 0x5e)).collect();
+    assert!(missing.iter().all(|&x| text_width(buf[(x - 1, 13)].symbol()) == 2), "stripes at {missing:?}");
+    assert!(missing.len() < 10, "{missing:?}");
+    // No other row has it, and the playing row keeps its own colour on the terminal's background.
+    assert!((0..20u16).filter(|&y| y != 13).all(|y| (0..140u16).all(|x| buf[(x, y)].bg != Color::Rgb(0x43, 0x4c, 0x5e))));
+    assert_eq!(buf[(2, 11)].style().fg, Some(CORAL));
+}
+
+#[test]
+fn only_a_background_keeps_the_text_colours_of_the_cells() {
+    let now = Instant::now();
+    let app = with_cursor_down("[theme]\nselection_bg = \"#222222\"\n", now);
+    let buf = draw(&app, now, 140, 20);
+    // The number column is green and the time magenta, on the new background.
+    let at = |sym: &str| (0..140u16).rev().find(|&x| buf[(x, 13)].symbol() == sym).unwrap();
+    let time_x = at(":") - 1;
+    assert_eq!((buf[(time_x, 13)].fg, buf[(time_x, 13)].bg), (Color::Magenta, Color::Rgb(0x22, 0x22, 0x22)));
+}
+
+#[test]
+fn the_selection_style_is_the_file_s_choice() {
+    let now = Instant::now();
+    let app = with_cursor_down("[theme]\nselection_bg = \"red\"\nselection_style = \"reversed|bold\"\n", now);
+    let m = draw(&app, now, 140, 20)[(2, 13)].modifier;
+    assert!(m.contains(Modifier::REVERSED) && m.contains(Modifier::BOLD));
+    // A style and no colour: bold instead of reversed.
+    let app = with_cursor_down("[theme]\nselection_style = \"bold\"\n", now);
+    let m = draw(&app, now, 140, 20)[(2, 13)].modifier;
+    assert!(m.contains(Modifier::BOLD) && !m.contains(Modifier::REVERSED));
+    // "none" with a colour: just the colour.
+    let app = with_cursor_down("[theme]\nselection_fg = \"red\"\nselection_style = \"none\"\n", now);
+    let st = draw(&app, now, 140, 20)[(2, 13)].style();
+    assert_eq!(st.fg, Some(Color::Red));
+    assert!(st.add_modifier.is_empty() || !st.add_modifier.contains(Modifier::REVERSED));
+}
+
+#[test]
+fn the_pane_without_the_focus_has_its_own_selection_colours() {
+    let mut rig = playlists_loaded("sel-inactive");
+    rig.app.set_config(Config::parse("[theme]\nselection_bg = \"#111111\"\nselection_inactive_bg = \"#222222\"\n"), rig.now);
+    rig.press(&[key(KeyCode::Enter)]); // the songs pane has the focus, the list does not
+    let buf = draw(&rig.app, rig.now, 120, 18);
+    // The list's cursor row (left pane) is the inactive colour, the songs' cursor row (right) the focused one.
+    assert_eq!(buf[(2, 11)].bg, Color::Rgb(0x22, 0x22, 0x22));
+    assert!(!buf[(2, 11)].modifier.contains(Modifier::UNDERLINED), "a colour replaces the underline");
+    let band = (60..118u16).filter(|&x| buf[(x, 11)].bg == Color::Rgb(0x11, 0x11, 0x11)).count();
+    assert!(band > 40, "{band}");
+    // No inactive colour: the old underline stays, even with a focused colour.
+    let mut rig = playlists_loaded("sel-inactive2");
+    rig.app.set_config(Config::parse("[theme]\nselection_bg = \"#111111\"\n"), rig.now);
+    rig.press(&[key(KeyCode::Enter)]);
+    let buf = draw(&rig.app, rig.now, 120, 18);
+    assert!(buf[(2, 11)].modifier.contains(Modifier::UNDERLINED) && buf[(2, 11)].bg == Color::Reset);
+}
+
+#[test]
+fn border_header_muted_progress_status_and_title_roles_paint_their_parts() {
+    let now = Instant::now();
+    let mut app = with_config(
+        "[theme]\nborder = \"#010101\"\nheader = \"#020202\"\nmuted = \"#030303\"\nprogress_bg = \"#040404\"\nstatus_fg = \"#050505\"\nstatus_bg = \"#060606\"\nplaying = \"#070707\"\nprogress = \"#090909\"\n",
+        now,
+    );
+    app.resize(20);
+    let buf = draw(&app, now, 140, 20);
+    let fg = |needle: &str, from: usize| {
+        let (x, y) = find_cell(&buf, needle, from);
+        buf[(x, y)].style()
+    };
+    assert_eq!(buf[(0, 3)].fg, Color::Rgb(1, 1, 1), "the frame");
+    assert_eq!(fg("Artist", 0).fg, Some(Color::Rgb(2, 2, 2)), "the column headers");
+    assert!(fg("Artist", 0).add_modifier.contains(Modifier::BOLD), "on top of bold");
+    let hint = fg("uzumaki · ? help", 0);
+    assert_eq!(hint.fg, Some(Color::Rgb(3, 3, 3)), "secondary text");
+    assert!(!hint.add_modifier.contains(Modifier::DIM), "a muted colour replaces dim");
+    // The status line is one coloured band, as wide as the box.
+    let (_, y) = find_cell(&buf, "Playing from", 0);
+    assert!((2..138).all(|x| buf[(x, y)].bg == Color::Rgb(6, 6, 6)), "the whole line");
+    assert_eq!(buf[(2, y)].fg, Color::Rgb(5, 5, 5));
+    assert_eq!(fg("Instant Crush", 0).fg, Some(Color::Rgb(7, 7, 7)), "the playing song's title");
+    let set = colours(&buf);
+    assert!(set.contains("Rgb(4, 4, 4)") && set.contains("Rgb(9, 9, 9)"), "the bar's track and its filled part: {set:?}");
+}
+
+#[test]
+fn the_help_and_the_sort_menu_use_the_focused_border() {
+    let now = Instant::now();
+    let mut app = with_config("[theme]\nborder = \"#010101\"\nborder_focused = \"#0f0f0f\"\n", now);
+    app.resize(24);
+    app.help = true;
+    let buf = draw(&app, now, 140, 24);
+    let (x, y) = find_cell(&buf, "Keys: Queue", 0);
+    assert_eq!(buf[(x - 2, y)].fg, Color::Rgb(15, 15, 15), "the help box's corner");
+    assert_eq!(buf[(0, 3)].fg, Color::Rgb(1, 1, 1), "the frame behind it");
+}
+
+#[test]
+fn warnings_and_errors_have_their_own_colours() {
+    let now = Instant::now();
+    let mut app = with_config("[theme]\nwarning = \"#0a0a0a\"\nerror = \"#0b0b0b\"\nstatus_bg = \"#0c0c0c\"\nacent = 1\n", now);
+    app.resize(20);
+    let buf = draw(&app, now, 140, 20);
+    let (x, y) = find_cell(&buf, "uzu.toml", 0);
+    assert_eq!((buf[(x, y)].fg, buf[(x, y)].bg), (Color::Rgb(10, 10, 10), Color::Rgb(12, 12, 12)), "a problem in the file is a warning");
+    app.away = true;
+    let (x, y) = find_cell(&draw(&app, now, 140, 20), "went away", 0);
+    assert_eq!(draw(&app, now, 140, 20)[(x, y)].fg, Color::Rgb(10, 10, 10));
+    app.away = false;
+    let later = now + Duration::from_secs(20);
+    app.set_error("boom", later);
+    let buf = draw(&app, later, 140, 20);
+    let (x, y) = find_cell(&buf, "boom", 0);
+    assert_eq!((buf[(x, y)].fg, buf[(x, y)].bg), (Color::Rgb(11, 11, 11), Color::Rgb(12, 12, 12)));
+    // A plain note takes the status colours only.
+    app.set_message("Paused", later);
+    let (x, y) = find_cell(&draw(&app, later, 140, 20), "Paused", 0);
+    assert_eq!(draw(&app, later, 140, 20)[(x, y)].fg, Color::Reset);
+}
+
+#[test]
+fn the_default_palettes_render_like_the_old_hardcoded_styles() {
+    // No theme keys at all, and a file that spells out every default: the same pixels.
+    let now = Instant::now();
+    let spelled: String = std::iter::once("[theme]\n".to_string()).chain(crate::config::theme::COLOURS.iter().chain(crate::config::theme::STYLES).map(|r| format!("{} = \"{}\"\n", r.name, r.default))).collect();
+    for (w, h) in [(140, 20), (100, 30), (60, 14)] {
+        let mut plain = fixture(now);
+        plain.resize(h);
+        let mut full = with_config(&spelled, now);
+        full.resize(h);
+        assert_eq!(draw(&plain, now, w, h), draw(&full, now, w, h), "{w}x{h}");
+    }
 }
 
 // ------------------------------------------------------------------- uzu.toml: [keys]

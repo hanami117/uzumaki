@@ -29,7 +29,9 @@ pub fn default_file() -> String {
             format!("{left:<w$}  # {}", a.about, w = width.clamp(0, 28))
         })
         .collect();
-    DEFAULT_TEMPLATE.replace("@KEYS@", &lines.join("\n"))
+    let name_w = theme::COLOURS.iter().chain(theme::STYLES).map(|r| r.name.len()).max().unwrap_or(0);
+    let theme_lines: Vec<String> = theme::COLOURS.iter().chain(theme::STYLES).map(|r| format!("{:<w$}  # {}", format!("# {} = \"{}\"", r.name, r.default), r.about, w = name_w + 14)).collect();
+    DEFAULT_TEMPLATE.replace("@KEYS@", &lines.join("\n")).replace("@THEME@", &theme_lines.join("\n"))
 }
 
 use std::fmt;
@@ -184,7 +186,8 @@ impl Config {
     /// `NO_COLOR` set: no colours, unless the file says `respect_no_color = false`.
     pub fn with_no_color(mut self, no_color: bool) -> Self {
         if no_color && self.respect_no_color {
-            self.theme = Theme::mono();
+            // No colour, but a look like bold or underline is not a colour: it stays.
+            self.theme = Theme { selection_style: self.theme.selection_style, selection_inactive_style: self.theme.selection_inactive_style, ..Theme::mono() };
         }
         self
     }
@@ -348,7 +351,7 @@ fn known_keys(section: &str) -> Option<Vec<&'static str>> {
     match section {
         // Any key: the actions are checked (with hints) when the keymap is built.
         "keys" => None,
-        "theme" => Some(vec!["palette", "accent", "number", "album", "time", "paused", "respect_no_color"]),
+        "theme" => Some(["palette", "respect_no_color"].into_iter().chain(theme::COLOURS.iter().chain(theme::STYLES).map(|r| r.name)).collect()),
         "format" => Some(vec!["status_format", "status_idle"]),
         "layout" => Some(vec!["start_screen", "start_view", "lyrics", "artist_width", "title_width", "album_width", "show_artist", "show_album"]),
         "defaults" => Some(vec!["sort_playlists", "sort_albums", "sort_songs", "sort_search", "notifications"]),
@@ -521,6 +524,7 @@ pub fn want_int(e: &Entry, w: &mut Warnings) -> Option<i64> {
 struct ThemeSpec {
     palette: Option<(usize, String)>,
     roles: Vec<(&'static str, Option<Color>)>,
+    styles: Vec<(&'static str, Option<ratatui::style::Modifier>)>,
 }
 
 impl ThemeSpec {
@@ -531,14 +535,24 @@ impl ThemeSpec {
             }
             return;
         }
-        let Some(role) = theme::ROLES.iter().find(|r| **r == e.key) else { return };
+        if let Some(role) = theme::STYLES.iter().find(|r| r.name == e.key) {
+            match &e.value {
+                Value::String(text) => match theme::parse_style(text) {
+                    Ok(m) => self.styles.push((role.name, m)),
+                    Err(message) => w.add(e.line, message),
+                },
+                other => w.add(e.line, format!("'{}' needs text like \"reversed|bold\" (got {})", e.key, reader::kind(other))),
+            }
+            return;
+        }
+        let Some(role) = theme::COLOURS.iter().find(|r| r.name == e.key) else { return };
         let colour = match &e.value {
             Value::String(text) => theme::parse_colour(text),
             Value::Integer(n) => u8::try_from(*n).map(|n| Some(Color::Indexed(n))).map_err(|_| format!("{n} is not a colour; numbers go from 0 to 255")),
             other => Err(format!("'{}' needs a colour in quotes (got {})", e.key, reader::kind(other))),
         };
         match colour {
-            Ok(c) => self.roles.push((role, c)),
+            Ok(c) => self.roles.push((role.name, c)),
             Err(message) => w.add(e.line, message),
         }
     }
@@ -554,8 +568,21 @@ impl ThemeSpec {
                 }
             }
         }
-        for (role, colour) in self.roles {
-            theme.set(role, colour);
+        let set: Vec<&str> = self.roles.iter().map(|(r, _)| *r).collect();
+        for (role, colour) in &self.roles {
+            theme.set(role, *colour);
+        }
+        // What follows another role, unless the file sets it too.
+        if set.contains(&"accent") {
+            for role in theme::FOLLOW_ACCENT.iter().filter(|r| !set.contains(r)) {
+                theme.set(role, theme.accent);
+            }
+        }
+        if set.contains(&"border") && !set.contains(&"border_focused") {
+            theme.border_focused = theme.border;
+        }
+        for (key, style) in self.styles {
+            theme.set_style(key, style);
         }
         theme
     }

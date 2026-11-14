@@ -16,7 +16,7 @@ use uzumaki_ctl::{CollectionInfo, Kind, Request, SongInfo};
 use super::app::Out;
 use super::jobs::{Job, Jobs};
 use super::sort::{self, Sort};
-use super::table::{self, GAP, Mark, Row, Table, bold, dim, frame, paint, theme};
+use super::table::{self, GAP, Mark, Row, Table, bold, dim, frame, gap, heading, paint, theme};
 use crate::fmt::{pad_left, pad_right, plural, text_width, truncate};
 
 /// How long the left selection must rest before its songs are fetched.
@@ -389,10 +389,10 @@ fn left_line(c: &CollectionInfo, n: usize, w: &[usize; 3], mark: Option<Mark>) -
     let mut spans = Vec::new();
     for (i, group) in parts.into_iter().enumerate() {
         if i > 0 {
-            spans.push(Span::raw(" ".repeat(GAP)));
+            spans.push(gap(GAP, mark));
         }
         for (text, style) in group {
-            spans.push(Span::styled(text, mark.map_or(style, |m| style.add_modifier(m.style()))));
+            spans.push(Span::styled(text, mark.map_or(style, |m| m.apply(style))));
         }
     }
     Line::from(spans)
@@ -409,7 +409,7 @@ fn draw_left(f: &mut Frame, area: Rect, b: &Browse) {
     };
     let w = [num_w, flex - extra_w, extra_w];
     let head = format!("{}{}{}{}{}", pad_left("#", num_w), " ".repeat(GAP), pad_right("Title", w[1]), " ".repeat(GAP), pad_right(if b.kind == Kind::Album { "Artist" } else { "Songs" }, extra_w));
-    f.render_widget(Paragraph::new(Line::styled(truncate(&head, area.width as usize), bold())), Rect { height: 1, ..area });
+    f.render_widget(Paragraph::new(Line::styled(truncate(&head, area.width as usize), heading())), Rect { height: 1, ..area });
     let mark = if b.focus == Focus::Left { Mark::Focus } else { Mark::Dim };
     let vis = b.visible_left();
     let lines: Vec<Line> = if vis.is_empty() {

@@ -19,7 +19,7 @@ use super::app::{App, COMPACT_BELOW, Screen, chrome_top};
 use super::cover;
 use super::showcase::{self, Layout};
 use super::sort::{Key, View};
-use super::table::{self, Mark, Row, Table, bold, coral, dim, frame, paint, theme};
+use super::table::{self, Mark, Row, Table, bold, coral, dim, frame, frame_focused, paint, playing, status, theme, title, warning};
 use super::{browse, lyrics, search};
 use crate::fmt::{fmt_time, pad_right, plural, repeat_name, text_width, truncate};
 
@@ -52,7 +52,7 @@ pub fn state_glyph(state: Option<PlayState>) -> &'static str {
 /// The player's glyph, word and style for a state.
 pub(super) fn state_word(state: PlayState) -> (&'static str, &'static str, Style) {
     match state {
-        PlayState::Playing => ("▶", "Playing", coral()),
+        PlayState::Playing => ("▶", "Playing", playing()),
         PlayState::Paused => ("‖", "Paused", paint(theme().paused)),
         PlayState::Loading => ("…", "Loading", dim()),
         PlayState::Stopped => ("■", "Stopped", dim()),
@@ -127,6 +127,11 @@ fn fold_fit(app: &App, now: Instant, width: usize, min_left: usize) -> String {
     (0..3).map(|l| fold_text(app, now, l)).find(|t| text_width(t) + min_left <= width).unwrap_or_default()
 }
 
+/// The unfinished part of the bar: the plain foreground unless `progress_bg` says otherwise.
+fn progress_rest() -> Style {
+    paint(theme().progress_bg)
+}
+
 /// `━━━╸────`: filled, head, rest.
 pub fn bar_text(frac: f64, width: usize) -> (String, String) {
     let n = ((frac.clamp(0.0, 1.0) * width as f64) as usize).min(width);
@@ -136,7 +141,7 @@ pub fn bar_text(frac: f64, width: usize) -> (String, String) {
     (format!("{}╸", "━".repeat(n)), "─".repeat(width - n - 1))
 }
 
-/// The progress bar, `width` columns, coral while playing and dim otherwise; with `brackets`
+/// The progress bar, `width` columns, in the `progress` colour while playing and plain otherwise; with `brackets`
 /// it sits inside `[ ]` (and the brackets are part of the width).
 pub(super) fn bar_spans(app: &App, width: usize, now: Instant, brackets: bool) -> Vec<Span<'static>> {
     let inner = if brackets { width.saturating_sub(2) } else { width };
@@ -146,12 +151,12 @@ pub(super) fn bar_spans(app: &App, width: usize, now: Instant, brackets: bool) -
         spans.push(Span::styled("[", frame()));
     }
     if dur <= 0.0 || inner == 0 {
-        spans.push(Span::styled("─".repeat(inner), frame()));
+        spans.push(Span::styled("─".repeat(inner), progress_rest()));
     } else {
         let (done, rest) = bar_text(app.position(now) / dur, inner);
-        let filled = if app.status.as_ref().is_some_and(|s| s.state == PlayState::Playing) { coral() } else { frame() };
+        let filled = if app.status.as_ref().is_some_and(|s| s.state == PlayState::Playing) { paint(theme().progress) } else { Style::default() };
         spans.push(Span::styled(done, filled));
-        spans.push(Span::styled(rest, frame()));
+        spans.push(Span::styled(rest, progress_rest()));
     }
     if brackets {
         spans.push(Span::styled("]", frame()));
@@ -164,7 +169,7 @@ pub(super) fn song_lines(app: &App, width: usize) -> [Line<'static>; 3] {
     let st = app.status.as_ref();
     match st.and_then(|st| st.song.as_ref()) {
         Some(song) => {
-            let title = if st.is_some_and(|s| s.state == PlayState::Playing) { bold().patch(coral()) } else { bold() };
+            let title = if st.is_some_and(|s| s.state == PlayState::Playing) { title().patch(playing()) } else { title() };
             [
                 Line::styled(truncate(&song.title, width), title),
                 Line::from(truncate(&song.artist, width)),
@@ -224,7 +229,7 @@ fn compact_lines(app: &App, width: usize, now: Instant) -> [Line<'static>; 2] {
     match st.and_then(|st| st.song.as_ref().map(|s| (st.state, s))) {
         Some((state, song)) => {
             let (glyph, _, gstyle) = state_word(state);
-            let title = if state == PlayState::Playing { bold().patch(coral()) } else { bold() };
+            let title = if state == PlayState::Playing { title().patch(playing()) } else { title() };
             let avail = left_w.saturating_sub(2);
             let name = truncate(&song.title, avail);
             let room = avail.saturating_sub(text_width(&name) + 3);
@@ -336,10 +341,10 @@ fn context_line(app: &App, width: usize, now: Instant) -> Line<'static> {
         return Line::from(truncate(&format!("Search: {}▏", app.search.input), width));
     }
     if app.away {
-        return Line::styled(truncate("Uzumaki went away, retrying…", width), coral());
+        return Line::styled(truncate("Uzumaki went away, retrying…", width), warning());
     }
     if let Some(m) = app.message(now) {
-        return Line::from(truncate(m, width));
+        return Line::styled(truncate(m, width), app.message_style(now));
     }
     let (mut text, filter) = match app.screen {
         Screen::Queue => (if app.queue.source.is_empty() { "Queue".to_string() } else { format!("Playing from: {}", app.queue.source) }, app.filter.as_str()),
@@ -481,7 +486,7 @@ fn help_overlay(f: &mut Frame, area: Rect, screen: Screen, app: &App) {
     let r = help_rect(area, screen);
     let lines: Vec<Line> = keys.iter().map(|(k, d)| Line::from(vec![Span::styled(pad_right(&truncate(&app.config.keys.relabel(k), 15), 16), coral()), Span::raw(*d)])).collect();
     f.render_widget(Clear, r);
-    f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(format!(" Keys: {} ", screen.name())).border_style(frame())), r);
+    f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(format!(" Keys: {} ", screen.name())).border_style(frame_focused())), r);
 }
 
 /// The sort popup, a rounded box at the bottom right of the body, above the bottom border.
@@ -502,7 +507,7 @@ fn sort_popup(f: &mut Frame, area: Rect, app: &App, view: View) {
         return;
     }
     let r = Rect { x: area.width - 1 - w, y: area.height - 1 - h, width: w, height: h };
-    let block = Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(frame()).title(format!(" {} ", view.title()));
+    let block = Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(frame_focused()).title(format!(" {} ", view.title()));
     f.render_widget(Clear, r);
     let content = block.inner(r);
     f.render_widget(block, r);
@@ -603,7 +608,11 @@ pub fn draw(f: &mut Frame, app: &App, now: Instant) {
             render_line(f, line, Rect { x: x + 2, y: 1 + i as u16, width: STATUS_W - 3, height: 1 });
         }
     }
-    render_line(f, context_line(app, inner.saturating_sub(2), now), Rect { x: 2, y: prows + 2, width: (inner.saturating_sub(2)) as u16, height: 1 });
+    // `status_bg` fills the whole line, so it is the paragraph's style and not the text's.
+    let status_row = Rect { x: 2, y: prows + 2, width: (inner.saturating_sub(2)) as u16, height: 1 };
+    if status_row.width > 0 && status_row.y < f.area().height {
+        f.render_widget(Paragraph::new(context_line(app, inner.saturating_sub(2), now)).style(status()), status_row);
+    }
 
     // The body: a left pad, the content, a gap and a column for the scrollbar.
     let body_h = h.saturating_sub(1).saturating_sub(chrome);

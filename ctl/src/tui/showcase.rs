@@ -22,7 +22,7 @@ use uzumaki_ctl::RepeatMode;
 use super::app::{App, COMPACT_BELOW};
 use crate::config::Placement;
 use super::cover::Caps;
-use super::table::{bold, coral, dim, frame};
+use super::table::{dim, frame, status, title, warning};
 use super::view::{self, bar_spans, help_rect, hline, hint_text, playing_song, put, render_line, song_lines, state_word, time_text};
 use crate::fmt::{fmt_time, plural, repeat_name, text_width, truncate};
 
@@ -286,16 +286,16 @@ fn showcase_lines(app: &App, width: usize, now: Instant) -> Vec<Line<'static>> {
 /// typed, a message, the app being away.
 fn up_next_title(app: &App, width: usize, now: Instant) -> Line<'static> {
     if let Some(text) = app.filter_text() {
-        return Line::from(truncate(&format!(" /{text}▏ "), width));
+        return Line::styled(truncate(&format!(" /{text}▏ "), width), status());
     }
     if app.away {
-        return Line::styled(truncate(" Uzumaki went away, retrying… ", width), coral());
+        return Line::styled(truncate(" Uzumaki went away, retrying… ", width), warning());
     }
     if let Some(m) = app.message(now) {
-        return Line::from(truncate(&format!(" {m} "), width));
+        return Line::styled(truncate(&format!(" {m} "), width), app.message_style(now));
     }
     let n = app.queue.up_next.len();
-    let mut spans = vec![Span::raw(" "), Span::styled("Up Next", bold())];
+    let mut spans = vec![Span::raw(" "), Span::styled("Up Next", title())];
     if n > 0 {
         let secs: f64 = app.queue.up_next.iter().map(|s| s.duration).sum();
         spans.push(Span::styled(format!(" · {} · {}", plural(n, "song"), view::short_length(secs)), dim()));
@@ -327,7 +327,7 @@ pub fn draw_showcase(f: &mut Frame, app: &App, now: Instant, g: &Showcase) {
     put(buf, d, h - 1, "┴", 1, frame());
     // Titles in the top border: plain spaces around bold words, so the dashes stop short.
     put(buf, 2, 0, " ", 1, Style::default());
-    put(buf, 3, 0, "Now Playing", (d - 4) as usize, bold());
+    put(buf, 3, 0, "Now Playing", (d - 4) as usize, title());
     put(buf, 14, 0, " ", (d.saturating_sub(15)) as usize, Style::default());
     let right_w = (w - d - 4) as usize;
     render_line(f, up_next_title(app, right_w, now), Rect { x: d + 2, y: 0, width: right_w as u16, height: 1 });
@@ -382,7 +382,7 @@ pub fn draw_solo(f: &mut Frame, app: &App, now: Instant, g: &Solo) {
     let left = format!("{elapsed}{}", " ".repeat(gx.saturating_sub(text_width(&elapsed))));
     let time = spread(vec![Span::raw(left), glyph], vec![Span::raw(total)], width);
     render_line(f, time, Rect { y: bar.y + 1, ..bar });
-    let note = if app.away { Some(Line::styled("Uzumaki went away, retrying…", coral())) } else { app.message(now).map(|m| Line::styled(m.to_string(), dim())) };
+    let note = if app.away { Some(Line::styled("Uzumaki went away, retrying…", warning())) } else { app.message(now).map(|m| Line::styled(m.to_string(), dim().patch(app.message_style(now)))) };
     // With no message, the lyrics' absence is a dim hint on the last row (only when asked for).
     let note = note.or_else(|| view::solo_lyrics_hint(app).map(|t| Line::styled(t, dim())));
     if let Some(line) = note
