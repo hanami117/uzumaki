@@ -3,7 +3,7 @@
 use crate::bridge::PlayState;
 use crate::lyrics::{Line, Lyrics};
 use crate::models::{Artist, Artwork, Collection, CollectionKind, SearchResults, Shelf, Song, Station};
-use crate::settings::{Pin, PinKind};
+use crate::settings::{AnimatedArtwork, Pin, PinKind};
 use crate::state::PlayQueue;
 use crate::ui::{Col, Sort};
 use crate::state::{LibraryTab, Load, Paged, Route, SHELF_TITLES, State};
@@ -36,6 +36,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("album", album),
     ("album-motion", album_motion),
     ("album-motion-paused", album_motion_paused),
+    ("album-motion-now-playing-only", |s| { album_motion(s); s.settings.animated_artwork = AnimatedArtwork::NowPlaying }),
+    ("album-motion-off", |s| { album_motion(s); s.settings.animated_artwork = AnimatedArtwork::Off }),
     ("album-long", |s| { album(s); long_album(s) }),
     ("album-motion-long", |s| { album_motion(s); long_album(s) }),
     ("album-artists-two", album_two_artists),
@@ -62,6 +64,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("now-playing-cover-only", crate::ui::scene_np_cover_only),
     ("now-playing-motion", |s| crate::ui::scene_np_motion(s, false)),
     ("now-playing-motion-lyrics", |s| crate::ui::scene_np_motion(s, true)),
+    ("now-playing-motion-off", |s| { crate::ui::scene_np_motion(s, false); s.settings.animated_artwork = AnimatedArtwork::Off }),
+    ("now-playing-motion-now-playing-only", |s| { crate::ui::scene_np_motion(s, false); s.settings.animated_artwork = AnimatedArtwork::NowPlaying }),
     ("now-playing-queue", now_playing_queue),
     ("now-playing-queue-empty", now_playing_queue_empty),
     ("up-next-stars", up_next_stars),
@@ -175,6 +179,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("search-local", search_local),
     ("appearance", appearance),
     ("appearance-icon-auto", appearance_icon_auto),
+    ("settings-animated-artwork", settings_animated_artwork),
+    ("settings-animated-artwork-off", |s| { settings_animated_artwork(s); s.settings.animated_artwork = AnimatedArtwork::Off }),
     ("intro", intro),
     ("onboarding", onboarding),
     ("onboarding-welcome", |s| onboarding_at(s, Mode::FirstRun, Step::Welcome, None)),
@@ -1826,6 +1832,12 @@ fn appearance(s: &mut State) {
     home(s);
     builtin_bg(s, crate::appearance::Effect::Dither);
     s.ui.settings.open = Some(crate::ui::settings::Tab::Appearance);
+}
+
+/// Settings search for "animated artwork": its three choices (Always chosen).
+fn settings_animated_artwork(s: &mut State) {
+    appearance(s);
+    crate::ui::settings::set_query(s, "animated artwork");
 }
 
 /// Settings → Appearance with App icon → Follow theme chosen.
