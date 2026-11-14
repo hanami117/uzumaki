@@ -95,6 +95,7 @@ pub fn is_open(s: &State) -> bool {
 
 /// What the column beside the cover holds now, if anything (the lyrics button's "on" state
 /// counts, even for a song with no lyrics: the button is lit and the hint shows).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // the macOS menu bar and the tests
 pub fn column(s: &State) -> Option<crate::settings::RightTab> {
     use crate::settings::RightTab;
     if s.settings.now_playing_queue {
