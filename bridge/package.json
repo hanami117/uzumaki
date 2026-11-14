@@ -1,6 +1,6 @@
 {
   "name": "uzumaki-bridge",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Hidden castLabs Electron process that drives music.apple.com's MusicKit instance over JSON stdin/stdout",
   "license": "GPL-3.0-or-later",

@@ -5,6 +5,52 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-14
+
+AutoPlay, animated album artwork, AirPlay on the Mac, and a configurable `uzu`. You need an Apple Music subscription.
+
+### Added
+- **AutoPlay (∞):** when the queue ends, similar songs keep playing, as in Apple Music. Up Next (the side panel and
+  Now Playing) has an ∞ button and an "AutoPlay" section with the upcoming suggestions, which you can play or remove;
+  Now Playing's transport row has the button after repeat. It also continues after an album or playlist ends.
+  Settings → Playback → AutoPlay turns it off (on by default); `uzu autoplay [on|off|toggle]` and the A key in `uzu`
+  do the same.
+- **Create Station** in the song menu and in an artist's menu, like Apple Music's.
+- **Animated artwork:** albums with a motion cover (Apple's square loop) play it on the album page and in Now
+  Playing, which now also slides and fades with the animation. Settings → Appearance → **Animated artwork**:
+  Always, Now Playing only, or Off (Off downloads no clips). It follows Reduce Motion, pauses while the window is
+  hidden, and Clear Caches removes the clips. On Linux it plays through `ffmpeg`, which must be installed.
+- **Share → Copy Link** on albums, songs, playlists, artists and stations ("Link copied"). On macOS Share also lists the
+  system's sharing services (AirDrop, Mail, Messages, …); on Linux the menu has Copy Link alone.
+- **`uzu.toml`:** an optional config file for the `uzu` command line: `[theme]` (palettes and every colour of the
+  screens), `[keys]` (remap any action), `[format]` (`status_format` for `uzu status --line`, for a status bar) and
+  `[layout]` / `[defaults]` (start screen and view, columns, starting sorts, notifications). A bad line is a warning,
+  never an error. `uzu config` checks the file and `uzu config --default` prints a commented one; every key is in
+  `docs/UZU-CONFIG.md`.
+- **AirPlay on macOS:** an AirPlay button in the player bar and in Now Playing picks a speaker (HomePod, Apple TV,
+  stereo pairs, other AirPlay receivers), with a volume slider and password or PIN pairing, and the sound moves back
+  to the Mac if the speaker goes away. Settings → Playback can reconnect to the last speaker; `uzu airplay` lists and
+  picks speakers. Not available on Linux yet: there the button, the setting and the command are hidden.
+- Cmd/Ctrl+L and Cmd/Ctrl+U open lyrics and Up Next in Now Playing; the mouse wheel over any volume control moves it
+  in whole percents.
+
+### Changed
+- **Now Playing in a narrow window:** the volume has its own row under the scrubber, and the lyrics, Words, AirPlay,
+  AutoPlay and Up Next buttons sit evenly spaced on a row of their own. Wide windows keep one row. Words is a round icon
+  button like the others.
+- Play and Shuffle from a menu (sidebar row, card) load the playlist's songs first and then play, so they start
+  faster and a library playlist no longer fails with "not found".
+- Pinned albums, playlists and stations have the full menu of what they pin; Up Next shows the favourite star.
+- The sidebar rail lists every playlist.
+
+### Fixed
+- A song played from 0 after the restored (resumed) one had been replaced, instead of continuing at the old position.
+- Lyrics requests that failed are tried again, and "no lyrics" expires instead of sticking for good.
+- A dropped sidebar pin glides home on one smooth movement, without a bump.
+- Local files with no album tag show the song's initial on the cover tile instead of their folder's.
+- Up Next rows use the dark colours on the Light theme.
+- Linux: no AirPlay row or command that can't work.
+
 ## [0.1.1] - 2026-11-12
 
 Linux packages, a fixed sign-in and store, and a few fixes. You need an Apple Music subscription.
@@ -97,5 +143,6 @@ affiliated with Apple.
   Open Anyway.
 - Music videos, concerts and radio shows on artist pages are not shown.
 
+[0.2.0]: https://github.com/hanami117/uzumaki/releases/tag/v0.2.0
 [0.1.1]: https://github.com/hanami117/uzumaki/releases/tag/v0.1.1
 [0.1.0]: https://github.com/hanami117/uzumaki/releases/tag/v0.1.0
