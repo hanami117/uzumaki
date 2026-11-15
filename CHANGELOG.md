@@ -5,16 +5,27 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
-Planned as 0.2.1.
+## [0.2.1] - 2026-11-15
+
+A fix for accounts that refuse explicit songs, and a Ko-fi link. You need an Apple Music subscription.
+
+### Added
+- **Apple's "E" badge** on explicit songs in song rows, Up Next, Now Playing and the player bar.
+- A **Ko-fi** support link on getuzumaki.app and in the README, and GitHub's Sponsor button on the repository. The app
+  itself is unchanged by it.
 
 ### Fixed
 - **Explicit songs on an account that refuses them:** the player's refusal (`CONTENT_RESTRICTED`) is now explained
   instead of leaving playback stuck. Uzumaki says why once, marks explicit songs as unplayable (dimmed, passed over)
-  and plays on from the next song that can play.
+  and plays on from the next song that can play (after five refusals in a row it stops with one message).
 - **The explicit content setting that counts is the web player's:** the message tells you to allow explicit content
   on music.apple.com and restart, with an "Open music.apple.com" button; Settings → Account → Explicit content
   explains that a Screen Time change on an iPhone or Mac may not reach the web player (try another browser if it
   keeps refusing). Accounts of a child under 18 can't turn it on.
+
+### Site
+- New page "Apple Music on Linux", a real 404 page, titles, descriptions and social cards per page, JSON-LD on the
+  home page, and no layout shift in the home page's hero.
 
 ## [0.2.0] - 2026-11-14
 
