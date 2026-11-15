@@ -13,7 +13,8 @@
   <a href="https://getuzumaki.app">getuzumaki.app</a> ·
   <a href="#install">Install</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="LICENSE">GPL-3.0-or-later</a>
+  <a href="LICENSE">GPL-3.0-or-later</a> ·
+  <a href="https://ko-fi.com/hanami117">Support on Ko-fi</a>
 </p>
 
 ![An album with synced lyrics in the side panel](site/assets/shots/right-panel-lyrics.webp)
@@ -264,6 +265,12 @@ For the details, see [docs/bridge-protocol.md](docs/bridge-protocol.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md): how to build and run from source, the tests, and how to test
 without touching your own Apple Music login.
+
+## Support Uzumaki
+
+Uzumaki is free and open source, made by one person. If you enjoy it, you can
+[buy me a coffee on Ko-fi](https://ko-fi.com/hanami117): it buys time for bug fixes and new features.
+Bug reports and a star on GitHub help too.
 
 ## License
 
