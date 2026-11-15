@@ -77,6 +77,7 @@ p { margin: 0; }
 .foot-social a { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); text-decoration: none; font-size: .92rem; }
 .foot-social a:hover { color: var(--accent); }
 .foot-social { margin: 2px 0 6px; }
+.foot-social { display: flex; flex-wrap: wrap; gap: 6px 22px; }
 .foot-contact { margin: 0 0 6px; color: var(--ink-3); font-size: .9rem; }
 .foot-contact a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--border); }
 .foot-contact a:hover { color: var(--accent); border-color: currentColor; }
