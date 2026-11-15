@@ -56,7 +56,7 @@ pub fn song_row(s: &State, song: &Song, key: String, list: &str, rk: &str) -> El
 pub fn song_row_compact(s: &State, song: &Song, key: String, list: &str, rk: &str) -> El {
     let cur = is_current(s, song);
     let title = col().grow(1.0).min_w(0.0).gap(1.0)
-        .child(title_with_mark(song, cur).grow(0.0).w_full())
+        .child(title_line(song, cur, true))
         .child(text(song.album.clone()).font(SMALL13).color(PAL.muted).truncate());
     row_with(s, song, key, list, rk, [title], 54.0)
 }
@@ -78,6 +78,25 @@ fn row_with<const N: usize>(s: &State, song: &Song, key: String, list: &str, rk:
         .child(star)
         .child(row().w(56.0).justify_end().child(text(fmt_time(song.duration)).font(TIME14).color(PAL.muted)));
     select::wire(s, super::widgets::dim_if_blocked(s, song, r), rk, list)
+}
+
+/// The title as a line of its own inside a column (no flex growth: a zero-basis row would collapse
+/// to no height there and drop the title below its cell). A song with no marker gets the bare title,
+/// exactly as before the markers existed; otherwise the markers follow it in a row of the title's height.
+pub fn title_line(song: &Song, cur: bool, local_mark: bool) -> El {
+    let local = local_mark && song.is_local();
+    let title = text(song.title.clone()).font(TRACK_TITLE).color(if cur { PAL.accent } else { PAL.text2 }).truncate().min_w(0.0);
+    if !song.explicit && !local {
+        return title;
+    }
+    let mut r = row().w_full().min_w(0.0).gap(6.0).center_y().child(title.shrink());
+    if song.explicit {
+        r = r.child(super::widgets::explicit_badge());
+    }
+    if local {
+        r = r.child(icon(&icons::LOCAL_MARK, 14.0).color(PAL.dim));
+    }
+    r
 }
 
 /// The title, followed by a small "local file" marker for songs from the music folders.

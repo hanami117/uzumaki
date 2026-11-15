@@ -86,6 +86,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("up-next-repeat-end", up_next_repeat_end),
     ("up-next-autoplay", up_next_autoplay),
     ("explicit-album", explicit_album),
+    ("explicit-songs", explicit_songs),
+    ("explicit-songs", explicit_songs),
     ("explicit-blocked", explicit_blocked),
     ("explicit-now-playing", explicit_now_playing),
     ("explicit-blocked-up-next", explicit_blocked_up_next),
@@ -513,6 +515,19 @@ fn explicit_album(s: &mut State) {
         s.playback.song = c.tracks.get(1).cloned();
     }
     s.playback.state = PlayState::Playing;
+}
+
+/// The playlist's Songs table (covers, Added and Title columns) with songs 2, 4 and 5 explicit.
+fn explicit_songs(s: &mut State) {
+    playlist_songs(s);
+    let Route::Collection { id, .. } = &s.route else { return };
+    if let Some(Load::Ready(c)) = s.collections.get_mut(id) {
+        for i in [1, 3, 4] {
+            if let Some(t) = c.tracks.get_mut(i) {
+                t.explicit = true;
+            }
+        }
+    }
 }
 
 /// An account that refuses explicit songs: the same album with those rows dimmed, and the
