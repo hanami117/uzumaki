@@ -13,6 +13,8 @@ use super::songs_table::fold;
 pub enum Row {
     MusicSource,
     AppleMusic,
+    /// Why explicit songs may be refused (Settings → Account; Apple Music only).
+    ExplicitContent,
     Quality,
     Lyrics,
     /// Resume where you left off (Settings → Playback; also in local only mode).
@@ -61,6 +63,7 @@ impl Row {
             Row::Binding(i) => return format!("settings/row/kb-{i}"),
             Row::MusicSource => "music-source",
             Row::AppleMusic => "apple-music",
+            Row::ExplicitContent => "explicit-content",
             Row::Quality => "quality",
             Row::Lyrics => "lyrics",
             Row::Resume => "resume",
@@ -161,6 +164,7 @@ const fn only(on: On, row: Row, tab: Tab, title: &'static str, note: &'static st
 const SPECS: &[Spec] = &[
     spec(Row::MusicSource, Tab::Account, "Music source", "Apple Music, or local files only.", "offline local mode streaming"),
     spec(Row::AppleMusic, Tab::Account, "Apple Music", "Signed in, store.", "sign in sign out log in login logout apple id storefront country region store"),
+    spec(Row::ExplicitContent, Tab::Account, "Explicit content", "Allow it on music.apple.com first; a Screen Time change on iPhone or Mac may not reach the web player.", "explicit restricted restriction refused content_restricted screen time parental controls child age e clean music.apple.com"),
     spec(Row::Quality, Tab::Playback, "Streaming quality", "Data saver uses about a quarter of the data. Lossless and Dolby Atmos aren't available in Apple Music on the web.", "bitrate kbps audio sound 256 64 mobile"),
     spec(Row::Lyrics, Tab::Playback, "Lyrics highlight", "Word by word when Apple has word timing, otherwise whole lines.", "karaoke words lines sync"),
     spec(Row::AutoPlay, Tab::Playback, "AutoPlay", "When the queue ends, similar music keeps playing. Also the \u{221e} button in Up Next.", "auto play infinite endless continue similar songs radio station suggestions queue end infinity"),

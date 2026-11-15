@@ -408,7 +408,7 @@ fn banners(s: &State) -> El {
     }
     if let Some(t) = &s.toast {
         list.push(
-            banner("toast", PAL.nav_active).child(msg(t.clone(), PAL.text)).children(restricted_help(t)).child(
+            banner("toast", PAL.nav_active).child(toast_text(t, msg(t.clone(), PAL.text))).children(restricted_help(t)).child(
                 el().key("toast-dismiss").role("button").label("Dismiss").focusable(true).size(28.0, 28.0).radius(14.0).center()
                     .hover(crate::theme::ov(0.1)).cursor(Cursor::Pointer)
                     .on_press(|s: &mut State| s.toast = None)
@@ -420,6 +420,16 @@ fn banners(s: &State) -> El {
         return col();
     }
     col().w_full().px(PAGE_PX).pt(16.0).gap(8.0).children(list)
+}
+
+/// The toast's message; the explicit-content one has a second, quieter line under it.
+fn toast_text(toast: &str, first: El) -> El {
+    if toast != crate::state::restricted::NOTICE {
+        return first;
+    }
+    let line = text(toast.to_string()).font(BODY14).color(PAL.text).min_w(0.0).wrap();
+    let hint = text(crate::state::restricted::NOTICE_HINT).font(SMALL13).color(PAL.dim).min_w(0.0).wrap();
+    col().grow(1.0).min_w(0.0).gap(2.0).child(line).child(hint)
 }
 
 /// "Open music.apple.com" beside the explicit-content message: the web player's own settings.

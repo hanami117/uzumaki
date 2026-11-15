@@ -266,7 +266,7 @@ struct Rx<'a> {
 /// cover effect shows only with the Cover background; App icon only on Linux and the Mac).
 fn available(s: &State, row: Row) -> bool {
     match row {
-        Row::AppleMusic | Row::Quality | Row::Lyrics | Row::AutoPlay => !s.local_only(),
+        Row::AppleMusic | Row::ExplicitContent | Row::Quality | Row::Lyrics | Row::AutoPlay => !s.local_only(),
         Row::NpCoverEffect => s.settings.appearance.np == NpBg::Cover,
         Row::AppIcon => cfg!(any(target_os = "linux", target_os = "macos")),
         // No cliairplay helper (Linux for now): no AirPlay anywhere, the setting included.
@@ -305,6 +305,16 @@ fn row_el(r: &Rx, id: Row) -> El {
     match id {
         Row::MusicSource => music_source(s, narrow),
         Row::AppleMusic => apple_music(s, narrow),
+        Row::ExplicitContent => setting(
+            narrow,
+            "Explicit content",
+            Some(crate::state::restricted::SETTINGS_TEXT.into()),
+            small_button("settings/explicit-help", "Open music.apple.com").on_press_tx(|s: &mut State, tx: &mut rune::Tx| {
+                if tx.open_url(crate::state::restricted::HELP_URL).is_err() {
+                    s.toast = Some("Couldn't open the link.".into());
+                }
+            }),
+        ),
         Row::Quality => {
             let saver = s.settings.data_saver;
             setting(
@@ -838,7 +848,7 @@ fn binding(s: &State, i: usize) -> El {
 // ---- pages ----
 
 fn account(r: &Rx) -> Vec<El> {
-    rows(r, &[Row::MusicSource, Row::AppleMusic])
+    rows(r, &[Row::MusicSource, Row::AppleMusic, Row::ExplicitContent])
 }
 
 fn playback(r: &Rx) -> Vec<El> {

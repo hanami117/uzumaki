@@ -5,6 +5,17 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+Planned as 0.2.1.
+
+### Fixed
+- **Explicit songs on an account that refuses them:** the player's refusal (`CONTENT_RESTRICTED`) is now explained
+  instead of leaving playback stuck. Uzumaki says why once, marks explicit songs as unplayable (dimmed, passed over)
+  and plays on from the next song that can play.
+- **The explicit content setting that counts is the web player's:** the message tells you to allow explicit content
+  on music.apple.com and restart, with an "Open music.apple.com" button; Settings → Account → Explicit content
+  explains that a Screen Time change on an iPhone or Mac may not reach the web player (try another browser if it
+  keeps refusing). Accounts of a child under 18 can't turn it on.
+
 ## [0.2.0] - 2026-11-14
 
 AutoPlay, animated album artwork, AirPlay on the Mac, and a configurable `uzu`. You need an Apple Music subscription.
