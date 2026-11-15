@@ -19,6 +19,7 @@ docker run --rm -v "$src":/src:ro -v "$out":/out \
   -v uzu-linux-cargo:/cargo -v uzu-linux-target:/target \
   -e STEPS="$steps" -e WGPU_BACKEND="${WGPU_BACKEND:-gl}" uzu-linux-check sh -c '
 set -u
+fail=0
 mkdir -p /work "$HOME" && rsync -a --delete --exclude .git --exclude target --exclude node_modules /src/ /work/
 cd /work
 export UZUMAKI_PROFILE_DIR=/tmp/scratch-profile
@@ -32,7 +33,9 @@ for s in $STEPS; do
     *) echo "unknown step $s"; continue ;;
   esac
   echo "== $s: $cmd"
-  eval "$cmd" >/out/$s.log 2>&1; echo "== $s exit $?"
-  [ $s = clippy ] && echo "clippy warnings: $(grep -c "^warning" /out/clippy.log)"
-  [ $s = test ] && grep -E "^test result|FAILED|failed" /out/test.log | sort | uniq -c | head -20
-done'
+  eval "$cmd" >/out/$s.log 2>&1; rc=$?; echo "== $s exit $rc"
+  [ $rc -eq 0 ] || fail=1
+  if [ $s = clippy ]; then echo "clippy warnings: $(grep -c "^warning" /out/clippy.log)"; fi
+  if [ $s = test ]; then grep -E "^test result|FAILED|failed" /out/test.log | sort | uniq -c | head -20; fi
+done
+exit ${fail:-0}'
