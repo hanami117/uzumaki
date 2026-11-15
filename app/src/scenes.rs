@@ -531,7 +531,7 @@ fn explicit_songs(s: &mut State) {
 }
 
 /// An account that refuses explicit songs: the same album with those rows dimmed, and the
-/// once-per-session message with its "How to change it" button.
+/// once-per-session message with its "Open music.apple.com" button.
 fn explicit_blocked(s: &mut State) {
     explicit_album(s);
     s.apply_msg(crate::state::Msg::Bridge(crate::bridge::Event::Restricted(true)));

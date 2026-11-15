@@ -422,11 +422,11 @@ fn banners(s: &State) -> El {
     col().w_full().px(PAGE_PX).pt(16.0).gap(8.0).children(list)
 }
 
-/// "How to change it" beside the explicit-content message: Apple's page on parental controls.
+/// "Open music.apple.com" beside the explicit-content message: the web player's own settings.
 /// The steps are its accessible label; the page opens in the browser.
 fn restricted_help(toast: &str) -> Option<El> {
     (toast == crate::state::restricted::NOTICE).then(|| {
-        small_button("toast-restricted-help", "How to change it").label(crate::state::restricted::HELP_STEPS).on_press_tx(
+        small_button("toast-restricted-help", "Open music.apple.com").label(crate::state::restricted::HELP_STEPS).on_press_tx(
             |s: &mut State, tx: &mut rune::Tx| {
                 if tx.open_url(crate::state::restricted::HELP_URL).is_err() {
                     s.toast = Some("Couldn't open the link.".into());

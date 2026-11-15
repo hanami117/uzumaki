@@ -9,17 +9,19 @@ use super::*;
 /// What the player says (any wrapping: `playback error: [mk-007] CONTENT_RESTRICTED; …`).
 const REASON: &str = "CONTENT_RESTRICTED";
 
-/// The one-time message. The toast also gets a "How to change it" button (`ui::view`).
+/// The one-time message. The toast also gets a "Open music.apple.com" button (`ui::view`).
 pub const NOTICE: &str = "This song is explicit and your Apple account doesn't allow explicit content.";
 
 /// Said when a run of songs ends playback: no `NOTICE` repeat, the reason it stopped.
 const STOPPED: &str = "Stopped: the next songs are explicit too, and your Apple account doesn't allow explicit content.";
 
-/// Apple's page about Parental Controls on Apple Music on the web (the player Uzumaki drives).
-pub const HELP_URL: &str = "https://support.apple.com/guide/music-web/set-or-change-parental-controls-apdmfc091c0a/web";
+/// Where the setting lives: Uzumaki is the Apple Music web player, so its own account settings
+/// decide, and the toast's button opens it in the browser.
+pub const HELP_URL: &str = "https://music.apple.com";
 
-/// The steps, for the button's tooltip and the Settings text.
-pub const HELP_STEPS: &str = "Screen Time \u{2192} Content & Privacy Restrictions \u{2192} Content Restrictions \u{2192} Music: Explicit. An Apple Account for a child under 18 can't turn it on.";
+/// The steps, for the button's tooltip and the Settings text. The web player first: a change made
+/// in Screen Time on an iPhone or Mac does not always reach it.
+pub const HELP_STEPS: &str = "On music.apple.com, signed in with the same Apple Account: account menu \u{2192} Settings \u{2192} allow explicit content. Also on iPhone or Mac: Screen Time \u{2192} Content & Privacy Restrictions \u{2192} Music: Explicit. A change made on the iPhone or Mac may not reach the web player, so change it on music.apple.com itself (try another browser if it does not stick), then restart Uzumaki. An Apple Account for a child under 18 can't turn it on.";
 
 /// A second report of the same refusal (the play call fails, and the player reports it too) comes
 /// within this many seconds; a real refusal of the next song takes a round trip to Apple.
