@@ -74,6 +74,7 @@ impl State {
             queue.user_playing = Some(song.clone());
         }
         self.queue = queue;
+        self.queue.block_explicit = self.explicit_blocked;
         self.queue.plan_lap(self.playback.repeat);
         self.history = History::restore(snap.history);
         self.playback.duration = song.duration.max(0.0);

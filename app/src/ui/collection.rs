@@ -421,7 +421,7 @@ fn track_row(s: &State, c: &Collection, i: usize, t: &Song, list: &str) -> El {
     let r = row().key(key).role("button").label(t.title.clone()).focusable(true).w_full().min_h(48.0)
         .px(12.0).gap(12.0).center_y().radius(8.0).hover(PAL.row_hover).hover_group().cursor(Cursor::Pointer)
         .child(lead)
-        .child(text(t.title.clone()).font(TRACK_TITLE).color(if cur { PAL.accent } else { PAL.text2 }).truncate().grow(1.0).min_w(0.0))
+        .child(super::tracks::title_with_mark(t, cur))
         .child(
             row().grow(1.0).min_w(0.0).child(artist_link::link(
                 format!("{}-artist", r_key),
@@ -432,7 +432,7 @@ fn track_row(s: &State, c: &Collection, i: usize, t: &Song, list: &str) -> El {
         )
         .child(star)
         .child(row().w(56.0).justify_end().child(text(fmt_time(t.duration)).font(TIME14).color(PAL.muted)));
-    select::wire(s, r, &rk, list)
+    select::wire(s, super::widgets::dim_if_blocked(s, t, r), &rk, list)
 }
 
 pub fn page(s: &State, id: &str, avail: f32) -> El {

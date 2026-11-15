@@ -106,7 +106,7 @@ impl Song {
             duration: v["duration"].as_f64().unwrap_or(0.0),
             track_number: None,
             disc_number: None,
-            explicit: false,
+            explicit: v["explicit"].as_bool().unwrap_or(false),
             artwork: v["artwork"]
                 .as_str()
                 .map(|s| Artwork { template: s.to_string(), bg: v["artworkBg"].as_str().map(String::from) }),

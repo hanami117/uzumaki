@@ -197,6 +197,7 @@ impl State {
         self.last_play = Some((key, now));
         let user = std::mem::take(&mut self.queue.user);
         self.queue = PlayQueue::start(songs, index, self.playback.shuffle, source, user);
+        self.queue.block_explicit = self.explicit_blocked;
         self.queue.plan_lap(self.playback.repeat); // the bridge's loop and Up Next need the next lap from the start
         self.begin_current(first.clone());
     }
@@ -267,6 +268,9 @@ impl State {
         if self.playback.local || (song.play_id() != first && song.id != first) {
             return; // a newer song took over already
         }
+        if super::restricted::is_restricted_error(error) {
+            return self.content_restricted(Some(first));
+        }
         if !error.contains("NOT_FOUND") {
             self.starting = None;
             self.toast = Some(format!("Couldn't play “{}”: {error}", song.title));
@@ -302,18 +306,23 @@ impl State {
     /// Greys out a song Apple couldn't find, wherever this session lists it, so it isn't queued
     /// again (until the list reloads from Apple).
     fn mark_unavailable(&mut self, song: &Song) {
-        let dead = |s: &mut Song| {
+        self.for_each_song(|s| {
             if s.same_track(song) {
                 s.playable = false;
             }
-        };
-        self.queue.context.iter_mut().chain(self.queue.original.iter_mut()).chain(self.queue.next_lap.iter_mut().flatten()).for_each(dead);
+        });
+    }
+
+    /// Runs `f` on every copy of a song this session holds in its queue, pages and library.
+    pub(super) fn for_each_song(&mut self, f: impl Fn(&mut Song)) {
+        self.queue.context.iter_mut().chain(self.queue.original.iter_mut()).chain(self.queue.next_lap.iter_mut().flatten()).for_each(&f);
+        self.queue.user.iter_mut().chain(self.queue.autoplay.iter_mut()).for_each(&f);
         for c in self.collections.values_mut() {
             if let Load::Ready(c) = c {
-                c.tracks.iter_mut().for_each(dead);
+                c.tracks.iter_mut().for_each(&f);
             }
         }
-        self.library_songs.items.iter_mut().for_each(dead);
+        self.library_songs.items.iter_mut().for_each(&f);
     }
 
     /// The whole list for the bridge to loop under repeat all, when it can (Apple songs only).
@@ -509,14 +518,14 @@ impl State {
         }
         // The resumed song was never handed over: the app starts the next one itself.
         if self.resume.is_some() {
-            if let Some(song) = self.queue.advance(repeat) {
+            if let Some(song) = self.next_allowed() {
                 self.begin_current(song);
             }
             return;
         }
         let app_decides = self.playback.local || (self.queue.peek_next(repeat).is_some() && !self.queue.bridge_has_next(repeat));
         if app_decides {
-            if let Some(song) = self.queue.advance(repeat) {
+            if let Some(song) = self.next_allowed() {
                 self.begin_current(song);
             }
         } else if let Some(b) = &self.bridge {
@@ -668,6 +677,7 @@ impl State {
         self.pending_play = None; // a newer click than the album or playlist still loading
         self.stop_local();
         self.queue = PlayQueue::for_station(id, name, keep);
+        self.queue.block_explicit = self.explicit_blocked;
         self.playback.state = PlayState::Loading;
         self.starting = Some(crate::clock::now());
         if let Some(b) = &self.bridge {

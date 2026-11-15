@@ -136,6 +136,17 @@ pub fn small_button(key: &'static str, label: &'static str) -> El {
         .child(text(label).font(rune::TextStyle::new(13.0, 600.0)).color(PAL.text))
 }
 
+/// Apple's "E": a small rounded tag after the title of an explicit song.
+pub fn explicit_badge() -> El {
+    el().label("Explicit").w(14.0).h(14.0).radius(3.0).center().min_w(14.0).fill(PAL.nav_active)
+        .child(text("E").font(rune::TextStyle::new(10.0, 700.0)).color(PAL.text2))
+}
+
+/// `r` dimmed when the account refuses explicit songs and `song` is one (it will be skipped).
+pub fn dim_if_blocked(s: &State, song: &crate::models::Song, r: El) -> El {
+    if s.is_blocked(song) { r.opacity(0.45) } else { r }
+}
+
 pub fn chip(key: String, label: &'static str, on: bool) -> El {
     let (bg, fg) = if on { (PAL.text, PAL.ink) } else { (PAL.chip, PAL.text2) };
     let c = el().key(key).role("button").label(label).focusable(true).h(36.0).px(16.0).radius(18.0).center().fill(bg)

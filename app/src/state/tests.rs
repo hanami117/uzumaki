@@ -98,7 +98,7 @@ fn navigation_keeps_a_back_stack() {
     assert_eq!(s.route, Route::Home);
 }
 
-fn song(id: &str) -> Song {
+pub(super) fn song(id: &str) -> Song {
     Song {
         id: id.into(),
         catalog_id: None,
@@ -1351,7 +1351,7 @@ fn not_found(first: &str) -> Msg {
     Msg::QueueFailed { first: first.into(), error: format!("[mk-007] NOT_FOUND; One or more items could not be resolved: {first}") }
 }
 
-fn playing_id(s: &State) -> Option<&str> {
+pub(super) fn playing_id(s: &State) -> Option<&str> {
     s.playback.song.as_ref().map(|x| x.id.as_str())
 }
 

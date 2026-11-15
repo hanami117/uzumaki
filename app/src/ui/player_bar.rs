@@ -232,11 +232,20 @@ fn subtitle(song: &crate::models::Song) -> String {
 
 /// The playing song's title and subtitle, each scrolling when it doesn't fit.
 fn now_lines(s: &State, song: &crate::models::Song, sub: bool, still: bool) -> El {
-    let mut c = col().grow(1.0).min_w(0.0).gap(2.0).justify_center()
-        .child(marquee::line(s, "bar-title", song.title.clone(), CARD_TITLE, PAL.text, still));
-    if sub {
-        c = c.child(marquee::line(s, "bar-sub", subtitle(song), SMALL13, PAL.muted, still));
-    }
+    let title = marquee::line(s, "bar-title", song.title.clone(), CARD_TITLE, PAL.text, still);
+    let mut c = col().grow(1.0).min_w(0.0).gap(2.0).justify_center();
+    // The "E" leads the subtitle line (the title line is the marquee's full width); a bar with no
+    // subtitle line puts it after the title.
+    let tag = song.explicit.then(super::widgets::explicit_badge);
+    c = match (sub, tag) {
+        (true, Some(tag)) => c.child(title).child(
+            row().w_full().min_w(0.0).gap(6.0).center_y().child(tag)
+                .child(marquee::line(s, "bar-sub", subtitle(song), SMALL13, PAL.muted, still).grow(1.0).min_w(0.0)),
+        ),
+        (true, None) => c.child(title).child(marquee::line(s, "bar-sub", subtitle(song), SMALL13, PAL.muted, still)),
+        (false, Some(tag)) => c.child(row().w_full().min_w(0.0).gap(6.0).center_y().child(title.grow(1.0).min_w(0.0)).child(tag)),
+        (false, None) => c.child(title),
+    };
     c
 }
 

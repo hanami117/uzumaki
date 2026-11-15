@@ -209,7 +209,14 @@ fn frame(size: f32, radius: f32) -> El {
 /// Title and artist, with the favourite star beside them when the song can have one.
 fn meta(s: &State, song: &Song) -> El {
     let text_block = col().gap(4.0).grow(1.0).min_w(0.0)
-        .child(text(song.title.clone()).font(TextStyle::new(22.0, 600.0)).color(PAL.text).truncate())
+        .child({
+            let title = text(song.title.clone()).font(TextStyle::new(22.0, 600.0)).color(PAL.text).truncate().min_w(0.0).shrink();
+            if song.explicit {
+                row().gap(8.0).center_y().min_w(0.0).child(title).child(crate::ui::widgets::explicit_badge())
+            } else {
+                title
+            }
+        })
         .child(
             text(if song.album.is_empty() { song.artist.clone() } else { format!("{} \u{2014} {}", song.artist, song.album) })
                 .font(TextStyle::new(16.0, 400.0)).color(PAL.muted).truncate(),

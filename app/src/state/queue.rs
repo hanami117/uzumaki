@@ -133,6 +133,8 @@ pub struct PlayQueue {
     /// Which queue this is: a new number for each list or station started (`start`,
     /// `for_station`); edits keep it. AutoPlay's station is made for one run.
     pub run: u64,
+    /// The account refuses explicit songs (`state::restricted`): they are not handed to MusicKit.
+    pub block_explicit: bool,
 }
 
 impl PlayQueue {
@@ -257,6 +259,7 @@ impl PlayQueue {
             user_playing: None,
             autoplay: Vec::new(),
             run: next_run(),
+            block_explicit: false,
         }
     }
 
@@ -290,7 +293,7 @@ impl PlayQueue {
             return Vec::new(); // MusicKit's queue is the station; queued songs are the app's
         }
         let after = self.up_next().chain(&self.autoplay);
-        after.take_while(|s| !s.is_local()).filter(|s| s.playable).map(|s| s.play_id().to_string()).collect()
+        after.take_while(|s| !s.is_local()).filter(|s| self.can_bridge(s)).map(|s| s.play_id().to_string()).collect()
     }
 
     /// The next lap, for repeat all, when the bridge can loop into it on its own (no local
@@ -300,7 +303,12 @@ impl PlayQueue {
         if self.station.is_some() || self.context.iter().any(Song::is_local) {
             return None;
         }
-        Some(self.lap().unwrap_or(&self.context).iter().filter(|s| s.playable).map(|s| s.play_id().to_string()).collect())
+        Some(self.lap().unwrap_or(&self.context).iter().filter(|s| self.can_bridge(s)).map(|s| s.play_id().to_string()).collect())
+    }
+
+    /// Whether MusicKit may get `s`: playable, and not explicit when the account refuses those.
+    fn can_bridge(&self, s: &Song) -> bool {
+        s.playable && !(self.block_explicit && s.explicit)
     }
 
     /// The song after the current one, without moving: the first user song, else the next of

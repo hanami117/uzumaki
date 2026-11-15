@@ -380,6 +380,7 @@ function pageBridge() {
       artworkBg: a.artwork?.bgColor ?? null, // hex, catalog items only (Now Playing tint)
       catalogId,
       hasLyrics: a.hasLyrics ?? null,
+      explicit: a.contentRating === 'explicit' || it.isExplicitItem === true, // the E badge
       albumId: (/\/album\/[^/]+\/(\d+)/.exec(a.url || '') || [])[1] ?? null, // Go to Album
     };
   };
@@ -441,8 +442,21 @@ function pageBridge() {
     return ok ? fine : coarse;
   };
 
+  // Whether the account has content restrictions on (MusicKit's `isRestricted`: the authorize
+  // view's `restricted` flag, which MusicKit itself uses to drop explicit songs from its queue).
+  // Only a hint: Apple's own Screen Time restriction may not show here, and then the player's
+  // CONTENT_RESTRICTED error is what tells (see `state::restricted`).
+  const restrictedFlag = (m) => {
+    try {
+      return m.isRestricted === true;
+    } catch {
+      return false;
+    }
+  };
+
   const status = () => ({
     authorized: !!mk.isAuthorized,
+    restricted: restrictedFlag(mk),
     storefront: mk.storefrontId ?? null,
     state: stateName(mk.playbackState),
     nowPlaying: itemInfo(mk.nowPlayingItem),
@@ -831,9 +845,18 @@ function pageBridge() {
     // The page's storefront (`storefrontId`, its URL's until `setStorefront`). Not the account's:
     // the app asks Apple for that (/v1/me/storefront) and sends `setStorefront`.
     let storefrontSent = inst.storefrontId ?? null;
+    // The restriction flag, sent when it changes (and once after `ready`).
+    let restrictedSent = null;
+    const emitRestricted = () => {
+      const value = restrictedFlag(inst);
+      if (value === restrictedSent) return;
+      restrictedSent = value;
+      emit({ event: 'restricted', value });
+    };
     inst.addEventListener('authorizationStatusDidChange', () => {
       storefrontSent = inst.storefrontId ?? null;
       emit({ event: 'auth', authorized: !!inst.isAuthorized, storefront: storefrontSent });
+      emitRestricted();
     });
     const storefrontChanged = () => {
       const id = inst.storefrontId ?? null;
@@ -855,6 +878,7 @@ function pageBridge() {
       storefront: inst.storefrontId ?? null,
       volume: inst.volume ?? null,
     });
+    emitRestricted();
   }
 
   // music.apple.com configures MusicKit itself; wait for its instance.

@@ -35,6 +35,7 @@ mod playlist_edit;
 mod playlists;
 mod prefs;
 pub mod queue;
+pub mod restricted;
 mod resume;
 mod signin;
 mod source;
@@ -590,6 +591,12 @@ pub struct State {
     starting: Option<Instant>,
     /// Songs skipped in a row because Apple couldn't find them (see `queue_failed`).
     skipped_in_row: u32,
+    /// The account refuses explicit songs (`restricted.rs`), told by MusicKit or learned from a refusal.
+    explicit_blocked: bool,
+    /// The "your account doesn't allow explicit content" message was shown this session.
+    restricted_told: bool,
+    /// When the last CONTENT_RESTRICTED was handled (the same refusal arrives twice).
+    restricted_at: Option<Instant>,
     /// Apple's stars: what is known about songs, albums and playlists.
     favs: favourites::Favourites,
     /// The picture chosen in the New Playlist dialog, for the playlist Apple is creating.
@@ -682,6 +689,9 @@ impl State {
             notifier,
             starting: None,
             skipped_in_row: 0,
+            explicit_blocked: false,
+            restricted_told: false,
+            restricted_at: None,
             favs: Default::default(),
             new_playlist_picture: None,
             motion: motion::MotionState::default(),
@@ -1196,6 +1206,12 @@ impl State {
                 if closed {
                     crate::ui::onboarding::window_closed(self);
                 }
+            }
+            Event::Restricted(on) => {
+                self.restrictions_known(on);
+            }
+            Event::Error(e) if restricted::is_restricted_error(&e) => {
+                self.content_restricted(None);
             }
             Event::Error(e) => {
                 self.starting = None;

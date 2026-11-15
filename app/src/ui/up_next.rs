@@ -256,7 +256,7 @@ fn song_row_with(s: &State, song: &Song, key: String, up_next_index: Option<usiz
     let (title_color, artist_color) = if cur { (PAL.accent, PAL.muted) } else if lap || auto.is_some() { (PAL.dim, PAL.dim) } else { (PAL.text, PAL.muted) };
     // The song tables' star: filled when favourite, outline on hover when it can be.
     let star = super::tracks::star_slot(s, song, &key);
-    let mut r = row().key(key).role("button").label(song.title.clone()).w_full().min_h(52.0).px(12.0).gap(10.0).center_y()
+    let r = row().key(key).role("button").label(song.title.clone()).w_full().min_h(52.0).px(12.0).gap(10.0).center_y()
         .radius(8.0).hover_group().cursor(Cursor::Pointer)
         .child(art(s, song.artwork.as_ref(), &song.album, Size::Small(40.0), 6.0, 0.0))
         .child(
@@ -264,6 +264,9 @@ fn song_row_with(s: &State, song: &Song, key: String, up_next_index: Option<usiz
                 .child({
                     let title = text(song.title.clone()).font(TRACK_TITLE).color(title_color).truncate().min_w(0.0).shrink();
                     let mut r = row().w_full().min_w(0.0).gap(6.0).center_y().child(title);
+                    if song.explicit {
+                        r = r.child(super::widgets::explicit_badge());
+                    }
                     if song.is_local() {
                         r = r.child(icon(&icons::LOCAL_MARK, 13.0).color(PAL.dim));
                     }
@@ -272,6 +275,7 @@ fn song_row_with(s: &State, song: &Song, key: String, up_next_index: Option<usiz
                 .child(text(song.artist.clone()).font(SMALL13).color(artist_color).truncate()),
         )
         .child(star);
+    let mut r = super::widgets::dim_if_blocked(s, song, r);
     let menu_song = song.clone();
     let context = match up_next_index {
         Some(i) if !lap => super::menu::MenuContext::UpNext(i),

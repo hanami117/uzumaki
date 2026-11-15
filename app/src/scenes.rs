@@ -85,6 +85,10 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("up-next-repeat", up_next_repeat),
     ("up-next-repeat-end", up_next_repeat_end),
     ("up-next-autoplay", up_next_autoplay),
+    ("explicit-album", explicit_album),
+    ("explicit-blocked", explicit_blocked),
+    ("explicit-now-playing", explicit_now_playing),
+    ("explicit-blocked-up-next", explicit_blocked_up_next),
     ("up-next-autoplay-playing", up_next_autoplay_playing),
     ("up-next-autoplay-off", up_next_autoplay_off),
     ("now-playing-queue-autoplay", now_playing_queue_autoplay),
@@ -494,6 +498,44 @@ fn album_motion(s: &mut State) {
     s.route = Route::Collection { kind: CollectionKind::Album, id: c.id.clone() };
     crate::ui::scene_clip(s, &c.id);
     s.collections.insert(c.id.clone(), Load::Ready(c));
+}
+
+/// An album page whose songs 2, 4 and 5 carry Apple's "E"; the playing song (2) is explicit too.
+fn explicit_album(s: &mut State) {
+    album(s);
+    let Route::Collection { id, .. } = &s.route else { return };
+    if let Some(Load::Ready(c)) = s.collections.get_mut(id) {
+        for i in [1, 3, 4] {
+            if let Some(t) = c.tracks.get_mut(i) {
+                t.explicit = true;
+            }
+        }
+        s.playback.song = c.tracks.get(1).cloned();
+    }
+    s.playback.state = PlayState::Playing;
+}
+
+/// An account that refuses explicit songs: the same album with those rows dimmed, and the
+/// once-per-session message with its "How to change it" button.
+fn explicit_blocked(s: &mut State) {
+    explicit_album(s);
+    s.apply_msg(crate::state::Msg::Bridge(crate::bridge::Event::Restricted(true)));
+    s.toast = Some(crate::state::restricted::NOTICE.into());
+}
+
+fn explicit_now_playing(s: &mut State) {
+    now_playing(s);
+    if let Some(song) = &mut s.playback.song {
+        song.explicit = true;
+    }
+}
+
+fn explicit_blocked_up_next(s: &mut State) {
+    up_next(s);
+    for (i, t) in s.queue.context.iter_mut().enumerate() {
+        t.explicit = i % 3 == 1;
+    }
+    s.apply_msg(crate::state::Msg::Bridge(crate::bridge::Event::Restricted(true)));
 }
 
 /// The shown album page with 40 songs, for measuring scrolling (`--script`).

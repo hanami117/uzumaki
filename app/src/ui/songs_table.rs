@@ -414,7 +414,7 @@ pub fn song_row_with(s: &State, song: &Song, n: usize, cols: Cols, key: String, 
             Col::Title => row().w_full().gap(GAP).center_y()
                 .child(art(s, song.artwork.as_ref(), &song.album, Size::Fixed(36.0), 6.0, 0.0))
                 .child(vstack().grow(1.0).min_w(0.0).shrink()
-                    .child(text(song.title.clone()).font(TRACK_TITLE).color(if cur { PAL.accent } else { PAL.text2 }).truncate().min_w(0.0))
+                    .child(super::tracks::title_with_mark(song, cur).grow(0.0).w_full())
                     .child(row().h(if cols.artist { 0.0 } else { 16.0 }).clip_rounded(0.0).motion(COL_MOTION)
                         .opacity_motion(COL_MOTION).opacity(if cols.artist { 0.0 } else { 1.0 })
                         .child(artist_link::link(
@@ -433,7 +433,7 @@ pub fn song_row_with(s: &State, song: &Song, n: usize, cols: Cols, key: String, 
         };
         r = r.child(cell(col, shown, inner));
     }
-    super::select::wire(s, r, rk, list)
+    super::select::wire(s, super::widgets::dim_if_blocked(s, song, r), rk, list)
 }
 
 /// Small "Playlist | Songs" segmented control.

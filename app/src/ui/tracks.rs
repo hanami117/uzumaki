@@ -77,13 +77,16 @@ fn row_with<const N: usize>(s: &State, song: &Song, key: String, list: &str, rk:
         .children(middle)
         .child(star)
         .child(row().w(56.0).justify_end().child(text(fmt_time(song.duration)).font(TIME14).color(PAL.muted)));
-    select::wire(s, r, rk, list)
+    select::wire(s, super::widgets::dim_if_blocked(s, song, r), rk, list)
 }
 
 /// The title, followed by a small "local file" marker for songs from the music folders.
 pub fn title_with_mark(song: &Song, cur: bool) -> El {
     let title = text(song.title.clone()).font(TRACK_TITLE).color(if cur { PAL.accent } else { PAL.text2 }).truncate().min_w(0.0).shrink();
     let mut r = row().grow(1.0).min_w(0.0).gap(6.0).center_y().child(title);
+    if song.explicit {
+        r = r.child(super::widgets::explicit_badge());
+    }
     if song.is_local() {
         r = r.child(icon(&icons::LOCAL_MARK, 14.0).color(PAL.dim));
     }
