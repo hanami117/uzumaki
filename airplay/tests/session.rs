@@ -46,7 +46,11 @@ fn rig(test: &str, mode: &str, devices: Vec<Device>) -> Rig {
         debug: None,
         extra: vec![],
         keep_local: false,
-        connect_timeout: Duration::from_secs(2),
+        // Room for a slow python start on a loaded machine; only "hang" waits it out.
+        connect_timeout: Duration::from_secs(if mode == "hang" { 2 } else { 10 }),
+        retry_backoff: vec![Duration::from_millis(300), Duration::from_millis(300)],
+        // Wide enough that a loaded machine still writes "the audio on its way" inside it.
+        flush_drop: Duration::from_millis(1500),
         discover_timeout: Duration::from_secs(1),
         stall_grace: Duration::from_millis(600),
         capture_timeout: Duration::from_millis(1500),
@@ -192,7 +196,7 @@ fn a_seek_flushes_and_drops_the_audio_on_its_way() {
     r.ctl.flush();
     wait_for("the flush command", || r.journal().contains("cmd ACTION=FLUSH"));
     bridge.write_all(&pcm(0x2222, 2048)).unwrap();
-    std::thread::sleep(Duration::from_millis(260));
+    std::thread::sleep(Duration::from_millis(1600));
     bridge.write_all(&pcm(0x3333, 4096)).unwrap();
     wait_for("the audio after the seek", || r.samples().iter().filter(|&&s| s == 0x3333).count() == 8192);
     // The speaker is started again on the new audio.
@@ -363,6 +367,68 @@ fn a_speaker_that_is_off_or_never_answers_is_unreachable() {
     let (why, seen) = failure("hang", "hang", hp(), false);
     assert_eq!(why, Why::Unreachable);
     assert!(!seen.contains(&Event::Capture(true)), "never connected: the bridge was never asked to capture");
+}
+
+/// The HomePod mini "Bedroom" while an iPhone plays to it (its TXT flags as seen live).
+fn busy_homepod() -> Device {
+    device("Bedroom", "AudioAccessory5,1", &[("flags", "0x1b8c04")])
+}
+
+#[test]
+fn a_busy_speaker_is_taken_over_on_a_later_try() {
+    let mut r = rig("busy-then-ok", "busy=2", vec![busy_homepod()]);
+    r.ctl.connect_named("Bedroom", opts());
+    r.on();
+    let j = r.journal();
+    assert_eq!(j.matches("args ").count(), 3, "two refusals, then it plays: {j}");
+    assert_eq!(j.matches("code=connect_failed").count(), 2, "{j}");
+    // Connecting throughout: no failure, no fall back to this computer between the tries.
+    assert!(!r.seen.iter().any(|e| matches!(e, Event::Failed { .. } | Event::State(Cast::Off))), "{:?}", r.seen);
+    r.end();
+}
+
+#[test]
+fn a_speaker_that_stays_busy_says_so_after_three_tries() {
+    let mut r = rig("busy-always", "busy", vec![busy_homepod()]);
+    let t = Instant::now();
+    r.ctl.connect_named("Bedroom", opts());
+    let Event::Failed { why, name } = r.wait("the failure", |e| matches!(e, Event::Failed { .. })) else { unreachable!() };
+    assert_eq!((why, name.as_str()), (Why::Busy, "Bedroom"));
+    assert_eq!(why.message("Bedroom"), "“Bedroom” is busy with another device.");
+    assert!(t.elapsed() >= Duration::from_millis(600), "it waited between the tries: {:?}", t.elapsed());
+    r.wait("off", |e| *e == Event::State(Cast::Off));
+    assert_eq!(r.journal().matches("args ").count(), 3, "{}", r.journal());
+    assert!(!r.seen.contains(&Event::Capture(true)), "never connected: the bridge was never asked to capture");
+    let feed = r.ctl.local_feed();
+    assert!(!feed.casting() && !feed.mute_local(), "back on this computer");
+    r.end();
+    // RTSP's own "busy" (453 Not Enough Bandwidth) says so too, whatever the flags.
+    assert_eq!(failure("busy-453", "busy,http=453", device("Bedroom", "AudioAccessory5,1", &[]), false).0, Why::Busy);
+}
+
+#[test]
+fn a_speaker_that_is_off_is_tried_three_times_then_unreachable() {
+    let mut r = rig("off-tries", "connect_failed", vec![device("Bedroom", "AudioAccessory5,1", &[("flags", "0x98404")])]);
+    r.ctl.connect_named("Bedroom", opts());
+    assert!(matches!(r.wait("the failure", |e| matches!(e, Event::Failed { .. })), Event::Failed { why: Why::Unreachable, .. }));
+    assert_eq!(r.journal().matches("args ").count(), 3, "{}", r.journal());
+    r.end();
+}
+
+#[test]
+fn picking_this_computer_while_waiting_to_try_again_ends_quietly() {
+    let mut r = rig("busy-stop", "busy", vec![busy_homepod()]);
+    r.ctl.connect_named("Bedroom", opts());
+    wait_for("the first refusal", || r.journal().contains("code=connect_failed"));
+    r.ctl.disconnect();
+    r.wait("off", |e| *e == Event::State(Cast::Off));
+    std::thread::sleep(Duration::from_millis(800));
+    while let Ok(e) = r.events.try_recv() {
+        r.seen.push(e);
+    }
+    assert!(!r.seen.iter().any(|e| matches!(e, Event::Failed { .. })), "{:?}", r.seen);
+    assert_eq!(r.journal().matches("args ").count(), 1, "no more tries: {}", r.journal());
+    r.end();
 }
 
 #[test]
