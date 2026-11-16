@@ -28,6 +28,7 @@ mod local;
 mod legacy;
 #[cfg(target_os = "macos")]
 mod logfile;
+mod login;
 #[cfg(target_os = "macos")]
 mod menu_bar_mac;
 mod lyrics;
@@ -241,6 +242,15 @@ fn main() {
         }
         None => legacy::migrate(), // first start after the rename: move Cadence's data over
     }
+    // macOS start at login in the background: a login item gets no `--hidden`, so with both
+    // switches on (Settings → General) the app starts windowless and `login::watch_launch` opens
+    // the window at once unless this launch is the login one. Linux writes `--hidden` into the
+    // autostart entry instead.
+    #[cfg(target_os = "macos")]
+    let login_check = !hidden && !test_instance && settings::Settings::load().start_hidden && login::read().on;
+    #[cfg(not(target_os = "macos"))]
+    let login_check = false;
+    let hidden = hidden || login_check;
     let app = if hidden { app.windowless() } else { app };
     let app = app.keep_running().on_close(on_close).on_focus(on_focus);
     // Animated artwork pauses while the window can't draw (minimised, covered).
@@ -344,6 +354,14 @@ fn main() {
 
     // No library on disk (first start, or the library cache was cleared): the intro waits for it.
     let needs_sync = cache::Cache::default_location().needs_sync();
+    #[cfg(target_os = "macos")]
+    if login_check {
+        let h = handle.clone();
+        login::watch_launch(move |at_login| {
+            eprintln!("uzumaki: {}", if at_login { "started at login, in the background" } else { "not a login start: opening the window" });
+            h.update(move |s: &mut State, _| s.login_launch(at_login, needs_sync));
+        });
+    }
     // A new install gets the onboarding instead of the intro (`onboarding::at_launch` says who).
     // `UZUMAKI_ONBOARDING=1` shows it anyway, for a look on a scratch config.
     let forced = std::env::var_os("UZUMAKI_ONBOARDING").is_some_and(|v| v == "1");
@@ -355,6 +373,12 @@ fn main() {
         s.engine = Some(ui_engine);
         s.load_local();
         s.background = hidden;
+        // Start at login as the system has it; an autostart entry left pointing at a removed
+        // program (a replaced AppImage) is pointed at this copy first.
+        if !test_instance {
+            login::repair();
+        }
+        s.read_login(login::read());
         // `--login` also keeps Sign in on the bridge's full window (a debug path).
         s.session.debug_login = debug_login;
         // A `--hidden` start sets the onboarding up too: it shows when the window first opens.

@@ -5,6 +5,13 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **Start Uzumaki when I log in** (Settings → General): on Linux an entry in your desktop's autostart programs
+  (`~/.config/autostart`, it runs the AppImage, the package or your own install); on macOS a login item, listed in
+  System Settings → General → Login Items. The switch shows what the system has, also after a change made there.
+- **Start in the background:** a start at login opens no window. The music, media keys and the tray or menu bar icon
+  are ready; show the window from the icon or by opening Uzumaki again.
+
 ## [0.2.1] - 2026-11-15
 
 A fix for accounts that refuse explicit songs, and a Ko-fi link. You need an Apple Music subscription.

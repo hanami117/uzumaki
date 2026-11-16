@@ -261,6 +261,104 @@ impl State {
         }
     }
 
+    /// Settings → General → "Start Uzumaki when I log in" (`login.rs`).
+    pub fn set_start_at_login(&mut self, on: bool) {
+        if self.login.on != on && self.login.available() && !self.login_busy {
+            self.apply_login(on);
+        }
+    }
+
+    /// "Start in the background": saved; on Linux the autostart entry is written again with or
+    /// without `--hidden` (macOS reads the setting at launch).
+    pub fn set_start_hidden(&mut self, on: bool) {
+        if self.settings.start_hidden == on || self.login_busy {
+            return;
+        }
+        self.settings.start_hidden = on;
+        self.save_settings();
+        if self.login.on && cfg!(target_os = "linux") {
+            self.apply_login(true);
+        }
+    }
+
+    /// Changes the system's entry on a thread (the switch moves at once; the system's answer,
+    /// `login_applied`, corrects it). Headless runs and tests (no handle) only move the switch.
+    fn apply_login(&mut self, on: bool) {
+        let hidden = self.settings.start_hidden;
+        self.login.on = on;
+        self.login.needs_approval = false;
+        self.login.hidden = (on && cfg!(target_os = "linux")).then_some(hidden);
+        let Some(h) = self.handle.clone().filter(|_| !rune::is_headless()) else { return };
+        self.login_busy = true;
+        std::thread::spawn(move || {
+            let result = crate::login::set(on, hidden);
+            h.update(move |s: &mut State, tx| {
+                tx.instant();
+                s.login_applied(result);
+            });
+        });
+    }
+
+    fn login_applied(&mut self, result: Result<crate::login::Login, String>) {
+        self.login_busy = false;
+        match result {
+            Ok(login) => self.read_login(login),
+            Err(e) => {
+                eprintln!("uzumaki: start at login: {e}");
+                self.toast = Some(format!("Couldn't change Start at login: {e}"));
+                self.read_login(crate::login::read());
+            }
+        }
+    }
+
+    /// Takes what the system says (at start, when Settings opens, after a change). On Linux the
+    /// entry's `--hidden` is the truth for "Start in the background", so the saved bool follows it.
+    pub fn read_login(&mut self, login: crate::login::Login) {
+        if let (true, Some(hidden)) = (login.on, login.hidden)
+            && self.settings.start_hidden != hidden
+        {
+            self.settings.start_hidden = hidden;
+            self.save_settings();
+        }
+        self.login = login;
+    }
+
+    /// "Open Login Items" beside a login item waiting for approval (macOS). Not headless.
+    pub fn open_login_items(&mut self) {
+        #[cfg(target_os = "macos")]
+        if self.handle.is_some() && !rune::is_headless() {
+            crate::login::open_login_items();
+        }
+    }
+
+    /// Reads the system's state again (Settings opened: it may have changed in the desktop's or
+    /// System Settings' own list). Not headless, not in tests.
+    pub fn refresh_login(&mut self) {
+        if self.handle.is_some() && !rune::is_headless() && !self.login_busy {
+            self.read_login(crate::login::read());
+        }
+    }
+
+    /// macOS, a windowless start with both start-at-login switches on (`main`): at login it stays
+    /// in the background with only the menu bar icon (the Dock icon goes too, as close to the
+    /// menu bar does; `tray::show_window` brings both back); any other launch opens the window as
+    /// a normal start would, intro included.
+    #[cfg(target_os = "macos")]
+    pub fn login_launch(&mut self, at_login: bool, needs_sync: bool) {
+        let Some(h) = self.handle.clone() else { return };
+        if at_login {
+            if self.tray.is_some() {
+                h.set_dock_icon(false);
+            }
+            return;
+        }
+        self.background = false;
+        if self.ui.onboarding.is_none() {
+            self.ui.intro = crate::ui::intro::at_launch(self.settings.startup_animation, needs_sync && !self.local_only());
+        }
+        crate::tray::show_window(&h);
+    }
+
     /// `App::on_close`: true when the window should just hide (close to tray, or started in
     /// the background).
     pub fn hide_on_close(&mut self) -> bool {

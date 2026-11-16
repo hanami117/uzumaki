@@ -273,6 +273,10 @@ pub struct Settings {
     pub tray_icon: bool,
     /// Closing the window keeps the app (and music) running in the tray. Needs `tray_icon`.
     pub close_to_tray: bool,
+    /// "Start in the background": a start at login opens no window (Linux: `--hidden` in the
+    /// autostart entry, which is what Settings shows when there is one; macOS: decided at launch,
+    /// `login::watch_launch`). Whether the app starts at login at all is the system's (`login.rs`).
+    pub start_hidden: bool,
     /// Shuffle and repeat, as last set in the player bar.
     pub shuffle: bool,
     pub repeat: Repeat,
@@ -359,6 +363,7 @@ impl Default for Settings {
             last_route: None,
             tray_icon: true,
             close_to_tray: false,
+            start_hidden: false,
             shuffle: false,
             repeat: Repeat::Off,
             music_folders: Vec::new(),

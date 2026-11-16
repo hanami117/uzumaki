@@ -71,6 +71,7 @@ pub fn open(s: &mut State) {
     s.ui.settings.open = Some(s.ui.settings.last);
     s.ui.settings.confirm = false;
     s.refresh_cache_sizes();
+    s.refresh_login();
 }
 
 /// Opens the overlay on `tab`.
@@ -582,6 +583,34 @@ fn row_el(r: &Rx, id: Row) -> El {
                 ),
             )
         }
+        Row::StartAtLogin => {
+            let l = &s.login;
+            let note = match (l.unavailable, l.needs_approval) {
+                (Some(why), _) => why.to_string(),
+                (None, true) => "Waiting for your OK in System Settings, General, Login Items.".to_string(),
+                _ if MAC => "Opens Uzumaki when you log in to your Mac. It is listed in System Settings, General, Login Items.".to_string(),
+                _ => "Adds Uzumaki to your desktop's autostart programs (~/.config/autostart).".to_string(),
+            };
+            let sw = switch("settings/start-at-login", "Start Uzumaki when I log in", l.on, l.available() && !s.login_busy, |s, on| s.set_start_at_login(on));
+            let control = if l.needs_approval {
+                row().gap(12.0).center_y().child(small_button("settings/login-items", "Open Login Items").on_press(|s: &mut State| s.open_login_items())).child(sw)
+            } else {
+                sw
+            };
+            setting(narrow, "Start Uzumaki when I log in", Some(note), control)
+        }
+        Row::StartHidden => {
+            let mut note = String::from(if MAC {
+                "When Uzumaki opens at login, the window stays closed and only the menu bar icon shows. Show it from the menu bar icon or by opening Uzumaki."
+            } else {
+                "When Uzumaki starts at login, the window stays closed: the music, media keys and tray icon are ready. Show it from the tray or by opening Uzumaki."
+            });
+            if !s.settings.tray_icon {
+                note.push_str(if MAC { " The menu bar icon is off, so open Uzumaki again to see it." } else { " The tray icon is off, so open Uzumaki again to see it." });
+            }
+            let enabled = s.login.on && s.login.available() && !s.login_busy;
+            setting(narrow, "Start in the background", Some(note), switch("settings/start-hidden", "Start in the background", s.settings.start_hidden, enabled, |s, on| s.set_start_hidden(on)))
+        }
         Row::Tray => setting(
             narrow,
             if MAC { "Show icon in the menu bar" } else { "Show in system tray" },
@@ -897,7 +926,7 @@ fn cache_row(s: &State, narrow: bool, kind: CacheKind, title: &str, key: &'stati
 }
 
 fn general(r: &Rx) -> Vec<El> {
-    let mut v = rows(r, &[Row::OpenOn, Row::Tray, Row::CloseToTray, Row::Notify, Row::CheckUpdates, Row::CheckNow, Row::Tour]);
+    let mut v = rows(r, &[Row::OpenOn, Row::StartAtLogin, Row::StartHidden, Row::Tray, Row::CloseToTray, Row::Notify, Row::CheckUpdates, Row::CheckNow, Row::Tour]);
     v.push(divider());
     v.push(text("Caches").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
     v.extend(rows(r, &[Row::ArtCache, Row::LibraryCache]));
@@ -1388,7 +1417,7 @@ mod tests {
         let st = &rt.state.ui.settings;
         assert_eq!(st.open, Some(Tab::General));
         assert!(st.query.text.is_empty());
-        assert_eq!(st.flash, Some(Row::Tray), "its first match");
+        assert_eq!(st.flash, Some(Row::StartHidden), "its first match (the background start names the tray)");
     }
 
     #[test]
@@ -1408,6 +1437,56 @@ mod tests {
         s.airplay.available = true;
         set_query(&mut s, "airplay");
         assert!(results(&s).iter().any(|(_, r)| *r == Row::AirPlay), "{:?}", results(&s));
+    }
+
+    fn general_window(login: crate::login::Login) -> Runtime<State> {
+        let mut rt = window();
+        rt.update(move |s, _| {
+            s.login = login;
+            select(s, Tab::General);
+        });
+        settle(&mut rt, 30);
+        rt
+    }
+
+    #[test]
+    fn the_start_at_login_switches_turn_on_in_order() {
+        // No handle in tests: the switches move, nothing on the system is touched.
+        let mut rt = general_window(crate::login::Login::default());
+        assert!(rt.presented(&Row::StartAtLogin.key()).is_some() && rt.presented(&Row::StartHidden.key()).is_some());
+        click(&mut rt, "settings/start-hidden");
+        assert!(!rt.state.settings.start_hidden, "background needs start at login first");
+        click(&mut rt, "settings/start-at-login");
+        assert!(rt.state.login.on && !rt.state.login_busy);
+        click(&mut rt, "settings/start-hidden");
+        assert!(rt.state.settings.start_hidden);
+        if cfg!(target_os = "linux") {
+            assert_eq!(rt.state.login.hidden, Some(true), "the entry gets --hidden");
+        }
+        click(&mut rt, "settings/start-at-login");
+        assert!(!rt.state.login.on);
+        assert!(rt.state.settings.start_hidden, "kept for the next time");
+    }
+
+    #[test]
+    fn a_copy_that_cant_start_at_login_says_why_and_stays_off() {
+        let why = "Only in the app (Uzumaki.app). This copy runs from a build folder.";
+        let mut rt = general_window(crate::login::Login::unavailable(why));
+        click(&mut rt, "settings/start-at-login");
+        assert!(!rt.state.login.on, "the switch is disabled");
+        assert_eq!(rt.state.login.unavailable, Some(why));
+    }
+
+    #[test]
+    fn the_systems_hidden_flag_wins_over_the_saved_one() {
+        let mut s = State::offline();
+        s.read_login(crate::login::Login { on: true, hidden: Some(true), ..Default::default() });
+        assert!(s.settings.start_hidden, "Linux: --hidden in the entry");
+        s.read_login(crate::login::Login { on: true, hidden: Some(false), ..Default::default() });
+        assert!(!s.settings.start_hidden);
+        s.settings.start_hidden = true;
+        s.read_login(crate::login::Login { on: true, hidden: None, ..Default::default() });
+        assert!(s.settings.start_hidden, "macOS: the setting is the truth");
     }
 
     #[test]

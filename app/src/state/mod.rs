@@ -552,6 +552,10 @@ pub struct State {
     /// Started with `--hidden` (in the background, like a daemon, for `uzu`): closing the
     /// window only hides it.
     pub background: bool,
+    /// Start at login, as the system has it (Settings → General; `login.rs`). Read in `main`.
+    pub login: crate::login::Login,
+    /// A start-at-login change is being applied on its thread.
+    pub login_busy: bool,
     /// The full library download (`sync_library`) is running; `ui::intro` shows its progress.
     pub syncing: bool,
     /// Every library playlist's songs and covers, fetched after the lists.
@@ -708,6 +712,8 @@ impl State {
             persist_settings: persist,
             tray,
             background: false,
+            login: Default::default(),
+            login_busy: false,
             syncing: false,
             pl_sync: Default::default(),
             cache_sizes: None,

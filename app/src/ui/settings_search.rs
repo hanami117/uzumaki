@@ -39,6 +39,10 @@ pub enum Row {
     NpCoverEffect,
     Sidebar,
     OpenOn,
+    /// "Start Uzumaki when I log in" (`login.rs`).
+    StartAtLogin,
+    /// "Start in the background" (a start at login opens no window).
+    StartHidden,
     Tray,
     CloseToTray,
     Notify,
@@ -85,6 +89,8 @@ impl Row {
             Row::AnimatedArtwork => "animated-artwork",
             Row::Sidebar => "sidebar",
             Row::OpenOn => "open-on",
+            Row::StartAtLogin => "start-at-login",
+            Row::StartHidden => "start-hidden",
             Row::Tray => "tray",
             Row::CloseToTray => "close-to-tray",
             Row::Notify => "notify",
@@ -187,6 +193,10 @@ const SPECS: &[Spec] = &[
     spec(Row::NpCoverEffect, Tab::Appearance, "Now Playing cover effect", "The effect on the cover behind Now Playing.", "full screen fullscreen dither blur"),
     spec(Row::Sidebar, Tab::Appearance, "Sidebar", "Turn off what you don't use. Right-click an entry in the sidebar to hide it from there.", "navigation hide show entries menu"),
     spec(Row::OpenOn, Tab::General, "Open on", "Home or the last page.", "startup start page launch home last page"),
+    only(On::NotMac, Row::StartAtLogin, Tab::General, "Start Uzumaki when I log in", "Adds Uzumaki to your desktop's autostart programs.", "autostart auto start startup boot login log in logon sign in launch open automatically session"),
+    only(On::Mac, Row::StartAtLogin, Tab::General, "Start Uzumaki when I log in", "Opens Uzumaki when you log in to your Mac. Listed in System Settings, Login Items.", "autostart auto start startup boot login log in logon launch open at login login items automatically"),
+    only(On::NotMac, Row::StartHidden, Tab::General, "Start in the background", "When Uzumaki starts at login, the window stays closed: the music, media keys and tray icon are ready. Show it from the tray or by opening Uzumaki.", "background hidden minimised minimized minimise minimize tray silent quiet no window autostart startup login"),
+    only(On::Mac, Row::StartHidden, Tab::General, "Start in the background", "When Uzumaki opens at login, the window stays closed and only the menu bar icon shows. Show it from the menu bar icon or by opening Uzumaki.", "background hidden minimised minimized minimise minimize menu bar tray silent quiet no window dock autostart startup login"),
     only(On::NotMac, Row::Tray, Tab::General, "Show in system tray", "Play, pause and skip from the tray. Needs a tray host (on GNOME, the AppIndicator extension).", "tray menu bar status icon notification area"),
     only(On::Mac, Row::Tray, Tab::General, "Show icon in the menu bar", "Play, pause and skip from the menu bar.", "tray menu bar status icon"),
     only(On::NotMac, Row::CloseToTray, Tab::General, "Close to tray", "Closing the window keeps the music playing. Quit from the tray or with the Quit shortcut.", "tray menu bar background minimize minimise quit"),
@@ -299,6 +309,14 @@ mod tests {
             ("cache", Row::ArtCache),
             ("cache", Row::LibraryCache),
             ("shortcuts", Row::NumberKeys),
+            ("log in", Row::StartAtLogin),
+            ("autostart", Row::StartAtLogin),
+            ("start at login", Row::StartAtLogin),
+            ("startup", Row::StartAtLogin),
+            ("background", Row::StartHidden),
+            ("minimised", Row::StartHidden),
+            ("minimized", Row::StartHidden),
+            ("start hidden", Row::StartHidden),
         ] {
             assert!(finds(Os::Linux, q, row), "{q:?} finds {row:?}");
             assert!(finds(Os::Mac, q, row), "{q:?} finds {row:?} on the Mac");

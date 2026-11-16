@@ -159,6 +159,10 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("settings-sign-out-confirm", settings_sign_out_confirm),
     ("settings-playback", settings_playback),
     ("settings-general", settings_general),
+    ("settings-login", settings_login),
+    ("settings-login-approval", |s| { settings_login(s); s.login.needs_approval = true }),
+    ("settings-login-unavailable", |s| { settings_general(s); s.login = crate::login::Login::unavailable("Only in the app (Uzumaki.app). This copy runs from a build folder.") }),
+    ("settings-search-login", |s| { settings_account(s); crate::ui::settings::set_query(s, "login") }),
     ("settings-about", settings_about),
     ("settings-playback-local", settings_playback_local),
     ("settings-check-now", settings_check_now),
@@ -1068,6 +1072,13 @@ fn settings_general(s: &mut State) {
     s.settings.tray_icon = true;
     s.cache_sizes = Some(crate::state::CacheSizes { art: 123 * 1024 * 1024, library: 4_404_019 });
     s.ui.settings.open = Some(crate::ui::settings::Tab::General);
+}
+
+/// Settings → General with both start-at-login switches on.
+fn settings_login(s: &mut State) {
+    settings_general(s);
+    s.login = crate::login::Login { on: true, hidden: Some(true), ..Default::default() };
+    s.settings.start_hidden = true;
 }
 
 /// The update banner (`update.rs`) over Home: a hand install (What's new, Download, Skip, ✕).
