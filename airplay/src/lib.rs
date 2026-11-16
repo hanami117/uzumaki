@@ -111,6 +111,9 @@ pub struct Config {
     /// Run the shared PTP clock (`cliairplay --ptp-daemon`) and have every helper follow it, so
     /// several speakers play in step. Off: each helper runs its own clock (one speaker only).
     pub ptp_daemon: bool,
+    /// Where the shared clock answers the liveness probe (`helper::DAEMON_CONTROL`). Tests point it
+    /// at a port nobody uses, so a real app's clock on the same computer is never mistaken for theirs.
+    pub daemon_control: String,
 }
 
 impl Config {
@@ -143,6 +146,7 @@ impl Config {
             capture_timeout: Duration::from_secs(8),
             fake,
             ptp_daemon: var("UZUMAKI_AIRPLAY_PTP_DAEMON").is_none_or(|v| v.trim() != "0"),
+            daemon_control: helper::DAEMON_CONTROL.to_string(),
         }
     }
 
@@ -2027,7 +2031,7 @@ fn end_stale_helpers(cfg: &Config) {
 /// plays on one clock. None when one already runs (another copy, another program: one per
 /// computer, the helpers find it) or it couldn't start (each helper then runs its own clock).
 fn start_daemon(helper_path: &Path, cfg: &Config, shared: &Shared) -> Option<Child> {
-    if helper::daemon_live(Duration::from_millis(150)) {
+    if helper::daemon_live(&cfg.daemon_control, Duration::from_millis(150)) {
         log("a shared PTP clock already runs on this computer: the speakers follow it");
         return None;
     }
@@ -2053,7 +2057,7 @@ fn start_daemon(helper_path: &Path, cfg: &Config, shared: &Shared) -> Option<Chi
     // Up before the first speaker's helper looks for it (else that one runs its own clock).
     let until = Instant::now() + Duration::from_millis(1000);
     loop {
-        if helper::daemon_live(Duration::from_millis(100)) {
+        if helper::daemon_live(&cfg.daemon_control, Duration::from_millis(100)) {
             log("the shared PTP clock is up");
             break;
         }

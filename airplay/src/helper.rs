@@ -191,10 +191,10 @@ pub fn daemon_args(dacp: &str) -> Vec<String> {
 pub const DAEMON_CONTROL: &str = "127.0.0.1:9010";
 
 /// Whether a PTP daemon answers on this computer (ours, or another program's: one per host).
-pub fn daemon_live(timeout: std::time::Duration) -> bool {
+pub fn daemon_live(control: &str, timeout: std::time::Duration) -> bool {
     let Ok(sock) = std::net::UdpSocket::bind("127.0.0.1:0") else { return false };
     let _ = sock.set_read_timeout(Some(timeout));
-    if sock.send_to(b"?", DAEMON_CONTROL).is_err() {
+    if sock.send_to(b"?", control).is_err() {
         return false;
     }
     let mut buf = [0u8; 128];

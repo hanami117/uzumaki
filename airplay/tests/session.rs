@@ -62,6 +62,8 @@ fn rig_with(test: &str, mode: &str, devices: Vec<Device>, ptp_daemon: bool) -> R
         capture_timeout: Duration::from_millis(1500),
         fake: devices,
         ptp_daemon,
+        // Never the real clock's port: an installed app casting on this computer answers there.
+        daemon_control: "127.0.0.1:1".into(),
     };
     let (tx, events) = mpsc::channel();
     let tx = std::sync::Mutex::new(tx);
