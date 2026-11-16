@@ -162,12 +162,17 @@ impl State {
         use uzumaki_airplay::Cast;
         match &self.airplay.cast {
             Cast::Off => None,
-            Cast::Connecting { name, .. } => Some(ctl::AirPlayNow { name: name.clone(), connecting: true }),
-            Cast::On { name, .. } => Some(ctl::AirPlayNow { name: name.clone(), connecting: false }),
+            Cast::Connecting { name, .. } => Some(ctl::AirPlayNow { name: name.clone(), connecting: true, also: self.ctl_airplay_also(name) }),
+            Cast::On { name, .. } => Some(ctl::AirPlayNow { name: name.clone(), connecting: false, also: self.ctl_airplay_also(name) }),
         }
     }
 
-    /// `uzu airplay`: the speakers found and the one in use.
+    /// The group's other speakers (multi-room), besides `first`.
+    fn ctl_airplay_also(&self, first: &str) -> Vec<String> {
+        self.airplay.speakers.iter().filter(|s| s.name != first).map(|s| s.name.clone()).collect()
+    }
+
+    /// `uzu airplay`: the speakers found and the ones in use.
     pub fn ctl_airplay(&self) -> ctl::Reply {
         let devices = self.airplay.devices.iter().map(|o| ctl::AirPlayDevice { name: o.name.clone(), kind: o.kind.label().to_string(), pair: o.pair }).collect();
         ctl::Reply::AirPlay { current: self.ctl_airplay_now(), devices }

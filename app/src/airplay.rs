@@ -19,10 +19,17 @@ use uzumaki_airplay::{Config, Controller, Event, LocalFeed};
 pub struct Prefs {
     /// Settings → Playback → "Reconnect to last AirPlay device".
     pub reconnect: bool,
-    /// The speaker in use when the app last quit (None: this computer).
+    /// The speaker in use when the app last quit (None: this computer). With several, the first
+    /// (an older app reads this one).
     pub last: Option<Last>,
-    /// The speaker volume last chosen, 0-100.
+    /// Every speaker in use when the app last quit, when there were several (multi-room).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub group: Vec<Last>,
+    /// The speaker volume last chosen, 0-100: a speaker with none of its own starts there.
     pub volume: Option<u8>,
+    /// Each speaker's own volume, by device id.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub volumes: BTreeMap<String, u8>,
     /// Makes this install's AirPlay identity (the DACP id a pairing is bound to).
     pub seed: Option<u64>,
     /// HomeKit pairings by device id (`Event::Paired`).
@@ -72,6 +79,16 @@ impl Prefs {
 
     pub fn volume(&self) -> u8 {
         self.volume.unwrap_or(DEFAULT_VOLUME).min(100)
+    }
+
+    /// The volume of the speaker `id`: its own, else the one last chosen.
+    pub fn volume_of(&self, id: &str) -> u8 {
+        self.volumes.get(id).copied().unwrap_or_else(|| self.volume()).min(100)
+    }
+
+    /// The speakers to reconnect to: the group, else the one speaker.
+    pub fn reconnect_to(&self) -> Vec<Last> {
+        if self.group.is_empty() { self.last.iter().cloned().collect() } else { self.group.clone() }
     }
 }
 
@@ -150,5 +167,21 @@ mod tests {
         assert!(p.reconnect);
         assert_eq!(p.last, Some(Last { id: "aa".into(), name: "Bedroom".into() }));
         assert_eq!(p.volume(), 100);
+        assert_eq!(p.reconnect_to(), vec![Last { id: "aa".into(), name: "Bedroom".into() }], "an old file reconnects to its one speaker");
+        assert_eq!(p.volume_of("aa"), 100, "no volume of its own: the last chosen");
+    }
+
+    #[test]
+    fn a_group_and_its_volumes_are_kept() {
+        let mut p = Prefs { volume: Some(30), ..Prefs::default() };
+        p.group = vec![Last { id: "aa".into(), name: "Bedroom".into() }, Last { id: "bb".into(), name: "Kitchen".into() }];
+        p.volumes.insert("bb".into(), 60);
+        let back: Prefs = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+        assert_eq!(back, p);
+        assert_eq!((back.volume_of("aa"), back.volume_of("bb")), (30, 60));
+        assert_eq!(back.reconnect_to().len(), 2);
+        // Nothing new is written for one speaker: an older app reads the file as before.
+        let one = serde_json::to_string(&Prefs { volume: Some(30), ..Prefs::default() }).unwrap();
+        assert!(!one.contains("group") && !one.contains("volumes"), "{one}");
     }
 }

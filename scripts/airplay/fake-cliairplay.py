@@ -2,8 +2,9 @@
 """Stand-in for cliairplay, for tests and dry runs with no speaker and no network.
 
 It answers like the real helper: [STATUS] connected, audio buffered, started, flushed, stopped;
-it takes START, FLUSH, VOLUME and STOP from the command pipe; and instead of sending anything it
-measures the PCM it receives (level once a second). The audio is only measured in memory.
+it takes START (with START_UNIX_MS and START_JOIN), FLUSH, VOLUME and STOP from the command pipe;
+and instead of sending anything it measures the PCM it receives (level once a second). The audio
+is only measured in memory. `--ptp-daemon` (the shared clock) only waits to be ended.
 
     UZUMAKI_CLIAIRPLAY=scripts/airplay/fake-cliairplay.py UZUMAKI_AIRPLAY_HOST=127.0.0.1 ...
 
@@ -18,22 +19,47 @@ What it does is chosen by FAKE_AIRPLAY (comma-separated words), so tests can pla
     hang            never connect (the app's timeout must end it)
     stalled         connect, then report a clock nobody answers
     die_after=N     end without a word N seconds after the start (connection lost)
+    clock           report a clock that is ready shortly after connecting
+A word written `<Name>:<word>` applies only to the speaker called <Name> (its --name), so one
+journal can play a group where one speaker fails.
 FAKE_AIRPLAY_JOURNAL=<file>: every command, state and level line is appended there.
 FAKE_AIRPLAY_RAW=<file>: the PCM received, raw (tests only, in a temp folder that the test removes).
+FAKE_AIRPLAY_DIR=<folder>: also <Name>.txt (that speaker's journal) and <Name>.pcm (its PCM) there.
 """
 import math, os, struct, sys, threading, time
 
 args = sys.argv[1:]
-mode = [m for m in os.environ.get("FAKE_AIRPLAY", "").split(",") if m]
 journal = os.environ.get("FAKE_AIRPLAY_JOURNAL")
 raw_path = os.environ.get("FAKE_AIRPLAY_RAW")
+per_dir = os.environ.get("FAKE_AIRPLAY_DIR")
 lock = threading.Lock()
 
 
+def arg(name):
+    return args[args.index(name) + 1] if name in args else None
+
+
+me = arg("--name") or (args[-1] if args else "")
+mode = []
+for m in os.environ.get("FAKE_AIRPLAY", "").split(","):
+    if not m:
+        continue
+    who, sep, word = m.partition(":")
+    if sep and not who.startswith("http") and not who.startswith("busy") and not who.startswith("die_after"):
+        if who == me:
+            mode.append(word)
+    else:
+        mode.append(m)
+own_journal = os.path.join(per_dir, me + ".txt") if per_dir else None
+own_raw = os.path.join(per_dir, me + ".pcm") if per_dir else None
+
+
 def note(s):
-    if journal:
-        with lock, open(journal, "a") as f:
-            f.write(s + "\n")
+    with lock:
+        for path in (journal, own_journal):
+            if path:
+                with open(path, "a") as f:
+                    f.write(s + "\n")
 
 
 def status(s, out=sys.stderr):
@@ -66,13 +92,21 @@ if "--pair-setup" in args:
     print("CREDENTIALS: " + "ab" * 96, flush=True)
     sys.exit(0)
 
+if "--ptp-daemon" in args:
+    note("ptp-daemon " + " ".join(args))
+    try:
+        time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    sys.exit(0)
+
 note("args " + " ".join(args))
 status("route protocol=fake flow=dry-run timing=none buffered=0", sys.stdout)
 if "hang" in mode:
     time.sleep(3600)
 def earlier_sessions():
     try:
-        with open(journal) as f:
+        with open(own_journal or journal) as f:
             return sum(1 for l in f if l.startswith("args ")) - 1
     except (OSError, TypeError):
         return 0
@@ -103,8 +137,11 @@ status("connected")
 fd = os.open(pipe, os.O_RDWR | os.O_NONBLOCK) if pipe else None  # as cliairplay opens it
 if "stalled" in mode:
     status("clock_ready mode=ptp state=stalled streak_ms=0 exchanges=0 ready_in_ms=0 ready_at_unix_ms=0")
+elif "clock" in mode:
+    status("clock_ready mode=ptp state=cold streak_ms=0 exchanges=0 ready_in_ms=0 ready_at_unix_ms=0")
+    threading.Timer(0.3, lambda: status("clock_ready mode=ptp state=ready streak_ms=0 exchanges=8 ready_in_ms=0 ready_at_unix_ms=0")).start()
 
-state = {"buffered": False, "started": False, "stop": False, "flush": 0}
+state = {"buffered": False, "started": False, "stop": False, "flush": 0, "start_ms": 0, "join": False, "head": 0}
 for m in mode:
     if m.startswith("die_after="):
         threading.Timer(float(m.split("=")[1]), lambda: os._exit(0)).start()
@@ -124,15 +161,32 @@ def commands():
             if not line:
                 continue
             note("cmd " + line)
-            if line == "ACTION=START":
+            if line.startswith("START_UNIX_MS="):
+                state["start_ms"] = int(line.split("=", 1)[1])
+            elif line.startswith("START_JOIN="):
+                state["join"] = line.split("=", 1)[1] != "0"
+            elif line == "ACTION=START":
                 state["started"] = True
-                status("started requested_unix_ms=0 at_unix_ms=%d" % int(time.time() * 1000 + 250))
+                # As the real helper: an instant it can't make (or 0) moves to the earliest it can,
+                # 250 ms ahead and past the audio still queued from before a flush.
+                earliest = max(int(time.time() * 1000 + 250), state["head"] + 250 if state["head"] else 0)
+                req = state["start_ms"]
+                at = req if req >= earliest else earliest
+                status("started requested_unix_ms=%d at_unix_ms=%d" % (req, at))
+                if state["join"] and req and at > req:
+                    # A join that starts later than asked drops as much of its audio, so it stays
+                    # in step with the group (the PCM file keeps everything received).
+                    frames = ((at - req) * 44100 + 500) // 1000
+                    status("content_cut requested_ms=%d cut_ms=%d cut_bytes=%d drain_ms=0" % (at - req, at - req, frames * 4))
+                state["head"] = at
+                state["start_ms"], state["join"] = 0, False
             elif line == "ACTION=FLUSH":
                 with lock:
                     state["flush"] += 1
                 state["started"] = False
                 state["buffered"] = False
                 status("flushed head_unix_ms=%d" % int(time.time() * 1000))
+                state["head"] = int(time.time() * 1000)
             elif line == "ACTION=STOP":
                 state["stop"] = True
                 status("stopped")
@@ -154,9 +208,10 @@ while True:
     if not state["buffered"]:
         state["buffered"] = True
         status("audio buffered_ms=93")
-    if raw_path:
-        with open(raw_path, "ab") as f:
-            f.write(data)
+    for path in (raw_path, own_raw):
+        if path:
+            with open(path, "ab") as f:
+                f.write(data)
     got += data
     while len(got) >= second:
         chunk, got = got[:second], got[second:]

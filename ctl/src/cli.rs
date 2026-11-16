@@ -21,7 +21,7 @@ pub enum Command {
     Prev,
     Seek(SeekTo),
     Vol(Option<VolumeTo>),
-    /// `airplay`, `airplay list`: the speakers; `airplay off`; `airplay <name>`.
+    /// `airplay`, `airplay list`: the speakers; `airplay off`; `airplay <name>`; `airplay <name> + <name>`.
     AirPlay(uzumaki_ctl::AirPlayTo),
     Shuffle(Option<bool>),
     Repeat(Option<RepeatMode>),
@@ -185,7 +185,16 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             [] => uzumaki_ctl::AirPlayTo::List,
             [a] if a == "list" => uzumaki_ctl::AirPlayTo::List,
             [a] if a == "off" => uzumaki_ctl::AirPlayTo::Off,
-            words => uzumaki_ctl::AirPlayTo::Name(words.join(" ")),
+            words => {
+                // Several speakers together: "Bedroom + Living Room" (a "+" may touch the names).
+                let joined = words.join(" ");
+                let names: Vec<String> = joined.split('+').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+                match names.len() {
+                    0 => return Err("'airplay' takes a speaker's name, several joined with '+', 'list' or 'off'".into()),
+                    1 => uzumaki_ctl::AirPlayTo::Name(names.into_iter().next().unwrap_or_default()),
+                    _ => uzumaki_ctl::AirPlayTo::Names(names),
+                }
+            }
         }),
         "shuffle" => Command::Shuffle(match p {
             [] => None,
@@ -277,7 +286,8 @@ In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (
   play -p|-a <x> [n]          force a playlist (also: play playlist <x>) or an album (play album <x>)
   seek <pos>                  30  1:30  +10  -10  +1:00  50%
   vol [<level>]               60  +5  -5
-  airplay [list|<name>|off]   the AirPlay speakers; send the sound to one, or back to this computer
+  airplay [list|<name>|off]   the AirPlay speakers; send the sound to one, or back to this computer;
+                              several together: airplay Bedroom + Living Room
   shuffle [on|off]            no argument: turn it on/off (also: toggle shuffle)
   repeat [off|all|one]        no argument: off -> all -> one (also: toggle repeat)
   autoplay [on|off|toggle]    AutoPlay (∞): similar songs after the queue; prints the new state
@@ -333,6 +343,11 @@ mod tests {
         assert_eq!(p("jump 1"), Ok(Command::Jump(0)));
         assert_eq!(p("add 2 3"), Ok(Command::Pick { indices: vec![1, 2], action: PickAction::Add }));
         assert_eq!(p("shuffle"), Ok(Command::Shuffle(None)));
+        assert_eq!(p("airplay living room"), Ok(Command::AirPlay(uzumaki_ctl::AirPlayTo::Name("living room".into()))));
+        assert_eq!(p("airplay Bedroom + Living Room"), Ok(Command::AirPlay(uzumaki_ctl::AirPlayTo::Names(vec!["Bedroom".into(), "Living Room".into()]))));
+        assert_eq!(p("airplay Bedroom+Kitchen +Office"), Ok(Command::AirPlay(uzumaki_ctl::AirPlayTo::Names(vec!["Bedroom".into(), "Kitchen".into(), "Office".into()]))));
+        assert_eq!(p("airplay Bedroom +"), Ok(Command::AirPlay(uzumaki_ctl::AirPlayTo::Name("Bedroom".into()))));
+        assert!(p("airplay +").is_err());
         assert_eq!(p("toggle"), Ok(Command::Toggle));
         assert_eq!(p("toggle shuffle"), Ok(Command::Shuffle(None)));
         assert_eq!(p("autoplay"), Ok(Command::Autoplay(None)));

@@ -215,9 +215,9 @@ pub enum Request {
     /// and word timing is ~20 KB. An app older than this answers "bad request".
     Lyrics,
     /// AirPlay: lists the speakers (`List`, which looks for them for a moment; replies
-    /// `AirPlay`), sends the sound to one by name, or back to this computer (`Off`); both reply
-    /// `Status`, whose `airplay` then says "connecting" until the speaker plays. An app older
-    /// than this answers "bad request".
+    /// `AirPlay`), sends the sound to one by name, to several together (`Names`), or back to this
+    /// computer (`Off`); these reply `Status`, whose `airplay` then says "connecting" until the
+    /// speakers play. An app older than this answers "bad request" (`Names`: older than multi-room).
     #[serde(rename = "airplay")]
     AirPlay { to: AirPlayTo },
     /// Shows the app's window. Replies `Status`.
@@ -245,15 +245,28 @@ pub enum AirPlayTo {
     Off,
     /// The speaker of that name, as the picker shows it (any case).
     Name(String),
+    /// These speakers together, in step (multi-room). Send `Name` for one: older apps know only that.
+    Names(Vec<String>),
 }
 
 /// The AirPlay speaker the sound goes to.
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct AirPlayNow {
+    /// The first speaker (the only one, unless several play together).
     pub name: String,
     /// Not playing yet.
     #[serde(default)]
     pub connecting: bool,
+    /// The other speakers that play along (multi-room). Empty from an older app.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also: Vec<String>,
+}
+
+impl AirPlayNow {
+    /// Every speaker, first one first.
+    pub fn names(&self) -> Vec<String> {
+        std::iter::once(self.name.clone()).chain(self.also.iter().cloned()).collect()
+    }
 }
 
 /// A speaker in `Reply::AirPlay`.
@@ -795,7 +808,7 @@ mod tests {
         let Reply::Status(st) = serde_json::from_str::<Reply>(old).unwrap() else { panic!() };
         assert_eq!(st.airplay, None);
         assert_eq!(serde_json::to_string(&Reply::Status(st.clone())).unwrap(), old);
-        let with = Reply::Status(Status { airplay: Some(AirPlayNow { name: "Bedroom".into(), connecting: true }), ..st });
+        let with = Reply::Status(Status { airplay: Some(AirPlayNow { name: "Bedroom".into(), connecting: true, also: vec![] }), ..st.clone() });
         let text = serde_json::to_string(&with).unwrap();
         assert!(text.ends_with(r#""airplay":{"name":"Bedroom","connecting":true}}"#), "{text}");
         assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), with);
@@ -803,6 +816,17 @@ mod tests {
         let text = serde_json::to_string(&list).unwrap();
         assert_eq!(text, r#"{"reply":"airplay","devices":[{"name":"Bedroom","kind":"HomePod","pair":false}]}"#);
         assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), list);
+        // Multi-room: a request older apps refuse, and a field older clients skip.
+        assert_eq!(serde_json::to_string(&Request::AirPlay { to: AirPlayTo::Names(vec!["Bedroom".into(), "Kitchen".into()]) }).unwrap(), r#"{"cmd":"airplay","to":{"names":["Bedroom","Kitchen"]}}"#);
+        let group = Reply::Status(Status { airplay: Some(AirPlayNow { name: "Bedroom".into(), connecting: false, also: vec!["Kitchen".into()] }), ..st });
+        let text = serde_json::to_string(&group).unwrap();
+        assert!(text.ends_with(r#""airplay":{"name":"Bedroom","connecting":false,"also":["Kitchen"]}}"#), "{text}");
+        #[derive(serde::Deserialize)]
+        struct OldNow {
+            name: String,
+        }
+        let old: OldNow = serde_json::from_str(r#"{"name":"Bedroom","connecting":false,"also":["Kitchen"]}"#).unwrap();
+        assert_eq!(old.name, "Bedroom", "an older client reads the first speaker");
     }
 
     #[test]

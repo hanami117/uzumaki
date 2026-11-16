@@ -1,4 +1,5 @@
-//! AirPlay: where the audio goes (this computer or one AirPlay speaker), as the app sees it.
+//! AirPlay: where the audio goes (this computer, or AirPlay speakers: one or several playing in
+//! step), as the app sees it.
 //!
 //! `crate::airplay` holds the controller; its events arrive as `Msg::AirPlay` and land in
 //! `State::airplay` here. The picker (`ui/airplay.rs`), `uzu airplay` and the reconnect at
@@ -6,7 +7,7 @@
 //! the methods only change state, and scenes fill in made-up speakers.
 
 use uzumaki_airplay::discover::Output;
-use uzumaki_airplay::{Cast, Connect, Event, Need};
+use uzumaki_airplay::{Cast, Connect, Event, Need, Speaker};
 
 use super::State;
 use crate::airplay::{Last, Prefs};
@@ -25,7 +26,10 @@ pub struct Ask {
 pub struct AirPlay {
     /// The speakers found, while the picker is open (kept after it closes, for `uzu`).
     pub devices: Vec<Output>,
+    /// The group as a whole (the first speaker that plays, else the first connecting).
     pub cast: Cast,
+    /// Every speaker the audio goes to (empty: this computer).
+    pub speakers: Vec<Speaker>,
     /// The bridge must capture (a speaker is connected). Sent again to a bridge that starts later.
     pub capture: bool,
     pub ask: Option<Ask>,
@@ -63,6 +67,29 @@ impl AirPlay {
     pub fn volume(&self) -> u8 {
         self.prefs.volume()
     }
+
+    /// The speaker `id` is in the group (playing or connecting).
+    pub fn has(&self, id: &str) -> bool {
+        self.speakers.iter().any(|s| s.id == id) || self.cast.device().is_some_and(|(cur, _)| cur == id)
+    }
+
+    /// The speakers' ids, in the group's order (the summary's alone while no list came yet).
+    pub fn ids(&self) -> Vec<String> {
+        if self.speakers.is_empty() { self.cast.device().map(|(id, _)| vec![id.to_string()]).unwrap_or_default() } else { self.speakers.iter().map(|s| s.id.clone()).collect() }
+    }
+
+    /// The master volume of a group: the loudest speaker's.
+    pub fn master(&self) -> u8 {
+        self.ids().iter().map(|id| self.prefs.volume_of(id)).max().unwrap_or_else(|| self.volume())
+    }
+
+    /// "Bedroom", "Bedroom and Kitchen": where the audio goes.
+    pub fn names(&self) -> String {
+        if self.speakers.is_empty() {
+            return self.cast.device().map(|(_, n)| n.to_string()).unwrap_or_default();
+        }
+        uzumaki_airplay::names_text(&self.speakers.iter().map(|s| s.name.clone()).collect::<Vec<_>>())
+    }
 }
 
 impl State {
@@ -71,28 +98,36 @@ impl State {
         match e {
             Event::Devices(list) => self.airplay.devices = list,
             Event::State(cast) => {
-                if let Cast::On { id, name, latency_ms } = &cast {
+                if let Cast::On { latency_ms, .. } = &cast {
                     self.airplay.latency_ms = *latency_ms;
-                    self.airplay.ask = None;
-                    let last = Some(Last { id: id.clone(), name: name.clone() });
-                    if self.airplay.prefs.last != last {
-                        self.airplay.prefs.last = last;
-                        self.airplay_save();
-                    }
                 }
                 if cast == Cast::Off {
                     self.airplay.latency_ms = None;
+                    self.airplay.speakers.clear();
                 }
+                let on = matches!(cast, Cast::On { .. });
                 self.airplay.cast = cast;
+                if on && self.airplay.speakers.iter().all(|s| s.playing) {
+                    self.airplay_remember();
+                }
+            }
+            Event::Speakers(list) => {
+                let playing = !list.is_empty() && list.iter().all(|s| s.playing);
+                self.airplay.speakers = list;
+                if playing {
+                    self.airplay_remember();
+                }
             }
             Event::Capture(on) => {
                 self.airplay.capture = on;
                 self.airplay_capture();
                 return false;
             }
-            Event::Failed { name, why } => {
-                self.airplay.ask = None;
-                self.toast = Some(format!("{} Playing on {}.", why.message(&name), crate::ui::this_computer()));
+            Event::Failed { name, why, still } => {
+                if self.airplay.ask.as_ref().is_some_and(|a| a.name == name) || still.is_empty() {
+                    self.airplay.ask = None;
+                }
+                self.toast = Some(failure_toast(&why.message(&name), &still));
             }
             Event::Auth { id, name, need, wrong } => self.airplay.ask = Some(Ask { id, name, need, wrong }),
             Event::Paired { id, credentials } => {
@@ -107,6 +142,23 @@ impl State {
             }
         }
         true
+    }
+
+    /// The speakers that all play now are the ones to reconnect to next time.
+    fn airplay_remember(&mut self) {
+        self.airplay.ask = None;
+        let group: Vec<Last> = if self.airplay.speakers.is_empty() {
+            self.airplay.cast.device().map(|(id, name)| Last { id: id.into(), name: name.into() }).into_iter().collect()
+        } else {
+            self.airplay.speakers.iter().map(|s| Last { id: s.id.clone(), name: s.name.clone() }).collect()
+        };
+        let last = group.first().cloned();
+        let group = if group.len() > 1 { group } else { Vec::new() };
+        if last.is_some() && (self.airplay.prefs.last != last || self.airplay.prefs.group != group) {
+            self.airplay.prefs.last = last;
+            self.airplay.prefs.group = group;
+            self.airplay_save();
+        }
     }
 
     fn airplay_save(&self) {
@@ -166,25 +218,26 @@ impl State {
     }
 
     fn airplay_connect(&self, id: &str) -> Connect {
-        Connect { volume: self.airplay.volume(), password: None, auth: self.airplay.prefs.pairings.get(id).cloned() }
+        Connect { volume: self.airplay.prefs.volume_of(id), password: None, auth: self.airplay.prefs.pairings.get(id).cloned() }
     }
 
-    /// The picker's choice: a speaker's id, or None for this computer.
+    /// The picker's choice: a speaker's id alone, or None for this computer.
     pub fn airplay_pick(&mut self, id: Option<&str>) {
         self.airplay.ask = None;
         let Some(id) = id else {
             // "This computer" is a choice too: nothing to reconnect to next time.
-            if self.airplay.prefs.last.take().is_some() {
+            if self.airplay.prefs.last.take().is_some() | !std::mem::take(&mut self.airplay.prefs.group).is_empty() {
                 self.airplay_save();
             }
             if let Some(c) = crate::airplay::controller() {
                 c.disconnect();
             } else {
                 self.airplay.cast = Cast::Off;
+                self.airplay.speakers.clear();
             }
             return;
         };
-        if self.airplay.cast.device().is_some_and(|(cur, _)| cur == id) {
+        if self.airplay.ids() == [id] {
             return; // already there (or on its way)
         }
         let Some(out) = self.airplay.devices.iter().find(|o| o.id == id).cloned() else { return };
@@ -195,39 +248,115 @@ impl State {
                 }
             }
             // Headless: the choice shows at once.
-            None => self.airplay.cast = Cast::Connecting { id: out.id, name: out.name },
+            None => {
+                self.airplay.speakers = vec![Speaker { id: out.id.clone(), name: out.name.clone(), playing: false }];
+                self.airplay.cast = Cast::Connecting { id: out.id, name: out.name };
+            }
+        }
+    }
+
+    /// The picker's checkbox: the speaker joins the ones that play, or leaves them (the last one
+    /// out: back to this computer).
+    pub fn airplay_toggle(&mut self, id: &str) {
+        if !self.airplay.has(id) {
+            if !self.airplay.active() {
+                return self.airplay_pick(Some(id));
+            }
+            let Some(out) = self.airplay.devices.iter().find(|o| o.id == id).cloned() else { return };
+            match crate::airplay::controller() {
+                Some(c) => {
+                    if !c.add(id, self.airplay_connect(id)) {
+                        self.toast = Some(format!("“{}” is no longer on this network.", out.name));
+                    }
+                }
+                None => self.airplay.speakers.push(Speaker { id: out.id, name: out.name, playing: false }),
+            }
+            return;
+        }
+        if self.airplay.ids().len() <= 1 {
+            return self.airplay_pick(None);
+        }
+        if self.airplay.ask.as_ref().is_some_and(|a| a.id == id) {
+            self.airplay.ask = None;
+        }
+        match crate::airplay::controller() {
+            Some(c) => c.remove(id),
+            None => {
+                self.airplay.speakers.retain(|s| s.id != id);
+                if let Some(s) = self.airplay.speakers.first() {
+                    self.airplay.cast = Cast::Connecting { id: s.id.clone(), name: s.name.clone() };
+                }
+            }
         }
     }
 
     /// `uzu airplay <name>` and the reconnect at launch: the speaker of that name.
     pub fn airplay_pick_named(&mut self, name: &str) -> Result<(), String> {
+        self.airplay_pick_names(&[name.to_string()])
+    }
+
+    /// `uzu airplay <name> + <name>…` and the reconnect at launch: these speakers, together.
+    pub fn airplay_pick_names(&mut self, names: &[String]) -> Result<(), String> {
         if !self.airplay.available {
             return Err(AIRPLAY_UNAVAILABLE.into());
         }
         let Some(c) = crate::airplay::controller() else { return Err("AirPlay isn't running".into()) };
         self.airplay.ask = None;
-        let id = self.airplay.devices.iter().find(|o| o.name.eq_ignore_ascii_case(name.trim())).map(|o| o.id.clone());
-        let id = id.or_else(|| self.airplay.prefs.last.as_ref().filter(|l| l.name.eq_ignore_ascii_case(name.trim())).map(|l| l.id.clone()));
-        let opts = match &id {
-            Some(id) => self.airplay_connect(id),
-            None => Connect { volume: self.airplay.volume(), password: None, auth: None },
-        };
-        c.connect_named(name, opts);
+        let mut known: Vec<Last> = self.airplay.prefs.reconnect_to();
+        known.extend(self.airplay.prefs.last.clone());
+        for (i, name) in names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).enumerate() {
+            let id = self.airplay.devices.iter().find(|o| o.name.eq_ignore_ascii_case(name)).map(|o| o.id.clone());
+            let id = id.or_else(|| known.iter().find(|l| l.name.eq_ignore_ascii_case(name)).map(|l| l.id.clone()));
+            let opts = match &id {
+                Some(id) => self.airplay_connect(id),
+                None => Connect { volume: self.airplay.volume(), password: None, auth: None },
+            };
+            if i == 0 {
+                c.connect_named(name, opts);
+            } else {
+                c.add_named(name, opts);
+            }
+        }
         Ok(())
     }
 
-    /// The speaker's own volume, 0-100 (the app's volume slider stays the player's).
-    pub fn airplay_volume(&mut self, volume: u8, done: bool) {
+    /// The volume of one speaker, 0-100 (the app's volume slider stays the player's).
+    pub fn airplay_speaker_volume(&mut self, id: &str, volume: u8, done: bool) {
         let v = volume.min(100);
-        if self.airplay.prefs.volume != Some(v) {
+        if self.airplay.prefs.volumes.get(id) != Some(&v) {
+            self.airplay.prefs.volumes.insert(id.to_string(), v);
+            // The next speaker without a volume of its own starts here.
             self.airplay.prefs.volume = Some(v);
             if let Some(c) = crate::airplay::controller() {
-                c.set_volume(v);
+                c.set_speaker_volume(id, v);
             }
         }
         if done {
             self.airplay_save();
         }
+    }
+
+    /// The master volume: one speaker's own; with several, each moves in proportion (`from`: their
+    /// volumes when the drag began, so a trip to 0 and back keeps the balance).
+    pub fn airplay_master_volume(&mut self, volume: u8, from: &[(String, u8)], done: bool) {
+        let v = volume.min(100);
+        let top = from.iter().map(|(_, x)| *x).max().unwrap_or(0);
+        for (id, was) in from {
+            let to = if top == 0 { v } else { ((u32::from(*was) * u32::from(v) + u32::from(top) / 2) / u32::from(top)).min(100) as u8 };
+            self.airplay_speaker_volume(id, to, false);
+        }
+        self.airplay.prefs.volume = Some(v);
+        if done {
+            self.airplay_save();
+        }
+    }
+
+    /// The speakers' volumes now, for `airplay_master_volume`.
+    pub fn airplay_volumes(&self) -> Vec<(String, u8)> {
+        self.airplay.ids().into_iter().map(|id| {
+            let v = self.airplay.prefs.volume_of(&id);
+            (id, v)
+        }).collect()
     }
 
     /// The password or PIN typed in the picker.
@@ -240,7 +369,12 @@ impl State {
         }
         // The field goes; the row shows "Connecting…" until the speaker answers.
         if let Some(a) = self.airplay.ask.take() {
-            self.airplay.cast = Cast::Connecting { id: a.id, name: a.name };
+            if !self.airplay.speakers.iter().any(|s| s.id == a.id) {
+                self.airplay.speakers.push(Speaker { id: a.id.clone(), name: a.name.clone(), playing: false });
+            }
+            if !self.airplay.active() {
+                self.airplay.cast = Cast::Connecting { id: a.id, name: a.name };
+            }
         }
     }
 
@@ -273,15 +407,25 @@ impl State {
         self.airplay_save();
     }
 
-    /// At launch: back to the speaker of the last run, if the setting asks for it.
+    /// At launch: back to the speakers of the last run, if the setting asks for it.
     pub fn airplay_reconnect(&mut self) {
         if !self.airplay.prefs.reconnect || !self.airplay.available {
             return;
         }
-        if let Some(last) = self.airplay.prefs.last.clone() {
-            eprintln!("airplay: reconnecting to \"{}\" (Settings → Playback)", last.name);
-            let _ = self.airplay_pick_named(&last.name);
+        let names: Vec<String> = self.airplay.prefs.reconnect_to().into_iter().map(|l| l.name).collect();
+        if !names.is_empty() {
+            eprintln!("airplay: reconnecting to {} (Settings → Playback)", uzumaki_airplay::names_text(&names));
+            let _ = self.airplay_pick_names(&names);
         }
+    }
+}
+
+/// A speaker stopped: why, and where the audio goes now.
+fn failure_toast(message: &str, still: &[String]) -> String {
+    if still.is_empty() {
+        format!("{message} Playing on {}.", crate::ui::this_computer())
+    } else {
+        format!("{message} Still playing on {}.", uzumaki_airplay::names_text(still))
     }
 }
 
@@ -308,15 +452,71 @@ mod tests {
         on(&mut s);
         assert_eq!(s.airplay.latency_ms, Some(480), "kept for a later lyrics offset");
         assert_eq!(s.airplay.prefs.last.as_ref().map(|l| l.name.as_str()), Some("Bedroom"));
-        assert!(s.airplay_event(Event::Failed { name: "Bedroom".into(), why: Why::Lost }));
+        assert!(s.airplay_event(Event::Failed { name: "Bedroom".into(), why: Why::Lost, still: vec![] }));
         assert!(s.airplay_event(Event::State(Cast::Off)));
         let toast = s.toast.clone().unwrap();
         assert!(toast.contains("Bedroom") && toast.contains("was lost") && toast.contains(crate::ui::this_computer()), "{toast}");
         assert!(!s.airplay.active() && s.airplay.latency_ms.is_none());
         // The device is still remembered: a lost connection isn't the user's choice.
         assert!(s.airplay.prefs.last.is_some());
+        assert!(s.airplay.speakers.is_empty());
         s.airplay_pick(None);
         assert!(s.airplay.prefs.last.is_none(), "choosing this computer is");
+    }
+
+    fn group(s: &mut State, names: &[(&str, &str)], playing: bool) {
+        let list: Vec<Speaker> = names.iter().map(|(id, name)| Speaker { id: id.to_string(), name: name.to_string(), playing }).collect();
+        s.airplay_event(Event::Speakers(list));
+        let (id, name) = names[0];
+        let cast = if playing { Cast::On { id: id.into(), name: name.into(), latency_ms: Some(400) } } else { Cast::Connecting { id: id.into(), name: name.into() } };
+        s.airplay_event(Event::State(cast));
+    }
+
+    #[test]
+    fn one_speaker_failing_says_the_others_play_on() {
+        let mut s = State::offline();
+        group(&mut s, &[("aa", "Bedroom"), ("bb", "Kitchen"), ("cc", "Office")], true);
+        assert_eq!(s.airplay.names(), "Bedroom, Kitchen and Office");
+        s.airplay_event(Event::Failed { name: "Kitchen".into(), why: Why::Busy, still: vec!["Bedroom".into(), "Office".into()] });
+        let toast = s.toast.clone().unwrap();
+        assert_eq!(toast, "“Kitchen” is busy with another device. Still playing on Bedroom and Office.");
+    }
+
+    #[test]
+    fn the_group_is_remembered_for_the_next_launch() {
+        let mut s = State::offline();
+        group(&mut s, &[("aa", "Bedroom"), ("bb", "Kitchen")], false);
+        assert!(s.airplay.prefs.last.is_none(), "not while connecting");
+        group(&mut s, &[("aa", "Bedroom"), ("bb", "Kitchen")], true);
+        assert_eq!(s.airplay.prefs.last.as_ref().map(|l| l.name.as_str()), Some("Bedroom"));
+        assert_eq!(s.airplay.prefs.reconnect_to().iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["Bedroom", "Kitchen"]);
+        // Down to one: that one alone.
+        group(&mut s, &[("bb", "Kitchen")], true);
+        assert!(s.airplay.prefs.group.is_empty());
+        assert_eq!(s.airplay.prefs.last.as_ref().map(|l| l.id.as_str()), Some("bb"));
+        s.airplay_pick(None);
+        assert!(s.airplay.prefs.last.is_none() && s.airplay.prefs.group.is_empty());
+    }
+
+    #[test]
+    fn the_master_volume_moves_every_speaker_in_proportion() {
+        let mut s = State::offline();
+        group(&mut s, &[("aa", "Bedroom"), ("bb", "Kitchen")], true);
+        s.airplay_speaker_volume("aa", 40, true);
+        s.airplay_speaker_volume("bb", 80, true);
+        assert_eq!(s.airplay.master(), 80, "the loudest");
+        let from = s.airplay_volumes();
+        s.airplay_master_volume(40, &from, false);
+        assert_eq!((s.airplay.prefs.volume_of("aa"), s.airplay.prefs.volume_of("bb")), (20, 40));
+        // Down to nothing and back up in the same drag: the balance is kept.
+        s.airplay_master_volume(0, &from, false);
+        assert_eq!((s.airplay.prefs.volume_of("aa"), s.airplay.prefs.volume_of("bb")), (0, 0));
+        s.airplay_master_volume(80, &from, true);
+        assert_eq!((s.airplay.prefs.volume_of("aa"), s.airplay.prefs.volume_of("bb")), (40, 80));
+        // One speaker on its own.
+        s.airplay_speaker_volume("bb", 10, true);
+        assert_eq!((s.airplay.prefs.volume_of("aa"), s.airplay.prefs.volume_of("bb")), (40, 10));
+        assert_eq!(s.airplay_connect("bb").volume, 10, "a speaker connects at its own volume");
     }
 
     #[test]

@@ -1,9 +1,12 @@
 //! The AirPlay picker: a button in the player bar and in Now Playing, and its popover.
 //!
 //! The popover lists this computer and the AirPlay speakers on the network (found only while it
-//! is open). One of them has the tick: where the audio goes. Picking a speaker shows a spinner
-//! until it plays; the playing speaker gets its own volume slider; a speaker that wants a
-//! password or a PIN gets a field. Tab moves through the rows, Enter picks, Esc closes.
+//! is open), each with a checkbox, as Apple's Music does: tick several speakers and they play
+//! together, in step (multi-room); this computer is either alone or off (picking it unticks every
+//! speaker, unticking the last speaker picks it). A speaker connecting shows a spinner in its box;
+//! each speaker in use gets its own volume slider under its row, and with several a master slider
+//! under the title moves them all in proportion. A speaker that wants a password or a PIN gets a
+//! field. Tab moves through the rows, Enter toggles, Esc closes.
 //!
 //! The button draws nothing that moves and reads only `State::airplay`: idle, it costs the view
 //! one more icon.
@@ -93,6 +96,8 @@ pub struct Picker {
     pub field: TextEdit,
     /// The question the field was last cleared and focused for.
     asked: Option<Ask>,
+    /// The speakers' volumes when the master slider's drag began.
+    master_from: Option<Vec<(String, u8)>>,
 }
 
 /// Opens the picker above the button `anchor` (or closes it, on a second press) and starts or
@@ -147,8 +152,8 @@ pub fn button(s: &State, key: &'static str, idle: rune::Color) -> Option<El> {
     let lit = s.airplay.active() || (s.ui.airplay.open && s.ui.airplay.anchor == key);
     let label = match &s.airplay.cast {
         Cast::Off => "AirPlay".to_string(),
-        Cast::Connecting { name, .. } => format!("AirPlay: connecting to {name}"),
-        Cast::On { name, .. } => format!("AirPlay: playing on {name}"),
+        Cast::Connecting { .. } => format!("AirPlay: connecting to {}", s.airplay.names()),
+        Cast::On { .. } => format!("AirPlay: playing on {}", s.airplay.names()),
     };
     Some(el().key(key).role("button").label(label).focusable(true).size(36.0, 36.0).radius(18.0).center()
         .hover(ov(0.08)).press(ov(0.12)).cursor(Cursor::Pointer)
@@ -156,48 +161,102 @@ pub fn button(s: &State, key: &'static str, idle: rune::Color) -> Option<El> {
         .child(glyph_el(Glyph { sym: Sym::AirPlay, line: &AIRPLAY }, if lit { PAL.accent } else { idle }, 18.0)))
 }
 
-/// What a row shows at its right end.
-#[derive(Clone, Copy, PartialEq)]
+/// What a row shows at its right end: its checkbox.
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Mark {
-    None,
-    Tick,
-    Spinner,
+    Off,
+    On,
+    Connecting,
 }
 
-fn output_row(key: String, glyph: Glyph, name: &str, sub: Option<String>, mark: Mark) -> El {
-    let on = mark == Mark::Tick;
+fn checkbox(mark: Mark) -> El {
+    let b = el().size(18.0, 18.0).radius(5.0).center();
+    match mark {
+        Mark::Off => b.border(1.5, PAL.muted),
+        Mark::On => b.fill(PAL.accent).child(icon(&icons::CHECK, 13.0).color(rune::Color::WHITE)),
+        Mark::Connecting => b.child(icon(&icons::SWIRL, 16.0).color(PAL.accent).looping(LoopSpec::rotation(1.6))),
+    }
+}
+
+fn output_row(key: String, glyph: Glyph, name: &str, sub: Option<String>, mark: Mark, playing: bool) -> El {
     let mut words = col().grow(1.0).min_w(0.0).gap(1.0).justify_center()
-        .child(text(name.to_string()).font(TextStyle::new(13.5, if on { 600.0 } else { 400.0 })).color(PAL.text).truncate());
+        .child(text(name.to_string()).font(TextStyle::new(13.5, if mark != Mark::Off { 600.0 } else { 400.0 })).color(PAL.text).truncate());
     if let Some(sub) = sub {
         words = words.child(text(sub).font(SMALL12).color(PAL.muted).truncate());
     }
-    let mark = match mark {
-        Mark::None => el().size(18.0, 18.0),
-        Mark::Tick => el().size(18.0, 18.0).center().child(icon(&icons::CHECK, 16.0).color(PAL.accent)),
-        Mark::Spinner => el().size(18.0, 18.0).center().child(icon(&icons::SWIRL, 16.0).color(PAL.accent).looping(LoopSpec::rotation(1.6))),
+    let state = match mark {
+        Mark::Off => "not selected",
+        Mark::On => "selected",
+        Mark::Connecting => "connecting",
     };
-    row().key(key).role("menuitemradio").label(name.to_string()).focusable(true).w_full().h(ROW_H).px(10.0).gap(10.0).center_y().radius(8.0)
+    row().key(key).role("menuitemcheckbox").label(format!("{name}, {state}")).focusable(true).w_full().h(ROW_H).px(10.0).gap(10.0).center_y().radius(8.0)
         .hover(ov(0.09)).press(ov(0.14)).cursor(Cursor::Pointer)
         // As Apple's picker: the device in a round badge, filled with the accent where the sound is.
         .child(
-            el().size(32.0, 32.0).radius(16.0).center().fill(if on { PAL.accent } else { ov(0.10) })
-                .child(glyph_el(glyph, if on { rune::Color::WHITE } else { PAL.text }, 21.0)),
+            el().size(32.0, 32.0).radius(16.0).center().fill(if playing { PAL.accent } else { ov(0.10) })
+                .child(glyph_el(glyph, if playing { rune::Color::WHITE } else { PAL.text }, 21.0)),
         )
         .child(words)
-        .child(mark)
+        .child(checkbox(mark))
 }
 
-/// The playing speaker's own volume, under its row.
-fn volume_row(s: &State) -> El {
-    let v = s.airplay.volume();
-    row().key("airplay-volume-row").w_full().h(30.0).pl(48.0).pr(12.0).gap(10.0).center_y()
+/// A slider key that lives as long as the app (one per speaker, kept once).
+fn slider_key(id: &str) -> &'static str {
+    static KEYS: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let want = format!("airplay-volume-{id}");
+    let mut keys = KEYS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(k) = keys.iter().find(|k| **k == want) {
+        return k;
+    }
+    let k: &'static str = Box::leak(want.into_boxed_str());
+    keys.push(k);
+    k
+}
+
+fn volume_line(key: String, slider_el: El, v: u8, indent: f32) -> El {
+    row().key(key).w_full().h(30.0).pl(indent).pr(12.0).gap(10.0).center_y()
         .child(icon(icons::volume(f64::from(v) / 100.0), 15.0).color(PAL.muted))
-        .child(el().grow(1.0).child(slider("airplay-volume", f32::from(v) / 100.0, PAL.text2, |s, f, phase, cancelled, _tx| {
-            if !(phase == Phase::Up && cancelled) {
-                s.airplay_volume((f * 100.0).round() as u8, phase == Phase::Up);
-            }
-        })))
+        .child(el().grow(1.0).child(slider_el))
         .child(row().w(26.0).justify_end().child(text(v.to_string()).font(SMALL12.features("'tnum' 1")).color(PAL.muted)))
+}
+
+/// One speaker's own volume, under its row.
+fn volume_row(s: &State, id: &str) -> El {
+    let v = s.airplay.prefs.volume_of(id);
+    let owned = id.to_string();
+    let slider_el = slider(slider_key(id), f32::from(v) / 100.0, PAL.text2, move |s, f, phase, cancelled, _tx| {
+        if !(phase == Phase::Up && cancelled) {
+            s.airplay_speaker_volume(&owned, (f * 100.0).round() as u8, phase == Phase::Up);
+        }
+    });
+    volume_line(format!("airplay-volume-row-{id}"), slider_el, v, 48.0)
+}
+
+/// Several speakers: the master volume, under the title. It moves every speaker in proportion.
+fn master_row(s: &State) -> El {
+    let v = s.airplay.master();
+    let slider_el = slider("airplay-master", f32::from(v) / 100.0, PAL.text, |s, f, phase, cancelled, _tx| {
+        let from = match s.ui.airplay.master_from.clone() {
+            Some(f) => f,
+            None => {
+                let f = s.airplay_volumes();
+                s.ui.airplay.master_from = Some(f.clone());
+                f
+            }
+        };
+        if phase == Phase::Up && cancelled {
+            // Back to where the drag began.
+            for (id, was) in &from {
+                s.airplay_speaker_volume(id, *was, false);
+            }
+        } else {
+            s.airplay_master_volume((f * 100.0).round() as u8, &from, phase == Phase::Up);
+        }
+        if phase == Phase::Up {
+            s.ui.airplay.master_from = None;
+        }
+    });
+    volume_line("airplay-master-row".into(), slider_el, v, 12.0)
 }
 
 fn submit(s: &mut State) {
@@ -250,17 +309,38 @@ fn note(key: &'static str, spinner: bool, msg: &str) -> El {
     r.child(text(msg.to_string()).font(SMALL13).color(PAL.muted).grow(1.0).min_w(0.0).wrap())
 }
 
-/// The speakers to list: those found, with the one in use first in line even when the network
-/// hasn't answered for it yet (the picker was just opened, or `uzu` chose it by name).
+/// The speakers to list: those found, with the ones in use first in line even when the network
+/// hasn't answered for them yet (the picker was just opened, or `uzu` chose them by name).
 fn listed(s: &State) -> Vec<Output> {
     let mut list = s.airplay.devices.clone();
-    let current = s.airplay.cast.device().or(s.airplay.ask.as_ref().map(|a| (a.id.as_str(), a.name.as_str())));
-    if let Some((id, name)) = current
-        && !list.iter().any(|o| o.id == id || o.name.eq_ignore_ascii_case(name))
+    let mut current: Vec<(String, String)> = s.airplay.speakers.iter().map(|sp| (sp.id.clone(), sp.name.clone())).collect();
+    if current.is_empty()
+        && let Some((id, name)) = s.airplay.cast.device()
     {
-        list.insert(0, Output { id: id.to_string(), name: name.to_string(), kind: Kind::Speaker, pair: false, password: false });
+        current.push((id.to_string(), name.to_string()));
+    }
+    current.extend(s.airplay.ask.as_ref().map(|a| (a.id.clone(), a.name.clone())));
+    let mut n = 0;
+    for (id, name) in current {
+        if list.iter().any(|o| o.id == id || o.name.eq_ignore_ascii_case(&name)) {
+            continue;
+        }
+        list.insert(n, Output { id, name, kind: Kind::Speaker, pair: false, password: false });
+        n += 1;
     }
     list
+}
+
+/// A listed speaker's place in the group: off, connecting, or playing.
+fn mark_of(s: &State, out: &Output) -> Mark {
+    let found = s.airplay.speakers.iter().find(|sp| sp.id == out.id || sp.name.eq_ignore_ascii_case(&out.name));
+    match (found, &s.airplay.cast) {
+        (Some(sp), _) if sp.playing => Mark::On,
+        (Some(_), _) => Mark::Connecting,
+        (None, Cast::On { id, .. }) if s.airplay.speakers.is_empty() && *id == out.id => Mark::On,
+        (None, Cast::Connecting { id, name }) if s.airplay.speakers.is_empty() && (*id == out.id || name.eq_ignore_ascii_case(&out.name)) => Mark::Connecting,
+        _ => Mark::Off,
+    }
 }
 
 /// The popover above its button, or None while closed. `win` is the window size.
@@ -295,8 +375,14 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
         .on_press(|_s: &mut State| {});
     let here = if cfg!(target_os = "macos") { kind_glyph(Kind::Computer, false) } else { Glyph { sym: Sym::Computer, line: &DESKTOP } };
     panel = panel.child(el().key("airplay-title").w_full().px(10.0).pt(4.0).pb(6.0).child(text("AirPlay").font(TextStyle::new(12.0, 600.0)).color(PAL.muted)));
+    let list = if s.airplay.available { listed(s) } else { Vec::new() };
+    let in_use = list.iter().filter(|o| mark_of(s, o) != Mark::Off).count();
+    if in_use > 1 {
+        panel = panel.child(master_row(s));
+    }
+    let here_on = *cast == Cast::Off;
     panel = panel.child(
-        output_row("airplay-this".into(), here, this_computer(), None, if *cast == Cast::Off { Mark::Tick } else { Mark::None })
+        output_row("airplay-this".into(), here, this_computer(), None, if here_on { Mark::On } else { Mark::Off }, here_on)
             .on_press(|s: &mut State| s.airplay_pick(None)),
     );
     if !s.airplay.available {
@@ -306,17 +392,13 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
             "AirPlay speakers aren't available: this install has no cliairplay helper.",
         ))));
     }
-    let list = listed(s);
     if !list.is_empty() {
         panel = panel.child(super::menu::sep());
     }
     for out in list.iter().take(MAX_ROWS) {
         let asking = s.airplay.ask.as_ref().filter(|a| a.id == out.id || a.name.eq_ignore_ascii_case(&out.name));
-        let (mark, state) = match cast {
-            Cast::On { id, .. } if *id == out.id => (Mark::Tick, None),
-            Cast::Connecting { id, name } if *id == out.id || name.eq_ignore_ascii_case(&out.name) => (Mark::Spinner, Some("Connecting\u{2026}")),
-            _ => (Mark::None, None),
-        };
+        let mark = mark_of(s, out);
+        let state = (mark == Mark::Connecting).then_some("Connecting\u{2026}");
         let sub = match (state, out.pair, out.password && asking.is_none()) {
             (Some(st), _, _) => Some(st.to_string()),
             (None, true, _) => Some("Stereo pair".to_string()),
@@ -325,11 +407,11 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
         };
         let id = out.id.clone();
         panel = panel.child(
-            output_row(format!("airplay-dev-{}", out.id), kind_glyph(out.kind, out.pair), &out.name, sub, mark)
-                .on_press(move |s: &mut State| s.airplay_pick(Some(&id))),
+            output_row(format!("airplay-dev-{}", out.id), kind_glyph(out.kind, out.pair), &out.name, sub, mark, mark == Mark::On)
+                .on_press(move |s: &mut State| s.airplay_toggle(&id)),
         );
-        if mark == Mark::Tick {
-            panel = panel.child(volume_row(s));
+        if mark != Mark::Off {
+            panel = panel.child(volume_row(s, &out.id));
         }
         if let Some(ask) = asking {
             panel = panel.child(ask_rows(s, ask));
@@ -371,21 +453,34 @@ fn scene_devices() -> Vec<Output> {
 }
 
 /// The picker's states, over whatever the scene before set up. `what`: `closed`, `looking`,
-/// `list`, `connecting`, `on`, `pin`, `password`, `password-wrong`, `unavailable`, `failed`.
+/// `list`, `connecting`, `on`, `group`, `group-joining`, `group-failed`, `pin`, `password`,
+/// `password-wrong`, `unavailable`, `failed`.
 pub fn scene(s: &mut State, what: &str) {
     symbols::load_now();
     s.airplay.available = what != "unavailable";
     s.airplay.prefs.volume = Some(35);
-    s.ui.airplay.open = !matches!(what, "closed" | "failed" | "on-closed" | "unavailable");
+    s.ui.airplay.open = !matches!(what, "closed" | "failed" | "on-closed" | "unavailable" | "group-failed");
     s.ui.airplay.anchor = if s.ui.now_playing { "np-airplay" } else { "airplay" };
     s.airplay.browsing = s.ui.airplay.open;
     if !matches!(what, "looking" | "unavailable") {
         s.airplay.devices = scene_devices();
     }
     let (id, name) = ("aa".to_string(), "Bedroom".to_string());
+    let speaker = |id: &str, name: &str, playing: bool| uzumaki_airplay::Speaker { id: id.into(), name: name.into(), playing };
     match what {
         "connecting" => s.airplay.cast = Cast::Connecting { id, name },
         "on" | "on-closed" => s.airplay.cast = Cast::On { id, name, latency_ms: Some(480) },
+        "group" | "group-joining" => {
+            s.airplay.speakers = vec![speaker("aa", "Bedroom", true), speaker("cc", "Living Room", what == "group")];
+            s.airplay.prefs.volumes.insert("aa".into(), 35);
+            s.airplay.prefs.volumes.insert("cc".into(), 60);
+            s.airplay.cast = Cast::On { id, name, latency_ms: Some(480) };
+        }
+        "group-failed" => {
+            s.airplay.speakers = vec![speaker("cc", "Living Room", true)];
+            s.airplay.cast = Cast::On { id: "cc".into(), name: "Living Room".into(), latency_ms: Some(480) };
+            s.toast = Some(format!("{} Still playing on Living Room.", uzumaki_airplay::Why::Busy.message("Bedroom")));
+        }
         "pin" => s.airplay.ask = Some(Ask { id: "dd".into(), name: "Living Room TV".into(), need: Need::Pin, wrong: false }),
         "password" | "password-wrong" => {
             s.airplay.ask = Some(Ask { id: "bb".into(), name: "Kitchen".into(), need: Need::Password, wrong: what == "password-wrong" });
@@ -452,6 +547,42 @@ mod tests {
     }
 
     #[test]
+    fn checkboxes_add_and_remove_speakers_and_this_computer_stays_alone() {
+        let mut s = open("list");
+        let ids = |s: &State| s.airplay.ids();
+        s.airplay_toggle("aa");
+        assert_eq!(ids(&s), ["aa"], "the first tick: that speaker alone");
+        assert_eq!(mark_of(&s, &s.airplay.devices[0]), Mark::Connecting);
+        s.airplay_toggle("cc");
+        assert_eq!(ids(&s), ["aa", "cc"], "the second joins it");
+        s.airplay_toggle("nobody");
+        assert_eq!(ids(&s).len(), 2, "gone from the list: nothing");
+        s.airplay_toggle("aa");
+        assert_eq!(ids(&s), ["cc"], "unticked: the other plays on");
+        s.airplay_toggle("cc");
+        assert_eq!(s.airplay.cast, Cast::Off, "the last one out: this computer");
+        assert!(ids(&s).is_empty());
+        // This computer unticks every speaker at once.
+        s.airplay_toggle("aa");
+        s.airplay_toggle("bb");
+        s.airplay_pick(None);
+        assert!(ids(&s).is_empty() && s.airplay.cast == Cast::Off);
+    }
+
+    #[test]
+    fn a_group_shows_a_master_slider_and_one_per_speaker() {
+        let s = open("group");
+        let list = listed(&s);
+        let marks: Vec<Mark> = list.iter().map(|o| mark_of(&s, o)).collect();
+        assert_eq!(marks.iter().filter(|m| **m == Mark::On).count(), 2);
+        assert_eq!(s.airplay.master(), 60, "the loudest speaker");
+        let joining = open("group-joining");
+        assert!(listed(&joining).iter().any(|o| mark_of(&joining, o) == Mark::Connecting));
+        assert_eq!(slider_key("aa"), slider_key("aa"), "one key per speaker, kept");
+        assert!(std::ptr::eq(slider_key("aa"), slider_key("aa")));
+    }
+
+    #[test]
     fn the_speaker_in_use_is_listed_before_the_network_answers() {
         let mut s = open("on");
         s.airplay.devices.clear();
@@ -481,10 +612,11 @@ mod tests {
     fn the_volume_is_the_speakers_own() {
         let mut s = open("on");
         let app = s.playback.volume;
-        s.airplay_volume(80, true);
-        assert_eq!(s.airplay.volume(), 80);
+        s.airplay_speaker_volume("aa", 80, true);
+        assert_eq!(s.airplay.prefs.volume_of("aa"), 80);
+        assert_eq!(s.airplay.volume(), 80, "the next speaker starts there");
         assert_eq!(s.playback.volume, app, "the app's volume is untouched");
-        s.airplay_volume(250, true);
-        assert_eq!(s.airplay.volume(), 100);
+        s.airplay_speaker_volume("aa", 250, true);
+        assert_eq!(s.airplay.prefs.volume_of("aa"), 100);
     }
 }

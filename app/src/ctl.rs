@@ -174,6 +174,7 @@ impl Ctl {
                 Ok(())
             }),
             R::AirPlay { to: uzumaki_ctl::AirPlayTo::Name(name) } => self.try_act(move |s| s.airplay_pick_named(&name)),
+            R::AirPlay { to: uzumaki_ctl::AirPlayTo::Names(names) } => self.try_act(move |s| s.airplay_pick_names(&names)),
             R::Quit => {
                 let reply = self.read(|s| Reply::Status(s.ctl_status()));
                 // Quit a moment after answering, so the reply is written before the socket goes.

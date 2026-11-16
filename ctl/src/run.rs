@@ -236,6 +236,15 @@ fn volume(be: &mut dyn Backend, env: &Env, out: &mut dyn Write) -> Result<(), Fa
     put(out, &render(&fmt::volume_spans(&st)[..2], env.term.width, env.term.color))
 }
 
+/// "Bedroom", "Bedroom and Kitchen", "Bedroom, Kitchen and Office".
+fn and(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// How long `uzu airplay <name>` waits for the speaker to play.
 const AIRPLAY_WAIT: Duration = Duration::from_secs(20);
 
@@ -244,8 +253,8 @@ const AIRPLAY_WAIT: Duration = Duration::from_secs(20);
 fn airplay(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, to: uzumaki_ctl::AirPlayTo, quiet: bool) -> Result<(), Fail> {
     use uzumaki_ctl::AirPlayTo;
     let line = |now: &Option<uzumaki_ctl::AirPlayNow>| match now {
-        Some(n) if n.connecting => format!("AirPlay: connecting to {}", n.name),
-        Some(n) => format!("AirPlay: playing on {}", n.name),
+        Some(n) if n.connecting => format!("AirPlay: connecting to {}", and(&n.names())),
+        Some(n) => format!("AirPlay: playing on {}", and(&n.names())),
         None => "AirPlay: off (playing on this computer)".to_string(),
     };
     match to {
@@ -257,7 +266,7 @@ fn airplay(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, to: uzumaki_ctl
             }
             let width = devices.iter().map(|d| d.name.chars().count()).max().unwrap_or(0);
             for d in &devices {
-                let mark = if current.as_ref().is_some_and(|c| c.name.eq_ignore_ascii_case(&d.name)) { "\u{25b6}" } else { " " };
+                let mark = if current.as_ref().is_some_and(|c| c.names().iter().any(|n| n.eq_ignore_ascii_case(&d.name))) { "\u{25b6}" } else { " " };
                 let kind = if d.pair { format!("{}, stereo pair", d.kind) } else { d.kind.clone() };
                 put(out, &format!("{mark} {:<width$}  {kind}", d.name))?;
             }
@@ -267,8 +276,14 @@ fn airplay(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, to: uzumaki_ctl
             let Reply::Status(st) = call(be, Request::AirPlay { to: AirPlayTo::Off })? else { return Err(unexpected()) };
             if quiet { Ok(()) } else { put(out, &line(&st.airplay)) }
         }
-        AirPlayTo::Name(name) => {
-            let Reply::Status(mut st) = call(be, Request::AirPlay { to: AirPlayTo::Name(name.clone()) })? else { return Err(unexpected()) };
+        to @ (AirPlayTo::Name(_) | AirPlayTo::Names(_)) => {
+            let name = match &to {
+                AirPlayTo::Name(n) => n.clone(),
+                AirPlayTo::Names(n) => and(n),
+                _ => String::new(),
+            };
+            let several = matches!(to, AirPlayTo::Names(_));
+            let Reply::Status(mut st) = call(be, Request::AirPlay { to }).map_err(|e| if several && e.msg.contains("bad request") { Fail::err("this Uzumaki is too old to play on several speakers at once") } else { e })? else { return Err(unexpected()) };
             let started = Instant::now();
             while st.airplay.as_ref().is_some_and(|a| a.connecting) && started.elapsed() < AIRPLAY_WAIT {
                 std::thread::sleep(env.timing.poll);

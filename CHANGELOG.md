@@ -11,6 +11,12 @@ takes each release's notes from its section here.
   System Settings → General → Login Items. The switch shows what the system has, also after a change made there.
 - **Start in the background:** a start at login opens no window. The music, media keys and the tray or menu bar icon
   are ready; show the window from the icon or by opening Uzumaki again.
+- **AirPlay to several speakers at once (macOS)**, in sync like Apple's multi-room: the AirPlay picker has a
+  checkbox next to each speaker; tick several (a stereo pair counts as one) and they play together. This Mac is
+  either alone or off. Each speaker has its own volume slider, and with several a master slider moves them all.
+  If one speaker is busy, off or drops out, the others keep playing and a message says which one stopped. Seek,
+  pause and skip apply to all. `uzu airplay Bedroom + Living Room` does the same from the terminal, and
+  “Reconnect to last AirPlay device” brings back the whole group.
 
 ### Fixed
 - **AirPlay to a speaker that is playing from another device** (an iPhone playing to a HomePod, say): Uzumaki now

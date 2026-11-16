@@ -12,8 +12,9 @@ pub enum Status {
     ClockReady { mode: String, state: String },
     Buffered { ms: u64 },
     Started { requested_ms: u64, at_ms: u64 },
-    /// `ACTION=FLUSH` was taken: the helper waits for new audio and the next START.
-    Flushed,
+    /// `ACTION=FLUSH` was taken: the helper waits for new audio and the next START. `head_ms`: the
+    /// instant the audio already queued at the speaker ends (0: none), a new start must be later.
+    Flushed { head_ms: u64 },
     /// The receiver's queue depth (native AirPlay 2): how late a seek is heard.
     Latency { warm_lead_ms: u64 },
     Error { code: String, http: u64, detail: String },
@@ -53,7 +54,7 @@ pub fn parse_status(line: &str) -> Option<Status> {
         },
         "audio" => Status::Buffered { ms: num("buffered_ms") },
         "started" => Status::Started { requested_ms: num("requested_unix_ms"), at_ms: num("at_unix_ms") },
-        "flushed" => Status::Flushed,
+        "flushed" => Status::Flushed { head_ms: num("head_unix_ms") },
         "latency" => Status::Latency { warm_lead_ms: num("warm_lead_ms") },
         "error" => Status::Error {
             code: field(rest, "code").unwrap_or("").into(),
@@ -98,6 +99,9 @@ pub struct Options {
     pub password: Option<String>,
     /// Stored HomeKit pairing (from `--pair-setup`, with the same `dacp`).
     pub auth: Option<String>,
+    /// Take the clock of the shared PTP daemon (`--ptp-shared`, multi-room): every speaker of a
+    /// group must follow one clock. Without a live daemon the helper runs its own.
+    pub ptp_shared: bool,
 }
 
 impl Options {
@@ -112,6 +116,7 @@ impl Options {
             active_remote: (seed >> 16) as u32 & 0x7fff_ffff,
             password: None,
             auth: None,
+            ptp_shared: false,
         }
     }
 }
@@ -164,12 +169,36 @@ pub fn args(device: &Device, cmdpipe: &Path, opt: &Options) -> Vec<String> {
     if let Some(c) = opt.auth.as_ref().filter(|c| !c.is_empty()) {
         a.extend(["--auth".into(), c.clone()]);
     }
+    if opt.ptp_shared {
+        a.push("--ptp-shared".into());
+    }
     if let Some(d) = opt.debug {
         a.extend(["--debug".into(), d.to_string()]);
     }
     a.extend(opt.extra.iter().cloned());
     a.push(device.ip.to_string());
     a
+}
+
+/// The command line of the shared PTP clock (`--ptp-daemon`): one per computer, every speaker's
+/// helper started with `--ptp-shared` follows it, so the speakers of a group share one clock. The
+/// DACP id makes its clock identity the same as the streams'.
+pub fn daemon_args(dacp: &str) -> Vec<String> {
+    vec!["--ptp-daemon".into(), "--dacp".into(), dacp.into()]
+}
+
+/// The PTP daemon's control channel (localhost UDP; `?` is its liveness probe).
+pub const DAEMON_CONTROL: &str = "127.0.0.1:9010";
+
+/// Whether a PTP daemon answers on this computer (ours, or another program's: one per host).
+pub fn daemon_live(timeout: std::time::Duration) -> bool {
+    let Ok(sock) = std::net::UdpSocket::bind("127.0.0.1:0") else { return false };
+    let _ = sock.set_read_timeout(Some(timeout));
+    if sock.send_to(b"?", DAEMON_CONTROL).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 128];
+    matches!(sock.recv_from(&mut buf), Ok((n, _)) if buf[..n].starts_with(b"OK"))
 }
 
 /// The command line of a HomeKit pairing (`--pair-setup`): the device shows a PIN, the helper
@@ -233,7 +262,8 @@ mod tests {
         assert_eq!(parse_status("[STATUS] route protocol=airplay2 flow=native timing=ptp buffered=0"), Some(Status::Route("protocol=airplay2 flow=native timing=ptp buffered=0".into())));
         assert_eq!(parse_status("[STATUS] eof"), Some(Status::Eof));
         assert_eq!(parse_status("[STATUS] latency warm_lead_ms=600 render_lead_ms=250"), Some(Status::Latency { warm_lead_ms: 600 }));
-        assert_eq!(parse_status("[STATUS] flushed head_unix_ms=5"), Some(Status::Flushed));
+        assert_eq!(parse_status("[STATUS] flushed head_unix_ms=5"), Some(Status::Flushed { head_ms: 5 }));
+        assert_eq!(parse_status("[STATUS] flushed"), Some(Status::Flushed { head_ms: 0 }));
         assert_eq!(parse_status("[STATUS] capabilities requested=0x0"), None);
         assert_eq!(parse_status("plain log line"), None);
     }
@@ -253,6 +283,10 @@ mod tests {
         assert!(s.contains("--volume 30 --port 7000 --name Bedroom --hostname Bedroom.local."), "{s}");
         assert!(s.contains("--udn AABBCCDDEEFF@Bedroom --et 0,3,5 --am AudioAccessory5,1 --cn 0,1,2,3"), "{s}");
         assert!(s.contains("--timing ntp"), "{s}");
+        assert!(!s.contains("--ptp-shared"), "{s}");
+        let shared = args(&homepod(), Path::new("/tmp/x/cmd.fifo"), &Options { ptp_shared: true, ..opt.clone() }).join(" ");
+        assert!(shared.contains("--ptp-shared"), "{shared}");
+        assert_eq!(daemon_args("0123456789ABCDEF").join(" "), "--ptp-daemon --dacp 0123456789ABCDEF");
         // The TXT blob is one argument; the device address is last.
         assert!(a.iter().any(|x| x.starts_with("acl=0 features=")));
         assert_eq!(a.last().map(String::as_str), Some("192.168.1.50"));
