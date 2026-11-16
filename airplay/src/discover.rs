@@ -319,6 +319,18 @@ impl Device {
         Some(low | (high << 32))
     }
 
+    /// The status flags (`flags` on `_airplay`, `sf` on `_raop`).
+    fn status_flags(&self) -> Option<u64> {
+        let raw = self.txt("flags").or_else(|| self.raop.as_ref().and_then(|s| s.get("sf")))?;
+        u64::from_str_radix(raw.trim().trim_start_matches("0x").trim_start_matches("0X"), 16).ok()
+    }
+
+    /// Another sender plays to it now (status flag bit 17, "receiver session is active"). Seen
+    /// live: a HomePod mini playing from an iPhone advertised `flags=0x1b8c04` (idle: `0x98404`).
+    pub fn busy(&self) -> bool {
+        self.status_flags().is_some_and(|f| f & 0x2_0000 != 0)
+    }
+
     fn txt(&self, key: &str) -> Option<&str> {
         self.airplay.as_ref().and_then(|s| s.get(key)).or_else(|| self.raop.as_ref().and_then(|s| s.get(key)))
     }
@@ -648,5 +660,22 @@ mod tests {
         assert_eq!(best_ip(a.into_iter()), Some("192.168.1.9".parse().unwrap()));
         let b: Vec<IpAddr> = vec!["fe80::1".parse().unwrap(), "2001:db8::5".parse().unwrap()];
         assert_eq!(best_ip(b.into_iter()), Some("2001:db8::5".parse().unwrap()));
+    }
+
+    #[test]
+    fn a_speaker_playing_for_someone_else_says_so_in_its_flags() {
+        let with = |k: &str, v: &str| {
+            let mut d = homepod();
+            d.airplay.as_mut().unwrap().txt.push((k.into(), v.into()));
+            d
+        };
+        assert!(!homepod().busy(), "no flags: not known to be busy");
+        assert!(with("flags", "0x1b8c04").busy(), "the HomePod mini while an iPhone played to it");
+        assert!(!with("flags", "0x98404").busy(), "the same speaker idle");
+        assert!(!with("flags", "nonsense").busy());
+        let mut raop_only = homepod();
+        raop_only.airplay = None;
+        raop_only.raop.as_mut().unwrap().txt.push(("sf".into(), "0x20004".into()));
+        assert!(raop_only.busy());
     }
 }

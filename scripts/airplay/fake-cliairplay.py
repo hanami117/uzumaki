@@ -12,6 +12,9 @@ What it does is chosen by FAKE_AIRPLAY (comma-separated words), so tests can pla
     need_password   refuse unless --password is "secret" (wrong one: auth_failed)
     need_pin        refuse unless --auth is given (pair first: --pair-setup, the PIN is 1234)
     connect_failed  the speaker is off
+    busy            refuse every session at once (connect_failed), as a speaker playing for another device
+    busy=N          refuse the first N sessions of this journal, then play (the speaker lets the other sender go)
+    http=N          the HTTP status of a busy refusal (default 0: the connection itself was refused)
     hang            never connect (the app's timeout must end it)
     stalled         connect, then report a clock nobody answers
     die_after=N     end without a word N seconds after the start (connection lost)
@@ -67,6 +70,20 @@ note("args " + " ".join(args))
 status("route protocol=fake flow=dry-run timing=none buffered=0", sys.stdout)
 if "hang" in mode:
     time.sleep(3600)
+def earlier_sessions():
+    try:
+        with open(journal) as f:
+            return sum(1 for l in f if l.startswith("args ")) - 1
+    except (OSError, TypeError):
+        return 0
+
+
+busy_http = int(next((m.split("=")[1] for m in mode if m.startswith("http=")), "0"))
+if "busy" in mode:
+    fail("connect_failed", busy_http, "native AirPlay 2 connect failed")
+for m in mode:
+    if m.startswith("busy=") and earlier_sessions() < int(m.split("=")[1]):
+        fail("connect_failed", busy_http, "native AirPlay 2 connect failed")
 if "connect_failed" in mode:
     fail("connect_failed", 0, "cannot reach the device")
 if "auth_required" in mode:

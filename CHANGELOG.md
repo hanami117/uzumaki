@@ -5,6 +5,12 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Fixed
+- **AirPlay to a speaker that is playing from another device** (an iPhone playing to a HomePod, say): Uzumaki now
+  takes it over the way Apple devices do, trying again after a short pause (up to three tries in about four
+  seconds) instead of failing on the first refusal. If it still refuses, the message says “… is busy with another
+  device” rather than asking you to check that it is on and on the same network.
+
 ## [0.2.1] - 2026-11-15
 
 A fix for accounts that refuse explicit songs, and a Ko-fi link. You need an Apple Music subscription.

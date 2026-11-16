@@ -82,6 +82,11 @@ pub struct Config {
     pub keep_local: bool,
     /// How long the helper may take to connect.
     pub connect_timeout: Duration,
+    /// The pauses before trying again when the speaker refuses the session at once (it plays for
+    /// another device, which it lets go of a moment later): one more try after each.
+    pub retry_backoff: Vec<Duration>,
+    /// After a seek, the audio arriving for this long is the old position's and is dropped.
+    pub flush_drop: Duration,
     /// How long `connect_named` looks for the speaker.
     pub discover_timeout: Duration,
     /// A speaker that doesn't answer our clock plays silence: after this long the session ends.
@@ -116,6 +121,8 @@ impl Config {
             extra: var("UZUMAKI_AIRPLAY_EXTRA_ARGS").map(|v| v.split_whitespace().map(String::from).collect()).unwrap_or_default(),
             keep_local: var("UZUMAKI_AIRPLAY_LOCAL").is_some_and(|v| v.trim() == "1"),
             connect_timeout: Duration::from_secs(15),
+            retry_backoff: vec![Duration::from_millis(1500), Duration::from_millis(2500)],
+            flush_drop: FLUSH_DROP,
             discover_timeout: Duration::from_secs(8),
             stall_grace: Duration::from_secs(6),
             capture_timeout: Duration::from_secs(8),
@@ -159,6 +166,8 @@ pub enum Why {
     NotFound,
     /// Off, asleep, another network, or a firewall.
     Unreachable,
+    /// It plays for another device and kept refusing us (after the retries).
+    Busy,
     /// The speaker only lets people of its home play (no password, no PIN to type).
     Refused,
     /// The password was wrong.
@@ -182,6 +191,7 @@ impl Why {
             Why::NoHelper => "AirPlay isn't available: the cliairplay helper is missing from this install.".into(),
             Why::NotFound => format!("Couldn't find “{name}” on this network."),
             Why::Unreachable => format!("Couldn't connect to “{name}”. Check that it is on and on the same network."),
+            Why::Busy => format!("“{name}” is busy with another device."),
             Why::Refused => format!("“{name}” only accepts people of its home. In the Home app, allow speaker access for “Anyone on the Same Network”."),
             Why::Password => format!("Wrong password for “{name}”."),
             Why::Pairing => format!("Couldn't pair with “{name}”. Check the code and try again."),
@@ -725,9 +735,29 @@ enum End {
     /// The user (or a newer session) stopped it.
     User,
     Failed(Why),
+    /// The speaker refused the session before it was set up (`connect_failed`): busy with another
+    /// sender (tried again after a pause), or really out of reach.
+    ConnectFailed { http: u64 },
     Auth { need: Need, wrong: bool },
     /// The stored pairing was refused.
     StalePairing,
+}
+
+/// Waits `pause`; true if the session was stopped meanwhile (the user picked something else).
+fn pause_or_stop(rx: &mpsc::Receiver<Ev>, pause: Duration) -> bool {
+    let until = Instant::now() + pause;
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        match rx.recv_timeout(left) {
+            Ok(Ev::Cmd(Cmd::Stop)) | Err(mpsc::RecvTimeoutError::Disconnected) => return true,
+            // A volume is kept in `Inner::volume` and sent once connected; nothing to flush yet.
+            Ok(_) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => return false,
+        }
+    }
 }
 
 fn session(inner: &Arc<Inner>, tx: mpsc::Sender<Ev>, rx: mpsc::Receiver<Ev>, target: Target, opts: Connect) {
@@ -787,10 +817,36 @@ fn session(inner: &Arc<Inner>, tx: mpsc::Sender<Ev>, rx: mpsc::Receiver<Ev>, tar
         auth: opts.auth.clone(),
         ..helper::Options::seeded(inner.cfg.seed, opts.volume.min(100))
     };
-    let end = run(inner, &tx, &rx, &helper_path, out, device, &options);
+    // A speaker playing for another device (an iPhone, say) may refuse the first session and take
+    // one a moment later, as it lets the other sender go: tried again after a short pause, the way
+    // Apple's senders take a speaker over.
+    let mut tries = 0;
+    let end = loop {
+        let end = run(inner, &tx, &rx, &helper_path, out, device, &options);
+        match end {
+            End::ConnectFailed { http } if tries < inner.cfg.retry_backoff.len() => {
+                let pause = inner.cfg.retry_backoff[tries];
+                tries += 1;
+                log(format!(
+                    "\"{}\" refused the session{}; trying again in {} ms (try {} of {})",
+                    out.name,
+                    if device.busy() || http == 453 { " (it plays for another device)" } else { "" },
+                    pause.as_millis(),
+                    tries + 1,
+                    inner.cfg.retry_backoff.len() + 1
+                ));
+                if pause_or_stop(&rx, pause) {
+                    break End::User;
+                }
+            }
+            end => break end,
+        }
+    };
     match end {
         End::User => inner.emit(Event::State(Cast::Off)),
         End::Failed(why) => fail(why),
+        // 453 Not Enough Bandwidth is RTSP's "busy"; else the speaker said so in its TXT flags.
+        End::ConnectFailed { http } => fail(if http == 453 || device.busy() { Why::Busy } else { Why::Unreachable }),
         End::Auth { need: Need::Password, wrong } => {
             inner.emit(Event::State(Cast::Off));
             *inner.asked.lock().unwrap() = Some(Asked { target: target.clone() });
@@ -925,6 +981,7 @@ fn run(inner: &Arc<Inner>, tx: &mpsc::Sender<Ev>, rx: &mpsc::Receiver<Ev>, helpe
     let mut waiting: Option<Instant> = None;
     let mut latency: Option<u32> = None;
     let mut error: Option<String> = None;
+    let mut error_http = 0u64;
     let mut user = false;
     let mut failed: Option<Why> = None;
     let mut kill_at: Option<Instant> = None;
@@ -1023,7 +1080,7 @@ fn run(inner: &Arc<Inner>, tx: &mpsc::Sender<Ev>, rx: &mpsc::Receiver<Ev>, helpe
             }
             Ev::Cmd(Cmd::Flush) => {
                 // Audio already on its way is the old position's.
-                shared.drop_until.store(shared.now_ms() + FLUSH_DROP.as_millis() as u64, Ordering::Relaxed);
+                shared.drop_until.store(shared.now_ms() + cfg.flush_drop.as_millis() as u64, Ordering::Relaxed);
                 if start_sent && !user && shared.command("ACTION=FLUSH\n") {
                     log("flush (seek or new song): the speaker starts again from the new audio");
                     start_sent = false;
@@ -1111,7 +1168,10 @@ fn run(inner: &Arc<Inner>, tx: &mpsc::Sender<Ev>, rx: &mpsc::Receiver<Ev>, helpe
                             start_sent = send_start(shared);
                         }
                     }
-                    "auth_required" | "auth_failed" | "connect_failed" => error = Some(code),
+                    "auth_required" | "auth_failed" | "connect_failed" => {
+                        error = Some(code);
+                        error_http = http;
+                    }
                     _ => {}
                 }
             }
@@ -1160,6 +1220,7 @@ fn run(inner: &Arc<Inner>, tx: &mpsc::Sender<Ev>, rx: &mpsc::Receiver<Ev>, helpe
         Some("auth_failed") if options.auth.is_some() && can_pin => End::StalePairing,
         Some("auth_required") if can_pin && options.auth.is_none() => End::Auth { need: Need::Pin, wrong: false },
         Some("auth_required" | "auth_failed") => End::Failed(Why::Refused),
+        Some("connect_failed") if !connected => End::ConnectFailed { http: error_http },
         Some(_) => End::Failed(Why::Unreachable),
         None if started => End::Failed(Why::Lost),
         None => End::Failed(Why::Unreachable),
@@ -1397,7 +1458,7 @@ mod tests {
 
     #[test]
     fn every_reason_has_a_sentence_with_the_name() {
-        for why in [Why::NotFound, Why::Unreachable, Why::Refused, Why::Password, Why::Pairing, Why::Lost, Why::Slept, Why::Clock] {
+        for why in [Why::NotFound, Why::Unreachable, Why::Busy, Why::Refused, Why::Password, Why::Pairing, Why::Lost, Why::Slept, Why::Clock] {
             assert!(why.message("Bedroom").contains("Bedroom"), "{why:?}");
         }
         assert!(Why::NoHelper.message("x").contains("cliairplay"));

@@ -76,7 +76,7 @@ pub fn explain(code: &str) -> &'static str {
              Apple TV: pair with the PIN it shows"
         }
         "auth_failed" => "the speaker rejected the password or the stored pairing",
-        "connect_failed" => "could not set up the session (speaker off or asleep? another Wi-Fi? firewall?)",
+        "connect_failed" => "could not set up the session (playing for another device? off or asleep? another Wi-Fi? firewall?)",
         "start_failed" => "the speaker accepted the session but would not schedule the start",
         "flush_failed" => "the speaker did not take the flush (a seek is heard a little later)",
         _ => "see the cliairplay lines above",
