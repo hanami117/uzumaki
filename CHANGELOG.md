@@ -5,6 +5,10 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-16
+
+AirPlay to several speakers at once, a fix for busy speakers, and starting at login. You need an Apple Music subscription.
+
 ### Added
 - **Start Uzumaki when I log in** (Settings → General): on Linux an entry in your desktop's autostart programs
   (`~/.config/autostart`, it runs the AppImage, the package or your own install); on macOS a login item, listed in
