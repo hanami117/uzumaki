@@ -5,6 +5,10 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-17
+
+Show what you play on Discord (off by default), and fixes for forced themes on macOS and the `uzu` Queue screen. You need an Apple Music subscription.
+
 ### Added
 - **Show on Discord** (Settings → General, off by default): Discord Rich Presence like Spotify's. Your profile shows
   "Listening to Uzumaki" with the song, the artist, the cover, a progress bar that follows seeks and pauses, and an
