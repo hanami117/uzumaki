@@ -155,7 +155,7 @@ section { scroll-margin-top: 72px; }
 .grid li:hover, .card:hover { border-color: var(--border-hi); }
 .grid p, .card p { color: var(--ink-2); margin-top: 10px; font-size: .95rem; }
 
-/* Wide feature card with a Discord mock-up (see DISCORD-NEXT-VERSION in index.html). */
+/* Wide feature card with a Discord mock-up. */
 .grid li.wide { grid-column: 1 / -1; display: grid; grid-template-columns: 1.4fr 1fr; gap: 28px; align-items: center; }
 .grid li.wide h3 .pill { margin: 0 0 0 8px; }
 .dmock { background: #1e1f22; border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; max-width: 340px; justify-self: end; width: 100%; }
