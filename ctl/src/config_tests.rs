@@ -626,8 +626,18 @@ fn taking_a_key_that_means_something_on_some_screens_warns() {
     let (_, w) = keymap("[keys]\nshuffle = \"tab\"\n");
     assert_eq!(w.len(), 1);
     assert!(w[0].contains("'tab' also switches panes"), "{}", w[0]);
+    // `h` (the history key, like `l` for the lyrics) switches panes there only through its action.
     let (_, w) = keymap("[keys]\nshuffle = \"h\"\n");
-    assert!(w[0].contains("'h' also switches panes"), "{}", w[0]);
+    assert_eq!(w, ["line 2: 'h' used to be 'history'; it now does 'shuffle', and 'history' loses that key"]);
+}
+
+#[test]
+fn the_history_key_can_be_remapped_and_the_help_and_hints_follow() {
+    let (map, w) = keymap("[keys]\nhistory = \"y\"\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(press(&map, ch('y'), KeyModifiers::NONE), Some((ch('h'), KeyModifiers::NONE)));
+    assert_eq!(map.relabel("h"), "y");
+    assert_eq!(map.relabel_hint("h history"), "y history");
 }
 
 #[test]

@@ -135,6 +135,9 @@ pub struct App {
     autoplay_head: uzumaki_ctl::SongInfo,
     /// `title` is the History divider's text ("⟲ History · 7 songs"), set with each queue.
     history_head: uzumaki_ctl::SongInfo,
+    /// The history's songs are listed under its header (Enter on the header, or the `history` key).
+    /// Collapsed by default: the list opens on what plays and what is next. A filter lists them anyway.
+    pub history_open: bool,
     /// The text of the "▸ Up Next · n songs" divider between the history and Up Next.
     upnext_head: uzumaki_ctl::SongInfo,
     /// Index into the full row list (playing song first).
@@ -196,6 +199,7 @@ impl App {
             station_head: Default::default(),
             autoplay_head: Default::default(),
             history_head: Default::default(),
+            history_open: false,
             upnext_head: Default::default(),
             cursor: 0,
             key: None,
@@ -305,7 +309,8 @@ impl App {
             // Oldest first, as the app sends it: entry i is `H(past - i)`, so the song played just
             // before the current one is H1. The number stays the entry number Enter sends.
             rows.push(Row { number: None, song: &self.history_head, playing: false, kind: RowKind::History });
-            rows.extend(self.queue.history.iter().enumerate().map(|(i, song)| Row { number: Some(self.entries_before_history() + i + 1), song, playing: false, kind: RowKind::Past(past - i) }));
+            let listed = if self.history_listed() { &self.queue.history[..] } else { &[] };
+            rows.extend(listed.iter().enumerate().map(|(i, song)| Row { number: Some(self.entries_before_history() + i + 1), song, playing: false, kind: RowKind::Past(past - i) }));
         }
         if let Some(song) = &self.queue.current {
             rows.push(Row { number: None, song, playing: true, kind: RowKind::Song });
@@ -336,6 +341,11 @@ impl App {
         rows
     }
 
+    /// The history's songs are among the rows: unfolded, or a filter is looking for them.
+    fn history_listed(&self) -> bool {
+        self.history_open || !self.filter.is_empty()
+    }
+
     /// Width of the queue table's number column: the largest entry number, or `H<k>` of the oldest
     /// history song when that is wider.
     pub fn num_width(&self) -> usize {
@@ -354,13 +364,14 @@ impl App {
         let vis = self.visible();
         let current = rows.iter().position(|r| r.playing);
         let next = vis.iter().copied().find(|&i| rows[i].kind == RowKind::Song && !rows[i].playing && current.is_none_or(|c| i > c));
-        next.or_else(|| current.filter(|c| vis.contains(c))).or_else(|| self.selectable().first().copied())
+        next.or_else(|| current.filter(|c| vis.contains(c))).or_else(|| self.selectable().into_iter().find(|&i| rows[i].kind != RowKind::History))
+            .or_else(|| self.selectable().first().copied())
     }
 
     /// The rows the cursor can stand on: `visible` without the divider.
     fn selectable(&self) -> Vec<usize> {
         let rows = self.rows();
-        self.visible().into_iter().filter(|&i| !rows[i].kind.is_divider()).collect()
+        self.visible().into_iter().filter(|&i| rows[i].kind.is_selectable()).collect()
     }
 
     /// Indices (into [`App::rows`]) of the rows the filter lets through.
@@ -576,7 +587,7 @@ impl App {
     /// Home / g: with history above, the first Up Next song; pressed again there, the top of the
     /// history. Without history, simply the first row.
     fn cursor_home(&mut self) {
-        let has_history = self.rows().iter().any(|r| matches!(r.kind, RowKind::Past(_)));
+        let has_history = !self.queue.history.is_empty();
         match self.first_up_next() {
             Some(i) if has_history && self.cursor != i => self.set_cursor(i),
             _ => self.cursor_to(false),
@@ -585,7 +596,13 @@ impl App {
 
     fn cursor_to(&mut self, last: bool) {
         let vis = self.selectable();
-        if let Some(&i) = if last { vis.last() } else { vis.first() } {
+        let rows = self.rows();
+        // The top is the first song; with the history unfolded, its header is one more `k` up.
+        let first = match vis.first() {
+            Some(&h) if rows[h].kind == RowKind::History && vis.get(1).is_some_and(|&i| matches!(rows[i].kind, RowKind::Past(_))) => vis.get(1),
+            other => other,
+        };
+        if let Some(&i) = if last { vis.last() } else { first } {
             self.set_cursor(i);
         }
     }
@@ -637,6 +654,11 @@ impl App {
             self.offset = pos + 1 - self.body;
         }
         self.offset = self.offset.min(vis.len().saturating_sub(1));
+        // The History header is never scrolled off by one: folded, the list starts at it while the
+        // cursor is within the first screen; unfolded, it shows when the cursor is on the oldest song.
+        if self.offset > 0 && vis.first().is_some_and(|&i| self.rows()[i].kind == RowKind::History) && (pos == 1 || (pos < self.body && !self.history_listed())) {
+            self.offset = 0;
+        }
         self.show_history_top(&vis, pos);
     }
 
@@ -676,6 +698,10 @@ impl App {
         let first = !self.have_queue;
         let old_pos = self.visible().iter().position(|&i| i == self.cursor).unwrap_or(0);
         let screen_row = old_pos.saturating_sub(self.offset);
+        // The cursor was on the playing song: it goes on playing the next one (the old one is
+        // history now), at the same place on the screen, instead of staying with the old song.
+        let followed = !first && self.rows().get(self.cursor).is_some_and(|r| r.playing);
+        let was = self.queue.current.as_ref().map(|s| s.id.clone());
         self.upnext_head.title = format!("\u{25b8} Up Next \u{b7} {}", crate::fmt::plural(q.up_next.len(), "song"));
         self.history_head.title = format!("\u{27f2} History \u{b7} {}", crate::fmt::plural(q.history.len(), "song"));
         self.autoplay_head.title = "\u{221e} AutoPlay \u{b7} similar music will keep playing".to_string();
@@ -688,12 +714,44 @@ impl App {
             let current = self.rows().iter().position(|r| r.playing).unwrap_or(0);
             self.offset = current;
             self.set_cursor(current);
-        } else {
+        } else if !(followed && self.queue.current.as_ref().map(|s| &s.id) != was.as_ref() && self.follow_playing(screen_row)) {
             self.resolve_cursor();
             let pos = self.visible().iter().position(|&i| i == self.cursor).unwrap_or(0);
             self.offset = pos.saturating_sub(screen_row);
             self.fit();
         }
+        self.keep_cursor_shown();
+    }
+
+    /// The cursor goes to the playing row, which lands on `screen_row` of the list. False when
+    /// the row isn't listed (a filter hides it, the showcase keeps it on the left).
+    fn follow_playing(&mut self, screen_row: usize) -> bool {
+        let Some(current) = self.rows().iter().position(|r| r.playing) else { return false };
+        let Some(pos) = self.visible().iter().position(|&i| i == current) else { return false };
+        self.offset = pos.saturating_sub(screen_row);
+        self.set_cursor(current);
+        true
+    }
+
+    /// Unfolds or folds the history (Enter on its header, or the `history` key). The cursor stays
+    /// on its song, at the same place on the screen; one that was among the history goes to the header.
+    fn toggle_history(&mut self, now: Instant) {
+        if self.queue.history.is_empty() {
+            self.set_message("No songs played yet", now);
+            return;
+        }
+        let old_pos = self.visible().iter().position(|&i| i == self.cursor).unwrap_or(0);
+        let screen_row = old_pos.saturating_sub(self.offset);
+        let on_past = self.rows().get(self.cursor).is_some_and(|r| matches!(r.kind, RowKind::Past(_)));
+        self.history_open = !self.history_open;
+        if on_past && !self.history_listed() {
+            self.set_cursor(0);
+        } else {
+            self.resolve_cursor();
+        }
+        let pos = self.visible().iter().position(|&i| i == self.cursor).unwrap_or(0);
+        self.offset = pos.saturating_sub(screen_row);
+        self.fit();
         self.keep_cursor_shown();
     }
 
@@ -1055,6 +1113,8 @@ impl App {
             KeyCode::Char(c) => self.filter.push(c),
             _ => {}
         }
+        // A filter lists the history, an empty one folds it again: the cursor stays on its song.
+        self.resolve_cursor();
         let vis = self.selectable();
         if !vis.contains(&self.cursor) {
             if let Some(&i) = vis.first() {
@@ -1069,7 +1129,11 @@ impl App {
         match code {
             KeyCode::Esc if self.filter.is_empty() && self.layout != Layout::Normal => self.set_layout(Layout::Normal, be, now),
             KeyCode::Esc if self.filter.is_empty() => self.quit = true,
-            KeyCode::Esc => self.filter.clear(),
+            KeyCode::Esc => {
+                self.filter.clear();
+                self.resolve_cursor();
+                self.fit();
+            }
             KeyCode::Char('/') => self.filtering = true,
             KeyCode::Up | KeyCode::Char('k') => self.move_cursor(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_cursor(1),
@@ -1078,6 +1142,7 @@ impl App {
             KeyCode::Home | KeyCode::Char('g') => self.cursor_home(),
             KeyCode::End | KeyCode::Char('G') => self.cursor_to(true),
             KeyCode::Char('o') => self.select_playing(now),
+            KeyCode::Char('h') => self.toggle_history(now),
             KeyCode::Enter => self.activate(be, now),
             KeyCode::Char('d') | KeyCode::Delete => self.remove_selected(be, now),
             KeyCode::Char('J') => self.move_selected(be, true, now),
@@ -1114,10 +1179,14 @@ impl App {
     }
 
     fn selected_number(&self) -> Option<Option<usize>> {
-        self.rows().get(self.cursor).filter(|r| !r.kind.is_divider()).map(|r| r.number)
+        self.rows().get(self.cursor).filter(|r| r.kind.is_selectable()).map(|r| r.number)
     }
 
     fn activate(&mut self, be: &mut dyn Backend, now: Instant) {
+        if self.rows().get(self.cursor).is_some_and(|r| r.kind == RowKind::History) {
+            self.toggle_history(now);
+            return;
+        }
         match self.selected_number() {
             Some(Some(n)) => {
                 let start = self.entries_before_history();
@@ -1347,7 +1416,7 @@ impl App {
                 let row = (ev.row as usize).checked_sub(top as usize).filter(|r| *r < self.body && inside);
                 let vis = self.visible();
                 let Some(&index) = row.and_then(|r| vis.get(self.offset + r)) else { return };
-                if self.rows().get(index).is_some_and(|r| r.kind.is_divider()) {
+                if self.rows().get(index).is_some_and(|r| !r.kind.is_selectable()) {
                     return;
                 }
                 self.set_cursor(index);

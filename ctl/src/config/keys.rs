@@ -66,6 +66,7 @@ pub const ACTIONS: &[Action] = &[
     a("filter", &["/"], "filter (on Search: type a new query)"),
     a("sort", &[","], "open the sort menu"),
     a("playing", &["o"], "select the playing song"),
+    a("history", &["h"], "Queue: show or hide the played songs under the History header (Enter on it too; on screens 2 and 4 this key also switches panes)"),
     a("remove", &["d", "delete"], "remove the selected song from Up Next"),
     a("move_down", &["J"], "move the selected song down in Up Next"),
     a("move_up", &["K"], "move the selected song up in Up Next"),
@@ -86,7 +87,6 @@ const FIXED: &[(&str, &str)] = &[
     ("right", "seeks on the queue, search and lyrics screens and switches panes on 2 and 4"),
     ("tab", "switches panes on screens 2 and 4"),
     ("shift+tab", "switches panes on screens 2 and 4"),
-    ("h", "switches panes on screens 2 and 4"),
 ];
 
 // ------------------------------------------------------------------------------------ chords

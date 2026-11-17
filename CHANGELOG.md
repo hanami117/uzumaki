@@ -5,6 +5,12 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Fixed
+- **`uzu`: the Queue screen no longer ends up in the History.** The played songs are folded under one "⟲ History · n songs"
+  row (Enter on it, or `h`, unfolds them; remappable as `history` in `[keys]`), and the cursor follows the playing song
+  when the next one starts, instead of staying with the old song as it slid up the History (after about 50 Next presses
+  the list sat on the oldest song with the playing song and Up Next far below the screen).
+
 ## [0.2.2] - 2026-11-16
 
 AirPlay to several speakers at once, a fix for busy speakers, and starting at login. You need an Apple Music subscription.

@@ -149,6 +149,11 @@ impl RowKind {
     pub fn is_divider(self) -> bool {
         matches!(self, RowKind::Repeat | RowKind::Station | RowKind::History | RowKind::UpNext | RowKind::AutoPlay)
     }
+
+    /// The cursor can stand here: a song, or the History header (Enter folds and unfolds it).
+    pub fn is_selectable(self) -> bool {
+        !self.is_divider() || self == RowKind::History
+    }
 }
 
 /// How the selected row shows: the focused pane inverts, the other one only underlines.
@@ -296,7 +301,8 @@ fn row_line(row: &Row, cols: &[(Col, usize)], mark: Option<Mark>, glyph: &str) -
             RowKind::History | RowKind::UpNext | RowKind::AutoPlay => row.song.title.clone(),
             _ => "↻ Repeat".to_string(),
         };
-        return Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(text, dim())]);
+        let style = mark.map_or_else(dim, |m| m.apply(dim()));
+        return Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(text, style)]);
     }
     let mut spans = Vec::new();
     for (i, &(col, w)) in cols.iter().enumerate() {

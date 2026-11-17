@@ -1014,7 +1014,7 @@ fn every_screen_has_its_context_line() {
 fn hints_follow_the_screen_and_the_typing_mode() {
     let mut rig = Rig::new("hints");
     let bottom = |rig: &mut Rig, w: u16| rig.frame(w, 24).pop().unwrap();
-    assert!(bottom(&mut rig, 120).starts_with("╰─ Space play/pause · n/p next/prev · Enter play · d remove · J/K move · / filter · F view · q quit "));
+    assert!(bottom(&mut rig, 120).starts_with("╰─ Space play/pause · n/p next/prev · Enter play · d remove · J/K move · h history · / filter · F view · q quit "));
     rig.press(&[ch('2')]);
     assert!(bottom(&mut rig, 120).contains("Enter open/play · Tab pane · P play all"));
     rig.press(&[ch('/')]);
@@ -2923,6 +2923,7 @@ fn general_history_is_above_current_initially_hidden_and_cursor_survives_updates
     let now = Instant::now();
     let mut app = App::new(now, Box::new(Inline::new(Box::new(NoApp))));
     app.resize_to(100, 24);
+    app.history_open = true;
     let q = Queue {
         history: (0..30).map(|i| s(&format!("h{i}"), "Played", "Artist", "Album", 120.0)).collect(),
         current: Some(s("now", "Current", "Artist", "Album", 120.0)),
@@ -2946,7 +2947,7 @@ fn history_enter_uses_general_replay_without_changing_up_next_numbers() {
     let mut q = rig.app.queue.clone();
     q.history = vec![s("old", "Old track", "Artist", "Album", 120.0)];
     rig.app.set_queue(q, rig.now);
-    rig.press(&[key(KeyCode::Home), key(KeyCode::Home), key(KeyCode::Enter)]);
+    rig.press(&[ch('h'), key(KeyCode::Home), key(KeyCode::Home), key(KeyCode::Enter)]);
     assert_eq!(rig.last(), Request::History { index: 0 });
 }
 
@@ -2955,6 +2956,7 @@ fn short_history_queue_can_place_current_at_top_without_upcoming_tracks() {
     let now = Instant::now();
     let mut app = App::new(now, Box::new(Inline::new(Box::new(NoApp))));
     app.resize_to(100, 30);
+    app.history_open = true;
     app.set_queue(Queue {
         history: vec![s("old", "Old", "Artist", "Album", 120.0)],
         current: Some(s("now", "Current", "Artist", "Album", 120.0)),
@@ -2974,6 +2976,7 @@ fn with_history(rig: &mut Rig) {
     q.history = vec![s("h1", "Oldest Played", "Aa", "A", 100.0), s("h2", "Middle Played", "Bb", "B", 110.0), s("h3", "Just Played", "Cc", "C", 120.0)];
     q.up_next = vec![s("n1", "Next One", "Dd", "D", 130.0), s("n2", "Next Two", "Ee", "E", 140.0)];
     q.next_lap = vec![s("l1", "Lap One", "Ff", "F", 150.0), s("l2", "Lap Two", "Gg", "G", 160.0)];
+    rig.app.history_open = true; // the history folds by default; these tests look at its rows
     rig.app.set_queue(q, now);
 }
 
@@ -2982,7 +2985,7 @@ fn history_is_a_separate_zone_with_a_header_and_h_numbers_counting_up_from_the_p
     let mut rig = Rig::new("history-zone");
     with_history(&mut rig);
     rig.app.resize_to(120, 20);
-    rig.press(&[key(KeyCode::Home)]);
+    rig.press(&[key(KeyCode::Home), key(KeyCode::Home)]); // Up Next 1, then the top of the history
     let buf = draw(&rig.app, rig.now, 120, 20);
     let text = lines(&buf);
     let head = text.iter().position(|l| l.contains("⟲ History · 3 songs")).expect("the header");
@@ -3004,11 +3007,12 @@ fn the_number_column_fits_h12_and_the_up_next_numbers_stay_right_aligned() {
     let mut rig = Rig::new("history-wide-num");
     let now = rig.now;
     let mut q = Queue { current: Some(s("c", "Now", "Aa", "A", 100.0)), ..Default::default() };
+    rig.app.history_open = true;
     q.history = (0..12).map(|i| s(&format!("h{i}"), &format!("Past {i}"), "Aa", "A", 100.0)).collect();
     q.up_next = vec![s("n1", "Next One", "Dd", "D", 130.0)];
     rig.app.set_queue(q, now);
     rig.app.resize_to(120, 40);
-    rig.press(&[key(KeyCode::Home)]); // the queue opens with the history scrolled off
+    rig.press(&[key(KeyCode::Home), key(KeyCode::Home)]); // the queue opens with the history scrolled off: back to its top
     assert_eq!(rig.app.num_width(), 3);
     let text = lines(&draw(&rig.app, now, 120, 40));
     let row = |t: &str| text.iter().find(|l| l.contains(t)).cloned().unwrap();
@@ -3074,6 +3078,7 @@ fn big_history(rig: &mut Rig, hist: usize, up: usize) {
     let mut q = Queue { current: Some(s("c", "Playing Now", "Daft Punk", "RAM", 239.0)), ..Default::default() };
     q.history = (0..hist).map(|i| s(&format!("h{i}"), &format!("Past {i}"), "Aa", "A", 100.0)).collect();
     q.up_next = (0..up).map(|i| s(&format!("n{i}"), &format!("Next {i}"), "Dd", "D", 130.0)).collect();
+    rig.app.history_open = true;
     rig.app.set_queue(q, now);
 }
 
@@ -3777,6 +3782,7 @@ fn history_keeps_its_numbers_with_suggestions_in_the_queue() {
     with_autoplay(&mut rig.app, now);
     let mut q = rig.app.queue.clone();
     q.history = vec![s("h1", "Older", "Hh", "H", 100.0), s("h2", "Old", "Hh", "H", 100.0)];
+    rig.app.history_open = true;
     rig.app.set_queue(q, now);
     rig.app.resize(40);
     let up = rig.app.queue.up_next.len();
@@ -3926,4 +3932,146 @@ fn a_change_of_autoplay_elsewhere_refreshes_the_queue() {
     rig.app.set_status(st, now);
     rig.app.tick(&mut rig.client, now + Duration::from_millis(1));
     assert!(asked(&rig) > before, "the suggestions came or went with it");
+}
+
+// ------------------------------------------------------------- the history folds
+
+/// 50 songs played, the playing one and 94 in Up Next; `k` songs further along the shuffle.
+fn long_history(k: usize) -> Queue {
+    let song = |i: usize| s(&format!("s{i}"), &format!("Song {i}"), "Aa", "A", 100.0);
+    Queue { history: (k..k + 50).map(song).collect(), current: Some(song(k + 50)), up_next: (k + 51..k + 145).map(song).collect(), ..Default::default() }
+}
+
+fn long_app(w: u16, h: u16) -> (App, Instant) {
+    let now = Instant::now();
+    let mut app = App::new(now, Box::new(Inline::new(Box::new(NoApp))));
+    app.resize_to(w, h);
+    app.set_queue(long_history(0), now);
+    (app, now)
+}
+
+fn table_rows(app: &App, now: Instant, w: u16, h: u16) -> Vec<String> {
+    let text = lines(&draw(app, now, w, h));
+    let head = text.iter().position(|l| l.contains("Title") && l.contains("Artist")).expect("the table header");
+    text[head + 1..].to_vec()
+}
+
+#[test]
+fn the_history_is_folded_by_default_and_the_list_opens_on_the_playing_song() {
+    let (app, now) = long_app(100, 30);
+    assert!(!app.history_open);
+    let rows = app.rows();
+    assert_eq!(rows.iter().filter(|r| matches!(r.kind, RowKind::Past(_))).count(), 0, "no history rows");
+    assert!(rows[0].kind == RowKind::History && rows[1].playing);
+    assert!(rows[app.cursor].playing, "the cursor is on the playing song");
+    assert_eq!(app.offset, 0);
+    let t = table_rows(&app, now, 100, 30);
+    assert!(t[0].contains("⟲ History · 50 songs"), "the header is the first row: {}", t[0]);
+    assert!(t[1].contains("Song 50"), "the playing song is right under it: {}", t[1]);
+    assert!(t[2].contains("Song 51") && t[2].contains(" 1 "), "Up Next follows: {}", t[2]);
+    assert!(!t.iter().any(|l| l.contains("H50")), "no history song shows");
+}
+
+#[test]
+fn enter_or_h_unfolds_and_folds_the_history_and_its_rows_still_replay() {
+    let (mut app, now) = long_app(100, 30);
+    let mut be = NoApp;
+    let press = |app: &mut App, be: &mut NoApp, c: KeyCode| app.handle_key(key(c), be, now);
+    press(&mut app, &mut be, KeyCode::Up); // from the playing song to the header
+    assert!(app.rows()[app.cursor].kind == RowKind::History);
+    press(&mut app, &mut be, KeyCode::Enter);
+    assert!(app.history_open, "Enter on the header unfolds");
+    assert_eq!(app.rows().iter().filter(|r| matches!(r.kind, RowKind::Past(_))).count(), 50);
+    let t = table_rows(&app, now, 100, 30);
+    assert!(t[0].contains("⟲ History · 50 songs") && t[1].contains("H50") && t[1].contains("Song 0"), "{} / {}", t[0], t[1]);
+    press(&mut app, &mut be, KeyCode::Enter);
+    assert!(!app.history_open, "and folds again");
+    press(&mut app, &mut be, KeyCode::Char('h'));
+    assert!(app.history_open, "h unfolds from anywhere");
+    // The cursor stays on its song through folding: the header's own row keeps the screen row.
+    press(&mut app, &mut be, KeyCode::Down);
+    assert!(app.rows()[app.cursor].kind == RowKind::Past(50) || app.rows()[app.cursor].kind == RowKind::Past(49));
+    press(&mut app, &mut be, KeyCode::Char('h'));
+    assert!(!app.history_open && app.rows()[app.cursor].kind == RowKind::History, "folding from inside the history lands on the header");
+}
+
+#[test]
+fn an_unfolded_history_replays_through_enter() {
+    let mut rig = Rig::new("fold-enter");
+    let now = rig.now;
+    rig.app.resize_to(100, 30);
+    rig.app.set_queue(long_history(0), now);
+    rig.press(&[key(KeyCode::Up), key(KeyCode::Enter), key(KeyCode::Down), key(KeyCode::Enter)]);
+    assert_eq!(rig.last(), Request::History { index: 0 }, "the oldest first");
+}
+
+#[test]
+fn the_list_follows_the_playing_song_through_fifty_nexts_and_the_header_stays() {
+    let (mut app, now) = long_app(100, 30);
+    for k in 1..=60 {
+        app.set_queue(long_history(k), now);
+        assert!(app.rows()[app.cursor].playing, "after {k} nexts the cursor is on the playing song");
+        assert_eq!(app.offset, 0, "folded: the header stays on top");
+    }
+    let t = table_rows(&app, now, 100, 30);
+    assert!(t[0].contains("⟲ History · 50 songs") && t[1].contains("Song 110"), "{} / {}", t[0], t[1]);
+    // Unfolded, the playing song keeps its place on the screen instead of the list creeping up.
+    app.history_open = true;
+    app.set_queue(long_history(60), now);
+    let before = app.visible().iter().position(|&i| i == app.cursor).unwrap() - app.offset;
+    for k in 61..=70 {
+        app.set_queue(long_history(k), now);
+        assert!(app.rows()[app.cursor].playing);
+        assert_eq!(app.visible().iter().position(|&i| i == app.cursor).unwrap() - app.offset, before);
+    }
+}
+
+#[test]
+fn a_cursor_the_user_moved_away_stays_with_its_song() {
+    let (mut app, now) = long_app(100, 30);
+    let mut be = NoApp;
+    app.handle_key(key(KeyCode::Down), &mut be, now); // Up Next 1 ("Song 51")
+    app.set_queue(long_history(1), now);
+    assert_eq!(app.rows()[app.cursor].song.id, "s51", "not dragged onto the new playing song");
+}
+
+#[test]
+fn a_filter_searches_the_folded_history_and_clearing_it_folds_again() {
+    let (mut app, now) = long_app(100, 30);
+    let mut be = NoApp;
+    for c in "/Song 7".chars() {
+        app.handle_key(key(KeyCode::Char(c)), &mut be, now);
+    }
+    app.handle_key(key(KeyCode::Enter), &mut be, now);
+    let hits: Vec<_> = app.visible().iter().map(|&i| app.rows()[i].song.id.clone()).collect();
+    assert!(hits.contains(&"s7".to_string()) && hits.contains(&"s70".to_string()), "history songs are found: {hits:?}");
+    app.handle_key(key(KeyCode::Esc), &mut be, now);
+    assert!(app.filter.is_empty() && !app.history_open);
+    assert_eq!(app.rows().iter().filter(|r| matches!(r.kind, RowKind::Past(_))).count(), 0);
+    assert!(app.visible().contains(&app.cursor), "the cursor is on a listed row");
+    assert_eq!(app.offset.min(1), app.offset, "and the header is still within reach");
+}
+
+#[test]
+fn the_showcase_shows_the_folded_history_header_and_up_next() {
+    let (mut app, now) = long_app(160, 50);
+    let mut be = NoApp;
+    app.handle_key(key(KeyCode::Char('F')), &mut be, now);
+    if app.showcase().is_none() {
+        return;
+    }
+    let rows = app.rows();
+    assert!(rows[app.cursor].song.id == "s51", "the cursor is on Up Next 1");
+    let t = {
+        let text = lines(&draw(&app, now, 160, 50));
+        let head = text.iter().position(|l| l.contains("Title") && l.contains("Artist")).unwrap();
+        text[head + 1..].to_vec()
+    };
+    assert!(t[0].contains("⟲ History · 50 songs") && t[1].contains("▸ Up Next · 94 songs") && t[2].contains("Song 51"), "{:?}", &t[..3]);
+}
+
+#[test]
+fn the_history_key_is_in_the_hints() {
+    let mut rig = Rig::new("hints-history");
+    assert!(rig.frame(120, 24).pop().unwrap().contains("h history"));
 }

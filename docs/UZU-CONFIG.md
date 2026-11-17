@@ -140,6 +140,7 @@ The actions and their default keys:
 | `filter`         | `/`                | filter (on Search: type a new query)             |
 | `sort`           | `,`                | open the sort menu                               |
 | `playing`        | `o`                | select the playing song                          |
+| `history`        | `h`                | show or hide the played songs under History      |
 | `remove`         | `d`, `delete`      | remove the selected song from Up Next            |
 | `move_down`      | `J`                | move the selected song down in Up Next           |
 | `move_up`        | `K`                | move the selected song up in Up Next             |
@@ -147,6 +148,10 @@ The actions and their default keys:
 | `reload`         | `R`                | reload the list                                  |
 | `add`            | `a`                | Search: add the result to the queue              |
 | `play_next`      | `N`                | Search: play the result next                     |
+
+The `history` key is `h`. On the Queue screen the played songs are folded under one "⟲ History" row; `h`
+or Enter on that row unfolds them (a filter always searches them). On the Playlists and Albums screens `h`
+also switches panes, so if you change `history`, the old `h` stops switching panes there too.
 
 The `lyrics` key is `l`. On the Playlists and Albums screens, `l` also switches panes. If you
 change `lyrics`, the old `l` stops switching panes there too. The arrow keys still work.

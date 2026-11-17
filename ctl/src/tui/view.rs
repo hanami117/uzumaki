@@ -308,7 +308,7 @@ fn hints(app: &App) -> &'static [&'static str] {
         return &["Enter keep", "Esc clear", "Backspace delete"];
     }
     match app.screen {
-        Screen::Queue => &["Space play/pause", "n/p next/prev", "Enter play", "d remove", "J/K move", "/ filter", "F view", "q quit"],
+        Screen::Queue => &["Space play/pause", "n/p next/prev", "Enter play", "d remove", "J/K move", "h history", "/ filter", "F view", "q quit"],
         Screen::Playlists | Screen::Albums => &["Space play/pause", "n/p next/prev", "Enter open/play", "Tab pane", "P play all", "/ filter", ", sort", "R reload", "Esc back", "q quit"],
         Screen::Search => &["Space play/pause", "n/p next/prev", "Enter play", "/ new query", "a add", "N next", ", sort", "Esc back", "q quit"],
         Screen::Lyrics => &["Space play/pause", "n/p next/prev", "w words/lines", "j/k scroll", "g follow", "Esc back", "q quit"],
@@ -432,9 +432,10 @@ fn help_for(screen: Screen) -> &'static [(&'static str, &'static str)] {
             ("Left  Right", "seek -10 s / +10 s"),
             ("Up Down  j k", "move the selection"),
             ("PgUp PgDn", "move a page"),
-            ("Home End  g G", "first Up Next (again: top of history) / last row"),
+            ("Home End  g G", "first Up Next (again: the top) / last row"),
             ("o", "select the playing song"),
-            ("Enter", "play the selected song"),
+            ("h", "show / hide the history (Enter on its header too)"),
+            ("Enter", "play the selected song, or fold the history"),
             ("d  Delete", "remove it from Up Next"),
             ("J  K", "move it down / up"),
             ("/", "filter by title or artist"),
