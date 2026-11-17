@@ -60,9 +60,13 @@ pub enum Row {
     LibraryCache,
     MusicFolders,
     NumberKeys,
-    /// The version and licence (Settings → General → About).
+    /// The version and copyright (Settings → About).
     About,
-    /// Where to support the app (Settings → General → About).
+    /// The licences (Settings → About).
+    Licences,
+    /// getuzumaki.app and the source code (Settings → About).
+    Links,
+    /// Where to support the app (Settings → About).
     Support,
     /// A shortcut: `keys::BINDINGS[i]`.
     Binding(usize),
@@ -115,6 +119,8 @@ impl Row {
             Row::MusicFolders => "music-folders",
             Row::NumberKeys => "number-keys",
             Row::About => "about",
+            Row::Licences => "licences",
+            Row::Links => "links",
             Row::Support => "support",
         };
         format!("settings/row/{slug}")
@@ -226,8 +232,10 @@ const SPECS: &[Spec] = &[
     spec(Row::Tour, Tab::General, "Welcome tour", "Plays the welcome and the shortcuts tour again.", "onboarding intro help tutorial shortcuts keys keyboard"),
     spec(Row::ArtCache, Tab::General, "Artwork cache", "Clear the downloaded covers.", "cache caches clear disk storage space covers images"),
     spec(Row::LibraryCache, Tab::General, "Library cache", "Clear the copy of your library.", "cache caches clear disk storage space offline"),
-    spec(Row::About, Tab::General, "About Uzumaki", "Version and licence.", "version about licence license gpl website copyright"),
-    spec(Row::Support, Tab::General, "Support Uzumaki", "Uzumaki is free. You can support it on Ko-fi.", "donate donation tip coffee ko-fi kofi sponsor heart"),
+    spec(Row::About, Tab::About, "About Uzumaki", "Version, build and copyright.", "version build about copyright credits"),
+    spec(Row::Licences, Tab::About, "Licences", "GPL-3.0-or-later, castLabs Electron, symphonia, rodio, Rune, Inter.", "licence license licences licenses gpl gnu free software castlabs electron widevine symphonia rodio inter plex fonts third party not affiliated apple"),
+    spec(Row::Links, Tab::About, "Links", "getuzumaki.app and the source code.", "website site getuzumaki.app github source code links repository"),
+    spec(Row::Support, Tab::About, "Support Uzumaki", "Uzumaki is free. You can support it on Ko-fi.", "donate donation tip coffee ko-fi kofi sponsor heart"),
     spec(Row::MusicFolders, Tab::Local, "Music folders", "Songs in these folders (and their subfolders) show up under Local Files.", "folder directory files flac mp3 rescan scan import"),
     spec(Row::NumberKeys, Tab::Keyboard, "Number keys 1–9", "Your sidebar pins or pages.", "shortcuts keys hotkeys keybindings pins pages ctrl alt digits"),
 ];

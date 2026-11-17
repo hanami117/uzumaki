@@ -6,8 +6,14 @@ takes each release's notes from its section here.
 ## [Unreleased]
 
 ### Added
-- **Support Uzumaki** (Settings → General, under About): a quiet heart, one line and a "Support on Ko-fi" button that
+- **Support Uzumaki** (Settings → About): a quiet heart, one line and a "Support on Ko-fi" button that
   opens https://ko-fi.com/hanami117 in your browser. No popups, no reminders. Also in Settings search ("donate", "ko-fi").
+
+### Changed
+- **Settings has its own About page** (last in the list, after Keyboard), moved out of General: the app icon, the
+  version and build, the copyright, the licences (GPL-3.0-or-later; castLabs Electron, symphonia, rodio, Rune and the
+  fonts keep their own; not affiliated with Apple), links to getuzumaki.app and the source code, and the Support card.
+  Settings search finds it ("version", "licence", "github", "donate").
 
 ## [0.2.3] - 2026-11-17
 

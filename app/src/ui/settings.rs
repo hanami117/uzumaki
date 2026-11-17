@@ -22,10 +22,12 @@ pub enum Tab {
     Local,
     /// Every keyboard shortcut (`ui::keys::BINDINGS`).
     Keyboard,
+    /// Version, licences, links and Support.
+    About,
 }
 
 impl Tab {
-    pub(super) const ALL: [Tab; 6] = [Tab::Account, Tab::Playback, Tab::Appearance, Tab::General, Tab::Local, Tab::Keyboard];
+    pub(super) const ALL: [Tab; 7] = [Tab::Account, Tab::Playback, Tab::Appearance, Tab::General, Tab::Local, Tab::Keyboard, Tab::About];
 
     fn info(self) -> (&'static str, &'static str, &'static rune::Icon) {
         match self {
@@ -34,7 +36,8 @@ impl Tab {
             Tab::Appearance => ("settings/tab/appearance", "Appearance", &icons::IMAGE),
             Tab::General => ("settings/tab/general", "General", &icons::GEAR),
             Tab::Local => ("settings/tab/local", "Local Files", &icons::LOCAL_FILES),
-            Tab::Keyboard => ("settings/tab/keyboard", "Keyboard", &icons::KEYBOARD)
+            Tab::Keyboard => ("settings/tab/keyboard", "Keyboard", &icons::KEYBOARD),
+            Tab::About => ("settings/tab/about", "About", &icons::INFO),
         }
     }
 
@@ -701,16 +704,24 @@ fn row_el(r: &Rx, id: Row) -> El {
             };
             setting(narrow, if r.search { "Check for updates now" } else { "Updates" }, Some(note), button)
         }
-        Row::About => setting(
-            narrow,
-            if r.search { "About Uzumaki" } else { "Uzumaki" },
-            Some(format!("Version {} ({}{}). {}. Free software under the GNU General Public License, version 3 or later.", crate::VERSION, crate::BUILD, uzumaki_ctl::dev_suffix(), crate::COPYRIGHT)),
-            small_button("settings/website", "getuzumaki.app").on_press_tx(|s: &mut State, tx: &mut Tx| {
-                if tx.open_url("https://getuzumaki.app").is_err() {
-                    s.toast = Some("Couldn't open the link.".into());
-                }
-            }),
-        ),
+        Row::About => {
+            let version = format!("Version {} (build {}{})", crate::VERSION, crate::BUILD, uzumaki_ctl::dev_suffix());
+            row().w_full().py(16.0).gap(16.0).items_start()
+                .child(super::widgets::logo_tile(56.0))
+                .child(
+                    col().grow(1.0).min_w(0.0).gap(4.0)
+                        .child(text("Uzumaki").font(rune::TextStyle::new(17.0, 600.0)).color(PAL.text))
+                        .child(text(version).font(SMALL13.features("'tnum' 1")).color(PAL.muted).wrap())
+                        .child(text("A native Apple Music client for Linux and macOS.").font(BODY14).color(PAL.text2).wrap().mt(4.0))
+                        .child(text(format!("{}. Free software under the GNU General Public License, version 3 or later.", crate::COPYRIGHT)).font(SMALL13).color(PAL.dim).wrap()),
+                )
+        }
+        Row::Licences => col().w_full().py(16.0).gap(6.0)
+            .child(text("Licences").font(BODY14).color(PAL.text))
+            .child(text(LICENCES).font(SMALL13).color(PAL.dim).wrap()),
+        Row::Links => row().w_full().py(16.0).gap(20.0).center_y()
+            .child(link("settings/website", "getuzumaki.app", "https://getuzumaki.app"))
+            .child(link("settings/source", "Source code (GitHub)", "https://github.com/hanami117/uzumaki")),
         Row::Support => {
             let title = text("Support Uzumaki").font(BODY14).color(PAL.text).wrap();
             let title = if r.search { title } else { row().gap(8.0).center_y().child(icon(&icons::HEART, 15.0).color(PAL.accent)).child(title) };
@@ -982,12 +993,38 @@ fn general(r: &Rx) -> Vec<El> {
     v.push(text("Caches").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
     v.extend(rows(r, &[Row::ArtCache, Row::LibraryCache]));
     v.push(text("Cleared files are downloaded again when needed.").font(SMALL13).color(PAL.dim).wrap().mt(4.0));
-    v.push(el().h(14.0));
-    v.push(divider());
-    v.push(text("About").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
-    v.extend(rows(r, &[Row::About, Row::Support]));
     v
 }
+
+/// Settings → About: the header card (icon, name, version, licence), the licences, the links, and
+/// the Support card below.
+fn about(r: &Rx) -> Vec<El> {
+    let mut v: Vec<El> = rows(r, &[Row::About, Row::Licences, Row::Links]);
+    v.extend(item(r, Row::Support).map(|e| card(e).mt(20.0)));
+    v
+}
+
+/// A bordered card around one row (About's Support).
+fn card(inner: El) -> El {
+    col().w_full().px(16.0).radius(12.0).fill(PAL.field).border(1.0, PAL.field_border).child(inner)
+}
+
+/// An accent text link that opens `url` in the browser.
+fn link(key: &'static str, label: &'static str, url: &'static str) -> El {
+    text(label).key(key).role("link").label(label).focusable(true).font(rune::TextStyle::new(13.0, 600.0)).color(PAL.accent)
+        .cursor(Cursor::Pointer)
+        .on_press_tx(move |s: &mut State, tx: &mut Tx| {
+            if tx.open_url(url).is_err() {
+                s.toast = Some("Couldn't open the link.".into());
+            }
+        })
+}
+
+/// About's licence text.
+const LICENCES: &str = "Uzumaki is free software under the GNU General Public License, version 3 or later (GPL-3.0-or-later). \
+Playback in Apple Music mode runs in a hidden castLabs Electron window, which brings Widevine; local files play with \
+symphonia and rodio. The interface is drawn with Rune, in Inter and IBM Plex Mono. Each keeps its own licence: see \
+THIRD_PARTY_NOTICES.md in the source. Uzumaki is not affiliated with Apple.";
 
 fn local(r: &Rx) -> Vec<El> {
     let lib = &r.s.local_lib;
@@ -1146,6 +1183,7 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
             Tab::General => general(&r),
             Tab::Local => local(&r),
             Tab::Keyboard => keyboard(&r),
+            Tab::About => about(&r),
         };
         (tab.title(), items)
     };
@@ -1501,6 +1539,18 @@ mod tests {
         s.settings.music_source = MusicSource::LocalOnly;
         set_query(&mut s, "lyrics");
         assert!(results(&s).iter().all(|(t, _)| *t == Tab::Keyboard), "{:?}", results(&s));
+    }
+
+    #[test]
+    fn about_is_the_last_page_and_search_leads_to_it() {
+        assert_eq!(Tab::ALL.last(), Some(&Tab::About));
+        let mut s = State::offline();
+        for (q, row) in [("donate", Row::Support), ("licence", Row::Licences), ("github", Row::Links), ("copyright", Row::About)] {
+            set_query(&mut s, q);
+            assert!(results(&s).contains(&(Tab::About, row)), "{q}: {:?}", results(&s));
+        }
+        set_query(&mut s, "ko-fi");
+        assert!(results(&s).iter().all(|(t, _)| *t == Tab::About), "General holds none of them now");
     }
 
     #[test]

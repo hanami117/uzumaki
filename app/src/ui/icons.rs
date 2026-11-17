@@ -218,6 +218,7 @@ line_icon!(
     "M15.2 9.2a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"
 );
 
+line_icon!(INFO, "cad-info", "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z", "M12 11v5.2", "M12 8h.01");
 line_icon!(
     KEYBOARD,
     "cad-keyboard",
