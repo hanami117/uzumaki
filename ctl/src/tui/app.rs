@@ -749,17 +749,31 @@ impl App {
             self.set_message("No songs played yet", now);
             return;
         }
-        let old_pos = self.visible().iter().position(|&i| i == self.cursor).unwrap_or(0);
-        let screen_row = old_pos.saturating_sub(self.offset);
-        let on_past = self.rows().get(self.cursor).is_some_and(|r| matches!(r.kind, RowKind::Past(_)));
+        // The playing song is the anchor: it stays on the same screen row while the history appears
+        // above it (H1 right over it) or goes away.
+        let playing_row = |app: &App| app.rows().iter().position(|r| r.playing).and_then(|c| app.visible().iter().position(|&i| i == c));
+        let anchor = playing_row(self).or_else(|| self.visible().iter().position(|&i| i == self.cursor));
+        let screen_row = anchor.map(|p| p.saturating_sub(self.offset));
+        let on_row = |app: &App, kind: fn(RowKind) -> bool| app.rows().get(app.cursor).is_some_and(|r| kind(r.kind));
+        let leaving = on_row(self, |k| matches!(k, RowKind::Past(_)));
+        let on_header = on_row(self, |k| k == RowKind::History);
         self.history_open = !self.history_open;
-        if on_past && !self.history_listed() {
-            self.set_cursor(0);
+        let playing = self.rows().iter().position(|r| r.playing);
+        if (leaving && !self.history_listed()) || (on_header && self.history_listed()) {
+            // Folded from inside the history, or unfolded from its header: onto the playing song.
+            match playing {
+                Some(p) => self.set_cursor(p),
+                None => self.set_cursor(0),
+            }
         } else {
             self.resolve_cursor();
         }
-        let pos = self.visible().iter().position(|&i| i == self.cursor).unwrap_or(0);
-        self.offset = pos.saturating_sub(screen_row);
+        if let (Some(row), Some(p)) = (screen_row, playing_row(self)) {
+            self.offset = p.saturating_sub(row);
+        } else {
+            let pos = self.visible().iter().position(|&i| i == self.cursor).unwrap_or(0);
+            self.offset = pos.saturating_sub(screen_row.unwrap_or(0));
+        }
         self.fit();
         self.keep_cursor_shown();
     }

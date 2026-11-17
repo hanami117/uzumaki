@@ -9,7 +9,8 @@ takes each release's notes from its section here.
 - **`uzu`: the Queue screen no longer ends up in the History.** The played songs are folded under one "⟲ History · n songs"
   row (Enter on it, or `h`, unfolds them; remappable as `history` in `[keys]`), and the cursor follows the playing song
   when the next one starts, instead of staying with the old song as it slid up the History (after about 50 Next presses
-  the list sat on the oldest song with the playing song and Up Next far below the screen).
+  the list sat on the oldest song with the playing song and Up Next far below the screen). Unfolding keeps the playing song
+  where it is on the screen with H1 right above it (k and the wheel go back through the latest played songs).
 
 ## [0.2.2] - 2026-11-16
 

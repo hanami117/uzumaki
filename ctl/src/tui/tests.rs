@@ -3982,17 +3982,16 @@ fn enter_or_h_unfolds_and_folds_the_history_and_its_rows_still_replay() {
     press(&mut app, &mut be, KeyCode::Enter);
     assert!(app.history_open, "Enter on the header unfolds");
     assert_eq!(app.rows().iter().filter(|r| matches!(r.kind, RowKind::Past(_))).count(), 50);
+    assert!(app.rows()[app.cursor].playing, "from the header the cursor goes to the playing song, H1 above it");
     let t = table_rows(&app, now, 100, 30);
-    assert!(t[0].contains("⟲ History · 50 songs") && t[1].contains("H50") && t[1].contains("Song 0"), "{} / {}", t[0], t[1]);
-    press(&mut app, &mut be, KeyCode::Enter);
-    assert!(!app.history_open, "and folds again");
+    assert!(t[0].contains("H1") && t[1].contains("Song 50"), "{} / {}", t[0], t[1]);
     press(&mut app, &mut be, KeyCode::Char('h'));
-    assert!(app.history_open, "h unfolds from anywhere");
-    // The cursor stays on its song through folding: the header's own row keeps the screen row.
-    press(&mut app, &mut be, KeyCode::Down);
-    assert!(app.rows()[app.cursor].kind == RowKind::Past(50) || app.rows()[app.cursor].kind == RowKind::Past(49));
+    assert!(!app.history_open, "h folds again");
     press(&mut app, &mut be, KeyCode::Char('h'));
-    assert!(!app.history_open && app.rows()[app.cursor].kind == RowKind::History, "folding from inside the history lands on the header");
+    press(&mut app, &mut be, KeyCode::Up);
+    assert!(app.rows()[app.cursor].kind == RowKind::Past(1));
+    press(&mut app, &mut be, KeyCode::Enter); // on a history row Enter replays (no fold)
+    assert!(app.history_open);
 }
 
 #[test]
@@ -4001,8 +4000,12 @@ fn an_unfolded_history_replays_through_enter() {
     let now = rig.now;
     rig.app.resize_to(100, 30);
     rig.app.set_queue(long_history(0), now);
-    rig.press(&[key(KeyCode::Up), key(KeyCode::Enter), key(KeyCode::Down), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::History { index: 0 }, "the oldest first");
+    rig.press(&[ch('h'), key(KeyCode::Up), key(KeyCode::Enter)]);
+    assert_eq!(rig.last(), Request::History { index: 49 }, "H1, the newest, is the last entry");
+    rig.press(&[ch('G'), ch('g')]);
+    assert_eq!(rig.app.rows()[rig.app.cursor].song.id, "s51", "first g: Up Next 1");
+    rig.press(&[ch('g'), key(KeyCode::Enter)]);
+    assert_eq!(rig.last(), Request::History { index: 0 }, "the top of the list: the oldest");
 }
 
 #[test]
@@ -4104,4 +4107,44 @@ fn a_uzu_left_open_keeps_the_playing_song_in_view_as_the_queue_changes_under_it(
     assert!(app.rows()[app.cursor].playing && app.offset == 0, "cursor {} offset {}", app.cursor, app.offset);
     let t = table_rows(&app, now, 100, 30);
     assert!(t[0].contains("⟲ History · 50 songs") && t[1].contains("Other 50"), "{} / {}", t[0], t[1]);
+}
+
+#[test]
+fn unfolding_keeps_the_cursor_and_the_playing_row_where_they_are() {
+    let (mut app, now) = long_app(100, 30);
+    let mut be = NoApp;
+    let screen_of = |app: &App| app.visible().iter().position(|&i| app.rows()[i].playing).unwrap() - app.offset;
+    let before = screen_of(&app);
+    app.handle_key(key(KeyCode::Char('h')), &mut be, now);
+    assert!(app.history_open);
+    assert!(app.rows()[app.cursor].playing, "the cursor stays on the playing song");
+    assert_eq!(screen_of(&app), before, "and the playing row does not move");
+    let t = table_rows(&app, now, 100, 30);
+    assert!(t[before - 1].contains("H1") && t[before - 1].contains("Song 49"), "H1 right above it: {}", t[before - 1]);
+    assert!(t[0].contains("H") && !t[0].contains("H50"), "the oldest is far above, not on top: {}", t[0]);
+    app.handle_key(key(KeyCode::Up), &mut be, now);
+    assert!(app.rows()[app.cursor].kind == RowKind::Past(1), "k from the playing song lands on H1");
+    app.handle_key(key(KeyCode::Up), &mut be, now);
+    assert!(app.rows()[app.cursor].kind == RowKind::Past(2));
+    app.handle_key(key(KeyCode::Char('h')), &mut be, now);
+    assert!(!app.history_open && app.rows()[app.cursor].playing, "folding from inside the history returns to the playing song");
+}
+
+#[test]
+fn the_wheel_and_clicks_work_in_the_unfolded_history() {
+    let mut rig = Rig::new("fold-mouse");
+    let now = rig.now;
+    rig.app.resize_to(100, 30);
+    rig.app.set_queue(long_history(0), now);
+    rig.press(&[ch('h')]);
+    let first = Screen::Queue.body_top(30);
+    let ev = |kind, row| MouseEvent { kind, column: 5, row, modifiers: KeyModifiers::NONE };
+    rig.app.handle_mouse(ev(MouseEventKind::ScrollUp, first + 3), &mut rig.client, rig.now);
+    assert!(rig.app.rows()[rig.app.cursor].kind == RowKind::Past(3), "the wheel goes back through the latest played songs");
+    // The list scrolled to H3 at its top: H2, then H1 under it.
+    let click = |row| ev(MouseEventKind::Down(MouseButton::Left), row);
+    rig.app.handle_mouse(click(first + 2), &mut rig.client, rig.now);
+    assert!(rig.app.rows()[rig.app.cursor].kind == RowKind::Past(1));
+    rig.app.handle_mouse(click(first + 2), &mut rig.client, rig.now + Duration::from_millis(100));
+    assert_eq!(rig.last(), Request::History { index: 49 }, "a double click replays it");
 }
