@@ -356,6 +356,22 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
       <h3>Your whole library, fast</h3>
       <p>Library, albums, artists, playlists, Favourite Songs, New, Radio and Made for You. The library is kept on disk, so it opens at once and you can browse it offline. Create and edit playlists, mark favourites, and pick light or dark.</p>
     </li>
+    <li class="reveal wide" id="discord">
+      <div>
+        <h3>Show it on Discord</h3>
+        <p>An optional setting, off by default: Settings &rarr; General &rarr; Show on Discord. Your Discord profile then says &ldquo;Listening to Uzumaki&rdquo; with the title, the artist, the cover and a progress bar. It works for Apple Music songs and local files, on macOS and Linux (Flatpak and Snap Discord too). It needs the Discord desktop app on the same computer; the web version can&rsquo;t show it.</p>
+      </div>
+      <!-- MOCK, not a real screenshot: made-up name, no real avatar or account. -->
+      <div class="dmock" role="img" aria-label="A mock-up of a Discord profile card: Listening to Uzumaki, a song title, an artist, a cover and a progress bar.">
+        <p class="dm-h">Listening to Uzumaki</p>
+        <div class="dm-body">
+          <span class="dm-cover"><img src="assets/icon.svg" alt="" width="64" height="64" loading="lazy"></span>
+          <div class="dm-t"><b>Song title</b><span>Artist name</span>
+            <span class="dm-bar"><i></i></span>
+            <span class="dm-time"><span>1:12</span><span>3:04</span></span></div>
+        </div>
+      </div>
+    </li>
   </ul>
 
   <div class="gallery stagger">
@@ -694,6 +710,11 @@ Juniper Vale - Small Rooms
   <details class="reveal">
     <summary>Do media keys and desktop widgets work?</summary>
     <p>Yes. On Linux Uzumaki registers with MPRIS, so media keys, KDE and GNOME widgets and tools like playerctl see it, whether an Apple Music song or a local file is playing. On macOS it uses the system's Now Playing controls.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>Can it show what I&rsquo;m playing on Discord?</summary>
+    <p>Yes. It&rsquo;s an optional setting, off by default (Settings &rarr; General &rarr; Show on Discord). Your profile then shows &ldquo;Listening to Uzumaki&rdquo; with the title, artist, cover and a progress bar, for Apple Music songs and local files. It needs the Discord desktop app on the same computer, on macOS or Linux (Flatpak and Snap too). Uzumaki talks to Discord locally and has no account or login for this. You can hide the song title, or the cover, if you prefer.</p>
   </details>
 
   <details class="reveal">
