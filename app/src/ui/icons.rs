@@ -170,6 +170,8 @@ line_icon!(
     "cad-favorites",
     "M12 4l2.5 5.2 5.6.8-4.1 4 1 5.6L12 16.9l-5 2.7 1-5.6-4.1-4 5.6-.8z"
 );
+// A heart outline (Settings → Support).
+stroke_icon!(HEART, "cad-heart", "M12 20.2 4.9 13.3a4.7 4.7 0 0 1 0-6.6 4.6 4.6 0 0 1 6.6 0l.5.5.5-.5a4.6 4.6 0 0 1 6.6 0 4.7 4.7 0 0 1 0 6.6z");
 line_icon!(
     PLAYLIST,
     "cad-playlist",

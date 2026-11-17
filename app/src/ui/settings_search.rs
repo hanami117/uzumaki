@@ -62,6 +62,8 @@ pub enum Row {
     NumberKeys,
     /// The version and licence (Settings → General → About).
     About,
+    /// Where to support the app (Settings → General → About).
+    Support,
     /// A shortcut: `keys::BINDINGS[i]`.
     Binding(usize),
 }
@@ -113,6 +115,7 @@ impl Row {
             Row::MusicFolders => "music-folders",
             Row::NumberKeys => "number-keys",
             Row::About => "about",
+            Row::Support => "support",
         };
         format!("settings/row/{slug}")
     }
@@ -224,6 +227,7 @@ const SPECS: &[Spec] = &[
     spec(Row::ArtCache, Tab::General, "Artwork cache", "Clear the downloaded covers.", "cache caches clear disk storage space covers images"),
     spec(Row::LibraryCache, Tab::General, "Library cache", "Clear the copy of your library.", "cache caches clear disk storage space offline"),
     spec(Row::About, Tab::General, "About Uzumaki", "Version and licence.", "version about licence license gpl website copyright"),
+    spec(Row::Support, Tab::General, "Support Uzumaki", "Uzumaki is free. You can support it on Ko-fi.", "donate donation tip coffee ko-fi kofi sponsor heart"),
     spec(Row::MusicFolders, Tab::Local, "Music folders", "Songs in these folders (and their subfolders) show up under Local Files.", "folder directory files flac mp3 rescan scan import"),
     spec(Row::NumberKeys, Tab::Keyboard, "Number keys 1–9", "Your sidebar pins or pages.", "shortcuts keys hotkeys keybindings pins pages ctrl alt digits"),
 ];

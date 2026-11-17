@@ -5,6 +5,10 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **Support Uzumaki** (Settings → General, under About): a quiet heart, one line and a "Support on Ko-fi" button that
+  opens https://ko-fi.com/hanami117 in your browser. No popups, no reminders. Also in Settings search ("donate", "ko-fi").
+
 ## [0.2.3] - 2026-11-17
 
 Show what you play on Discord (off by default), and fixes for forced themes on macOS and the `uzu` Queue screen. You need an Apple Music subscription.

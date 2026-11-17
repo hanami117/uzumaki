@@ -66,6 +66,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The build number (the `BUILD` file; see `uzumaki_ctl::BUILD`). It goes up when a package is
 /// rebuilt without code changes; the update check compares (version, build).
 pub const BUILD: u32 = uzumaki_ctl::BUILD;
+/// Where Settings → Support sends you.
+pub const SUPPORT_URL: &str = "https://ko-fi.com/hanami117";
 /// The copyright line (Settings → General → About; the macOS About panel and Info.plist spell it out too).
 pub const COPYRIGHT: &str = "© 2026 Thomas Lonigro";
 

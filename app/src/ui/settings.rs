@@ -241,7 +241,12 @@ fn divider() -> El {
 
 /// A settings row: title + description left, control right (below them when `narrow`).
 fn setting(narrow: bool, title: &str, desc: Option<String>, control: El) -> El {
-    let mut info = col().gap(4.0).grow(1.0).min_w(0.0).child(text(title.to_string()).font(BODY14).color(PAL.text).wrap());
+    setting_titled(narrow, text(title.to_string()).font(BODY14).color(PAL.text).wrap(), desc, control)
+}
+
+/// `setting` with a ready-made title element (the Support row's heart).
+fn setting_titled(narrow: bool, title: El, desc: Option<String>, control: El) -> El {
+    let mut info = col().gap(4.0).grow(1.0).min_w(0.0).child(title);
     if let Some(d) = desc {
         info = info.child(text(d).font(SMALL13).color(PAL.dim).wrap());
     }
@@ -706,6 +711,20 @@ fn row_el(r: &Rx, id: Row) -> El {
                 }
             }),
         ),
+        Row::Support => {
+            let title = text("Support Uzumaki").font(BODY14).color(PAL.text).wrap();
+            let title = if r.search { title } else { row().gap(8.0).center_y().child(icon(&icons::HEART, 15.0).color(PAL.accent)).child(title) };
+            setting_titled(
+                narrow,
+                title,
+                Some("Uzumaki is free and built in my spare time. If you enjoy it, you can support it on Ko-fi.".to_string()),
+                small_button("settings/support", "Support on Ko-fi").on_press_tx(|s: &mut State, tx: &mut Tx| {
+                    if tx.open_url(crate::SUPPORT_URL).is_err() {
+                        s.toast = Some("Couldn't open the link.".into());
+                    }
+                }),
+            )
+        }
         Row::Tour => setting(
             narrow,
             "Welcome tour",
@@ -966,7 +985,7 @@ fn general(r: &Rx) -> Vec<El> {
     v.push(el().h(14.0));
     v.push(divider());
     v.push(text("About").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
-    v.extend(rows(r, &[Row::About]));
+    v.extend(rows(r, &[Row::About, Row::Support]));
     v
 }
 
