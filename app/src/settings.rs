@@ -315,6 +315,9 @@ pub struct Settings {
     /// A desktop notification (title, artist and album, cover) when a new song starts while
     /// the window isn't in front (Settings → General; `notify.rs`). Off by default.
     pub notify_song_change: bool,
+    /// Discord Rich Presence: "Listening to …" on the user's Discord profile (Settings → General;
+    /// `discord/`). Off by default.
+    pub discord: crate::discord::Prefs,
     /// Once per UTC day, ask updates.getuzumaki.app for the latest version (sending the version,
     /// OS, architecture and install channel, which the server counts) and show a notice when a
     /// newer one is out (Settings → General; `update.rs`). On by default; off sends nothing.
@@ -381,6 +384,7 @@ impl Default for Settings {
             startup_animation: true,
             animated_artwork: AnimatedArtwork::Always,
             notify_song_change: false,
+            discord: Default::default(),
             check_updates: true,
             resume_playback: true,
             autoplay: true,
@@ -569,6 +573,19 @@ mod tests {
         assert!(!s.notify_song_change);
         let on: Settings = serde_json::from_str(r#"{"notify_song_change":true}"#).unwrap();
         assert!(on.notify_song_change);
+    }
+
+    #[test]
+    fn discord_is_off_by_default_with_its_choices_and_old_files_load() {
+        let d = Settings::default().discord;
+        assert!(!d.enabled && d.artwork && d.buttons && d.hide_when_paused && !d.hide_title && d.client_id.is_none());
+        let old: Settings = serde_json::from_str(r#"{"tray_icon":false}"#).unwrap();
+        assert_eq!(old.discord, d);
+        let s: Settings = serde_json::from_str(r#"{"discord":{"enabled":true,"hide_title":true,"client_id":"123456789012345678"}}"#).unwrap();
+        assert!(s.discord.enabled && s.discord.hide_title && s.discord.artwork, "unnamed choices keep their defaults");
+        assert_eq!(s.discord.client_id.as_deref(), Some("123456789012345678"));
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.discord, s.discord);
     }
 
     #[test]

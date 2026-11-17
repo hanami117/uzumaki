@@ -162,6 +162,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("settings-sign-out-confirm", settings_sign_out_confirm),
     ("settings-playback", settings_playback),
     ("settings-general", settings_general),
+    ("settings-discord", |s| { settings_discord(s); s.settings.discord.enabled = true; s.settings.discord.hide_title = true }),
+    ("settings-discord-off", settings_discord),
     ("settings-login", settings_login),
     ("settings-login-approval", |s| { settings_login(s); s.login.needs_approval = true }),
     ("settings-login-unavailable", |s| { settings_general(s); s.login = crate::login::Login::unavailable("Only in the app (Uzumaki.app). This copy runs from a build folder.") }),
@@ -1075,6 +1077,14 @@ fn settings_general(s: &mut State) {
     s.settings.tray_icon = true;
     s.cache_sizes = Some(crate::state::CacheSizes { art: 123 * 1024 * 1024, library: 4_404_019 });
     s.ui.settings.open = Some(crate::ui::settings::Tab::General);
+}
+
+/// Settings, searched for "discord": the Show on Discord rows (an app id configured, so the note
+/// has no "no application" line).
+fn settings_discord(s: &mut State) {
+    settings_general(s);
+    s.settings.discord.client_id = Some("123456789012345678".into());
+    crate::ui::settings::set_query(s, "discord");
 }
 
 /// Settings → General with both start-at-login switches on.

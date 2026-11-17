@@ -236,6 +236,7 @@ impl State {
         if self.hooks.observe(Some(&song), self.playback.state) {
             self.notifier.song_changed(&song, self.playback.state);
         }
+        self.discord_sync();
         if song.is_local() {
             self.start_local(&song, at);
         } else {

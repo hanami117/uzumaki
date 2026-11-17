@@ -191,6 +191,8 @@ How you update depends on how you installed it. Quit Uzumaki first.
 - **One copy at a time:** when you start Uzumaki again, the running one comes to the front.
 - **Song notifications:** Settings → General → Notify on song change. They show only while the window is
   hidden or behind other apps.
+- **Discord:** Settings → General → Show on Discord shows the song you are playing on your Discord profile, like
+  Spotify does (off by default; see [docs/DISCORD.md](docs/DISCORD.md)).
 - **Hooks:** put an executable named `on-song-change` or `on-state-change` in `~/.config/uzumaki/hooks/`.
   Uzumaki runs it and gives it the song's details in environment variables. See [docs/hooks.md](docs/hooks.md).
 
@@ -259,6 +261,9 @@ For the details, see [docs/bridge-protocol.md](docs/bridge-protocol.md).
   check of a week and of a month. The server adds one to a counter for that day and that combination; those
   daily counts are all it keeps: no IP address, no install or device id, no cookies. The code is in
   [server/update](server/update). You can turn the check off in Settings → General; then nothing is sent.
+- **Show on Discord** (off by default) hands the song you are playing to the Discord app on your own computer,
+  through its local socket; Uzumaki itself opens no connection for it, and Discord shows the card to others
+  (and fetches the cover from Apple). See [docs/DISCORD.md](docs/DISCORD.md).
 - **Covers and lyrics** come from Apple, the same as in the web player.
 
 ## Build from source and contribute

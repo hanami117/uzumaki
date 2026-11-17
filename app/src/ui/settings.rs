@@ -303,6 +303,7 @@ fn row_el(r: &Rx, id: Row) -> El {
     let (s, narrow) = (r.s, r.narrow);
     let ap = &s.settings.appearance;
     let bg_on = ap.source != BgSource::Off;
+    let d = &s.settings.discord;
     match id {
         Row::MusicSource => music_source(s, narrow),
         Row::AppleMusic => apple_music(s, narrow),
@@ -641,6 +642,37 @@ fn row_el(r: &Rx, id: Row) -> El {
             Some("Shows the song and its cover when a new one starts while Uzumaki isn't in front.".to_string()),
             switch("settings/notify", "Notify on song change", s.settings.notify_song_change, true, |s, on| s.set_notify_song_change(on)),
         ),
+        Row::Discord => {
+            let mut note = super::settings_search::DISCORD.to_string();
+            if !d.available() {
+                note.push_str(" This copy has no Discord application yet (see docs/DISCORD.md), so it shows nothing.");
+            }
+            setting(narrow, "Show on Discord", Some(note), switch("settings/discord", "Show on Discord", d.enabled, true, |s, on| s.set_discord_enabled(on)))
+        }
+        Row::DiscordArtwork => setting(
+            narrow,
+            "Show artwork",
+            Some("The album cover on your Discord card. Discord fetches it from Apple. Off: the Uzumaki icon.".to_string()),
+            switch("settings/discord-artwork", "Show artwork", d.artwork, d.enabled, |s, on| s.set_discord_artwork(on)),
+        ),
+        Row::DiscordButtons => setting(
+            narrow,
+            "Show buttons",
+            Some("An \"Open in Apple Music\" button on your Discord card, for songs from Apple Music.".to_string()),
+            switch("settings/discord-buttons", "Show buttons", d.buttons, d.enabled, |s, on| s.set_discord_buttons(on)),
+        ),
+        Row::DiscordHidePaused => setting(
+            narrow,
+            "Hide when paused",
+            Some("Takes the card off your profile while the music is paused or stopped. Off: it stays, without the progress bar.".to_string()),
+            switch("settings/discord-hide-paused", "Hide when paused", d.hide_when_paused, d.enabled, |s, on| s.set_discord_hide_paused(on)),
+        ),
+        Row::DiscordHideTitle => setting(
+            narrow,
+            "Hide song title",
+            Some("Shows \"Listening to music\" and the artist, not the song, the album or a link to it.".to_string()),
+            switch("settings/discord-hide-title", "Hide song title", d.hide_title, d.enabled, |s, on| s.set_discord_hide_title(on)),
+        ),
         Row::CheckUpdates => setting(
             narrow,
             "Check for updates",
@@ -926,7 +958,7 @@ fn cache_row(s: &State, narrow: bool, kind: CacheKind, title: &str, key: &'stati
 }
 
 fn general(r: &Rx) -> Vec<El> {
-    let mut v = rows(r, &[Row::OpenOn, Row::StartAtLogin, Row::StartHidden, Row::Tray, Row::CloseToTray, Row::Notify, Row::CheckUpdates, Row::CheckNow, Row::Tour]);
+    let mut v = rows(r, &[Row::OpenOn, Row::StartAtLogin, Row::StartHidden, Row::Tray, Row::CloseToTray, Row::Notify, Row::Discord, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle, Row::CheckUpdates, Row::CheckNow, Row::Tour]);
     v.push(divider());
     v.push(text("Caches").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
     v.extend(rows(r, &[Row::ArtCache, Row::LibraryCache]));
@@ -1418,6 +1450,30 @@ mod tests {
         assert_eq!(st.open, Some(Tab::General));
         assert!(st.query.text.is_empty());
         assert_eq!(st.flash, Some(Row::StartHidden), "its first match (the background start names the tray)");
+    }
+
+    #[test]
+    fn show_on_discord_is_found_by_search_and_its_choices_wait_for_the_switch() {
+        let mut rt = window();
+        rt.update(|s, _| set_query(s, "discord"));
+        settle(&mut rt, 10);
+        let found: Vec<Row> = results(&rt.state).iter().map(|(_, r)| *r).collect();
+        for r in [Row::Discord, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle] {
+            assert!(found.contains(&r), "{r:?} in {found:?}");
+        }
+        assert!(!rt.state.settings.discord.enabled, "off by default");
+        click(&mut rt, "settings/discord-hide-title");
+        assert!(!rt.state.settings.discord.hide_title, "dimmed while the switch is off");
+        click(&mut rt, "settings/discord");
+        assert!(rt.state.settings.discord.enabled);
+        click(&mut rt, "settings/discord-hide-title");
+        click(&mut rt, "settings/discord-artwork");
+        click(&mut rt, "settings/discord-hide-paused");
+        click(&mut rt, "settings/discord-buttons");
+        let d = &rt.state.settings.discord;
+        assert!(d.hide_title && !d.artwork && !d.hide_when_paused && !d.buttons, "{d:?}");
+        click(&mut rt, "settings/discord");
+        assert!(!rt.state.settings.discord.enabled);
     }
 
     #[test]

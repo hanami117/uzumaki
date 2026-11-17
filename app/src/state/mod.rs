@@ -20,6 +20,7 @@ use crate::settings::{IconVariant, Pin, PinKind, Settings, StartPage};
 use crate::tray::TrayCtl;
 
 mod actions;
+mod discord;
 pub mod airplay;
 mod artist;
 pub mod autoplay;
@@ -590,6 +591,8 @@ pub struct State {
     hooks: crate::hooks::Hooks,
     /// "Notify on song change" (`notify.rs`), fed by the hooks' song detector.
     notifier: crate::notify::Notifier,
+    /// Discord Rich Presence (`discord/`): "Show on Discord", off unless the setting is on.
+    discord: crate::discord::Presence,
     /// Set when we asked for a new song and it hasn't started yet. Meanwhile MusicKit reports
     /// the old queue stopping (nothing playing, paused, …), which must not flicker the player bar.
     starting: Option<Instant>,
@@ -691,6 +694,7 @@ impl State {
             autoplay: autoplay::Run::default(),
             hooks: if persist { crate::hooks::Hooks::for_app() } else { crate::hooks::Hooks::off() },
             notifier,
+            discord: if persist { crate::discord::Presence::for_app() } else { crate::discord::Presence::off() },
             starting: None,
             skipped_in_row: 0,
             explicit_blocked: false,
@@ -737,6 +741,8 @@ impl State {
         s.sync_app_icon();
         // The saved storefront, for Settings and links before the bridge is up.
         s.session.storefront = s.settings.storefront.as_ref().map(|f| f.id.clone());
+        // "Show on Discord", when it was left on (no thread at all otherwise).
+        s.discord_configure();
         s
     }
 
@@ -751,6 +757,7 @@ impl State {
         }
         self.favourite_lookups();
         self.resume_changed(false);
+        self.discord_sync();
         if time {
             // A frame for `ui::poll`, which moves the seek bars to the clock: a report that
             // changes it without changing the second (a small jump, or while paused) re-runs no

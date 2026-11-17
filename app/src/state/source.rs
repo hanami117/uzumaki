@@ -104,6 +104,7 @@ impl State {
             self.queue = PlayQueue::default();
             self.playback.song = None;
             self.playback.set_state(PlayState::Stopped);
+            self.discord_sync();
             self.playback.position = 0.0;
             self.playback.position_at = None;
             self.starting = None;

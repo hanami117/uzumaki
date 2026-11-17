@@ -46,6 +46,12 @@ pub enum Row {
     Tray,
     CloseToTray,
     Notify,
+    /// "Show on Discord" and its four choices (`discord/`).
+    Discord,
+    DiscordArtwork,
+    DiscordButtons,
+    DiscordHidePaused,
+    DiscordHideTitle,
     CheckUpdates,
     /// "Check now" and when the last check ran.
     CheckNow,
@@ -94,6 +100,11 @@ impl Row {
             Row::Tray => "tray",
             Row::CloseToTray => "close-to-tray",
             Row::Notify => "notify",
+            Row::Discord => "discord",
+            Row::DiscordArtwork => "discord-artwork",
+            Row::DiscordButtons => "discord-buttons",
+            Row::DiscordHidePaused => "discord-hide-paused",
+            Row::DiscordHideTitle => "discord-hide-title",
             Row::CheckUpdates => "check-updates",
             Row::CheckNow => "check-now",
             Row::Tour => "tour",
@@ -202,6 +213,11 @@ const SPECS: &[Spec] = &[
     only(On::NotMac, Row::CloseToTray, Tab::General, "Close to tray", "Closing the window keeps the music playing. Quit from the tray or with the Quit shortcut.", "tray menu bar background minimize minimise quit"),
     only(On::Mac, Row::CloseToTray, Tab::General, "Close to the menu bar", "Closing the window also hides the Dock icon and keeps the music playing. Quit from the menu bar icon or with the Quit shortcut.", "tray menu bar background minimize minimise quit"),
     spec(Row::Notify, Tab::General, "Notify on song change", "Shows the song and its cover when a new one starts while Uzumaki isn't in front.", "notification notifications alert popup toast"),
+    spec(Row::Discord, Tab::General, "Show on Discord", DISCORD, "discord rich presence activity status listening spotify profile game"),
+    spec(Row::DiscordArtwork, Tab::General, "Show artwork", "The album cover on your Discord card. Discord fetches it from Apple. Off: the Uzumaki icon.", "discord cover album art picture image"),
+    spec(Row::DiscordButtons, Tab::General, "Show buttons", "An \"Open in Apple Music\" button on your Discord card, for songs from Apple Music.", "discord button link share apple music"),
+    spec(Row::DiscordHidePaused, Tab::General, "Hide when paused", "Takes the card off your profile while the music is paused or stopped. Off: it stays, without the progress bar.", "discord pause paused stop remove clear"),
+    spec(Row::DiscordHideTitle, Tab::General, "Hide song title", "Shows \"Listening to music\" and the artist, not the song, the album or a link to it.", "discord private privacy hide title song name secret"),
     spec(Row::CheckUpdates, Tab::General, "Check for updates", "Once a day, asks getuzumaki.app whether a new version is out. Nothing about you is sent.", "update updates upgrade new version release download"),
     spec(Row::CheckNow, Tab::General, "Check now", "Asks getuzumaki.app now whether a new version is out. Shows when it last checked.", "update updates upgrade new version release check for updates last checked"),
     spec(Row::Tour, Tab::General, "Welcome tour", "Plays the welcome and the shortcuts tour again.", "onboarding intro help tutorial shortcuts keys keyboard"),
@@ -260,6 +276,8 @@ pub fn find(query: &str) -> Vec<usize> {
 }
 
 /// Settings → Appearance → Animated artwork: what it does.
+/// "Show on Discord" (`discord/`).
+pub const DISCORD: &str = "Shows what you're listening to on your Discord profile, like Spotify does: the song, the artist, a progress bar. Needs the Discord app running on this computer. Nothing is sent by Uzumaki itself; Discord shows the card to your friends.";
 pub const ANIMATED_ARTWORK: &str = "Apple's video loop of an album, when it has one: in the Now Playing cover and, with Always, at the top of an album page. Off keeps still covers and downloads no video.";
 
 #[cfg(test)]

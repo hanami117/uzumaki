@@ -5,6 +5,16 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **Show on Discord** (Settings → General, off by default): Discord Rich Presence like Spotify's. Your profile shows
+  "Listening to Uzumaki" with the song, the artist, the cover, a progress bar that follows seeks and pauses, and an
+  "Open in Apple Music" button. Choices: show artwork, show buttons, hide when paused (on by default), hide the song
+  title. Local files show title and artist only. It talks to the Discord app on the same computer through its local
+  socket (including Flatpak and Snap Discord on Linux; Discord in a browser has none): Uzumaki opens no connection of
+  its own, runs no thread while the switch is off, retries every 30 seconds while Discord isn't running, and clears
+  the card when you pause, stop, switch it off or quit. Needs a Discord application id: see
+  [docs/DISCORD.md](docs/DISCORD.md) (until the project's own is set, `discord.client_id` in settings.json).
+
 ### Fixed
 - **A forced Light or Dark theme now reaches macOS's own parts of the window:** with Theme set to Light while the
   Mac is Dark (or the reverse), the traffic lights, the file picker and other system dialogs, tooltips and the menu

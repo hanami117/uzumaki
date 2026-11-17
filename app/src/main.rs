@@ -24,6 +24,7 @@ mod desktop;
 mod dock_icon;
 mod native_theme;
 mod framelog;
+mod discord;
 mod hooks;
 mod local;
 mod legacy;
@@ -416,4 +417,5 @@ fn main() {
     resume::flush();
     engine.shutdown();
     airplay::shutdown(); // stop the speaker and its helper
+    discord::shutdown(); // clear the card on Discord
 }
