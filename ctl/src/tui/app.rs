@@ -702,6 +702,8 @@ impl App {
         // history now), at the same place on the screen, instead of staying with the old song.
         let followed = !first && self.rows().get(self.cursor).is_some_and(|r| r.playing);
         let was = self.queue.current.as_ref().map(|s| s.id.clone());
+        // The cursor's song is gone along with the playing one (another playlist replaced the queue): the playing song is the place to be.
+        let lost_key = self.key.clone();
         self.upnext_head.title = format!("\u{25b8} Up Next \u{b7} {}", crate::fmt::plural(q.up_next.len(), "song"));
         self.history_head.title = format!("\u{27f2} History \u{b7} {}", crate::fmt::plural(q.history.len(), "song"));
         self.autoplay_head.title = "\u{221e} AutoPlay \u{b7} similar music will keep playing".to_string();
@@ -714,13 +716,20 @@ impl App {
             let current = self.rows().iter().position(|r| r.playing).unwrap_or(0);
             self.offset = current;
             self.set_cursor(current);
-        } else if !(followed && self.queue.current.as_ref().map(|s| &s.id) != was.as_ref() && self.follow_playing(screen_row)) {
+        } else if !(followed && self.queue.current.as_ref().map(|s| &s.id) != was.as_ref() && self.follow_playing(screen_row))
+            && !(self.queue.current.as_ref().map(|s| &s.id) != was.as_ref() && self.key_missing(lost_key.as_ref()) && self.follow_playing(0))
+        {
             self.resolve_cursor();
             let pos = self.visible().iter().position(|&i| i == self.cursor).unwrap_or(0);
             self.offset = pos.saturating_sub(screen_row);
             self.fit();
         }
         self.keep_cursor_shown();
+    }
+
+    /// `key` (a cursor's song) is not among the rows any more.
+    fn key_missing(&self, key: Option<&(String, usize)>) -> bool {
+        key.is_some_and(|(id, nth)| self.rows().iter().filter(|r| &r.song.id == id).nth(*nth).is_none())
     }
 
     /// The cursor goes to the playing row, which lands on `screen_row` of the list. False when

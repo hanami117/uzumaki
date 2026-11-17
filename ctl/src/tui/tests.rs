@@ -4075,3 +4075,33 @@ fn the_history_key_is_in_the_hints() {
     let mut rig = Rig::new("hints-history");
     assert!(rig.frame(120, 24).pop().unwrap().contains("h history"));
 }
+
+#[test]
+fn a_uzu_left_open_keeps_the_playing_song_in_view_as_the_queue_changes_under_it() {
+    let song = |i: usize| s(&format!("s{i}"), &format!("Song {i}"), "Aa", "A", 100.0);
+    let now = Instant::now();
+    let mut app = App::new(now, Box::new(Inline::new(Box::new(NoApp))));
+    app.resize_to(100, 30);
+    // A new playlist with shuffle: nothing played yet, then the history grows one song per Next.
+    for played in 0..=50usize {
+        let q = Queue { history: (0..played).map(song).collect(), current: Some(song(played)), up_next: (played + 1..played + 95).map(song).collect(), ..Default::default() };
+        app.set_queue(q, now);
+        let vis = app.visible();
+        let pos = vis.iter().position(|&i| i == app.cursor).unwrap();
+        assert!(app.rows()[app.cursor].playing, "{played} played: cursor on the playing song");
+        assert!(pos >= app.offset && pos < app.offset + app.body, "{played}: the playing song is on screen");
+        if played > 0 {
+            assert_eq!(app.offset, 0, "{played}: the History header is on screen");
+        }
+    }
+    // Another playlist replaces it all while the cursor sits on Up Next 3.
+    let mut be = NoApp;
+    for _ in 0..3 {
+        app.handle_key(key(KeyCode::Down), &mut be, now);
+    }
+    let other = |i: usize| s(&format!("o{i}"), &format!("Other {i}"), "Bb", "B", 100.0);
+    app.set_queue(Queue { history: (0..50).map(other).collect(), current: Some(other(50)), up_next: (51..140).map(other).collect(), ..Default::default() }, now);
+    assert!(app.rows()[app.cursor].playing && app.offset == 0, "cursor {} offset {}", app.cursor, app.offset);
+    let t = table_rows(&app, now, 100, 30);
+    assert!(t[0].contains("⟲ History · 50 songs") && t[1].contains("Other 50"), "{} / {}", t[0], t[1]);
+}
