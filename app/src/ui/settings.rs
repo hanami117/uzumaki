@@ -365,7 +365,7 @@ fn row_el(r: &Rx, id: Row) -> El {
             )
         }
         Row::Theme => {
-            let system_light = !r.cx.system_dark();
+            let system_light = !crate::native_theme::os_dark(s.settings.theme, r.cx.system_dark());
             let theme_seg = |key: &'static str, label: &str, v: Theme| {
                 segment(key, label, s.settings.theme == v).on_press(move |s: &mut State| s.set_theme(v))
             };

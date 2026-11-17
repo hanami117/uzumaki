@@ -208,7 +208,11 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
 
 pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     // The palette for this build: the Theme setting, or the OS appearance (`--theme light|dark` headless).
-    let light = s.settings.theme.is_light(cx.system_dark());
+    // macOS: the native chrome takes the theme first, and `os_dark` is the computer's real
+    // appearance (the window's own report follows the forced one).
+    crate::native_theme::sync(s.settings.theme);
+    let os_dark = crate::native_theme::os_dark(s.settings.theme, cx.system_dark());
+    let light = s.settings.theme.is_light(os_dark);
     crate::theme::apply(light);
     // Light: text one step darker while a background picture shows (it is printed pale, never
     // past `uzumaki_fx::LIGHT_FLOOR`, and this ink keeps 4.5:1 on it).
@@ -217,13 +221,13 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
     // just outside the control, following its corners.
     cx.focus_ring(2.0, 2.0, PAL.accent);
     // App icon: Follow theme needs the OS appearance, which only the view sees.
-    s.report_system_dark(cx.system_dark());
+    s.report_system_dark(os_dark);
     // Animated artwork holds still under Reduce Motion, which only the view sees.
     s.report_reduced_motion(cx.is_reduced_motion());
     // macOS: the menu bar follows the state and the user's shortcuts (nothing headless).
     #[cfg(target_os = "macos")]
     menu_bar::sync(s);
-    crate::dock_icon::sync(s.settings.app_icon.resolve(s.settings.theme, Some(cx.system_dark())).unwrap_or(crate::settings::IconVariant::Dark));
+    crate::dock_icon::sync(s.settings.app_icon.resolve(s.settings.theme, Some(os_dark)).unwrap_or(crate::settings::IconVariant::Dark));
     // Covers are decoded for this scale (`art::memory_px`).
     crate::art::set_scale(cx.env().scale);
     // Covers drawn from here on are held in memory until a view leaves them out (`Art::get`).

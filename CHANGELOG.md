@@ -6,6 +6,10 @@ takes each release's notes from its section here.
 ## [Unreleased]
 
 ### Fixed
+- **A forced Light or Dark theme now reaches macOS's own parts of the window:** with Theme set to Light while the
+  Mac is Dark (or the reverse), the traffic lights, the file picker and other system dialogs, tooltips and the menu
+  bar menus used to stay in the Mac's appearance. They follow the Theme setting now, from the first moment the window
+  shows. Theme = System still follows the Mac, and the “System (Light/Dark)” label still shows the Mac's own appearance.
 - **`uzu`: the Queue screen no longer ends up in the History.** The played songs are folded under one "⟲ History · n songs"
   row (Enter on it, or `h`, unfolds them; remappable as `history` in `[keys]`), and the cursor follows the playing song
   when the next one starts, instead of staying with the old song as it slid up the History (after about 50 Next presses

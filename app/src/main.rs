@@ -22,6 +22,7 @@ mod cache;
 mod ctl;
 mod desktop;
 mod dock_icon;
+mod native_theme;
 mod framelog;
 mod hooks;
 mod local;
@@ -241,6 +242,15 @@ fn main() {
             return;
         }
         None => legacy::migrate(), // first start after the rename: move Cadence's data over
+    }
+    // macOS: the chosen theme reaches the native chrome (traffic lights, dialogs, tooltips, menus)
+    // and the window's own background before the window exists, so a forced Light or Dark never
+    // flashes the computer's appearance first. `ui::view` keeps both in step afterwards.
+    #[cfg(target_os = "macos")]
+    {
+        let theme = settings::Settings::load().theme;
+        native_theme::sync(theme);
+        theme::apply(theme.is_light(native_theme::os_dark(theme, true)));
     }
     // macOS start at login in the background: a login item gets no `--hidden`, so with both
     // switches on (Settings → General) the app starts windowless and `login::watch_launch` opens
