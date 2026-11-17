@@ -37,7 +37,7 @@ use ipc::Conn;
 /// The Discord Application id (docs/DISCORD.md: create it at discord.com/developers).
 /// TODO(thomas): replace this placeholder with the real Application ID. While it is all zeros
 /// the setting does nothing unless `discord.client_id` in settings.json gives another id.
-pub const CLIENT_ID: &str = "000000000000000000";
+pub const CLIENT_ID: &str = "1572355156471717929";
 
 /// While Discord isn't there (or the connection dropped), try again this often.
 const RECONNECT: Duration = Duration::from_secs(30);
