@@ -1,0 +1,282 @@
+# Uzumaki for Windows (x64): build, tests, headless snaps, the playback engine started for real
+# (signed out, muted), the installer installed and removed, and the test downloads, on every push
+# to the `windows` branch. Nothing here publishes: no release, no tag, no site. The files are
+# workflow artifacts only (sign in to GitHub to download them from the run's page).
+#
+# The artifacts:
+#   windows-release       Uzumaki-<release>-windows-x64-setup.exe  the installer (per user, no admin)
+#                         Uzumaki-<release>-windows-x64.zip        the same files without an installer
+#                         and a .sha256 for each
+#   Uzumaki-windows-x64   the unpacked folder (what the zip holds), for a quick look
+#   snaps                 headless pictures of the app drawn on this runner, and the programs' icons
+#
+# UNSIGNED (no Authenticode): Windows SmartScreen asks once ("More info", "Run anyway").
+# The playback engine (castLabs Electron) carries its production Widevine VMP signature: a branch
+# can't use the EVS login (the `build` environment is for `v*` tags only, and stays so), so the
+# signature made beforehand is copied in and verified here. See packaging/windows/vmp/README.md.
+#
+# Pins: actions by commit SHA.
+name: windows
+
+on:
+  push:
+    branches: [windows]
+    # The bridge's own quick workflow (windows-bridge.yml) covers these.
+    paths-ignore:
+      - 'packaging/windows/probe/**'
+      - '.github/workflows/windows-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  # "false": the normal rule, the first failing step fails the run.
+  # "true": a step that fails is reported by the Verdict step and the run goes on and stays green,
+  # so one run shows everything that is wrong (for work on the workflow itself: it saved a mail
+  # per broken step while the Windows checks were being built).
+  PROBE: "false"
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Version
+        id: v
+        shell: bash
+        run: |
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          build=$(tr -d '[:space:]' < BUILD)
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::bad version in Cargo.toml: $version"; exit 1; }
+          [[ $build =~ ^[1-9][0-9]*$ ]] || { echo "::error::BUILD is not a number: $build"; exit 1; }
+          if [ "$build" = 1 ]; then release=$version; else release=$version-$build; fi
+          { echo "version=$version"; echo "build=$build"; echo "release=$release"; } >> "$GITHUB_OUTPUT"
+          echo "Uzumaki $version (build $build) for Windows, $(git rev-parse --short HEAD): a test build, not a release" >> "$GITHUB_STEP_SUMMARY"
+
+      # Saved after a failed run too: a test that fails must not cost the next run a cold build.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: cargo test
+        id: test
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        run: cargo test --workspace --locked --no-fail-fast
+
+      - name: Bridge tests (node)
+        id: node
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: bash
+        run: node --test bridge/signin.test.js bridge/storefront.test.js
+
+      - name: Release build
+        run: cargo build --release --locked -p uzumaki -p uzumaki-ctl
+
+      # The icon, the version details and the manifest are in the programs (app/build.rs, ctl/build.rs).
+      - name: Program resources
+        id: resources
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: pwsh
+        env:
+          V: ${{ steps.v.outputs.version }}
+          B: ${{ steps.v.outputs.build }}
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          New-Item -ItemType Directory -Force out | Out-Null
+          foreach ($name in "uzumaki.exe", "uzu.exe") {
+            $exe = (Resolve-Path "target\release\$name").Path
+            $info = (Get-Item $exe).VersionInfo
+            "{0}: product '{1}', description '{2}', file version {3}, {4:N1} MB" -f $name, $info.ProductName, $info.FileDescription, $info.FileVersion, ((Get-Item $exe).Length / 1MB) | Out-Host
+            if ($info.ProductName -ne "Uzumaki") { throw "$name has no version details" }
+            $want = "$(($env:V -split '-')[0]).$env:B"
+            $have = "{0}.{1}.{2}.{3}" -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart
+            if ($have -ne $want) { throw "$name has file version $have, expected $want" }
+            $text = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($exe))
+            if ($text -notmatch "longPathAware") { throw "$name has no manifest" }
+            if ($name -eq "uzumaki.exe" -and $text -notmatch "PerMonitorV2") { throw "uzumaki.exe's manifest is not per-monitor DPI aware" }
+            # The icon, as Explorer would show it: kept with the snaps to look at.
+            $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe)
+            if ($null -eq $icon) { throw "$name has no icon" }
+            $icon.ToBitmap().Save("$PWD\out\icon-$name.png")
+          }
+
+      # Headless snaps with the program that ships. Uzumaki is a windowed program: the pipe makes
+      # PowerShell wait for it and show its output. No GPU here, so Windows' software adapter draws.
+      - name: Headless snaps
+        id: snaps
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: pwsh
+        env:
+          RUNE_GPU_LOG: "1"
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          $exe = "target\release\uzumaki.exe"
+          & $exe --version | Out-Host
+          & $exe --list-scenes | Measure-Object -Line | Out-Host
+          foreach ($scene in "home", "album", "library-albums", "now-playing", "up-next", "search", "settings-about", "settings-login") {
+            & $exe --snap "out\$scene.png" --scene $scene --size 1360x860 --scale 1 2>&1 | Out-Host
+            if (-not (Test-Path "out\$scene.png")) { throw "no snap for $scene" }
+          }
+          Get-ChildItem out | Format-Table Name, Length | Out-Host
+
+      # uzu with no app running: `quit` must say so and start nothing; a status line stays empty.
+      - name: uzu without the app
+        id: uzu
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: pwsh
+        run: |
+          & target\release\uzu.exe --version | Out-Host
+          $said = & target\release\uzu.exe quit 2>&1 | Out-String
+          $said
+          if ($LASTEXITCODE -ne 0 -or $said -notmatch "isn't running") { throw "unexpected answer to 'uzu quit'" }
+          $line = & target\release\uzu.exe status --line 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0 -or $line.Trim() -ne "") { throw "unexpected answer to 'uzu status --line': $line" }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: snaps
+          path: out
+          if-no-files-found: warn
+
+      # castLabs Electron, as release.yml's macOS job gets it (npm ci, then its own downloader).
+      - name: castLabs Electron
+        shell: bash
+        run: |
+          cd bridge && npm ci --no-audit --no-fund
+          for try in 1 2 3; do node node_modules/electron/install.js && break; [ $try = 3 ] && exit 1; sleep 10; done
+          ls -l node_modules/electron/dist | head -30
+
+      # The production VMP signature (packaging/windows/vmp/README.md): it fits exactly the
+      # electron.exe it was made for, and castLabs' own tool says whether Widevine will take it.
+      # No login is needed to verify.
+      - name: Widevine VMP signature
+        id: vmp
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: bash
+        env:
+          EVS_NO_ASK: "1"
+          EVS_CONFIG_FILE: ${{ runner.temp }}/evs-config/config.json
+        run: |
+          dist=bridge/node_modules/electron/dist
+          want=$(cut -d' ' -f1 packaging/windows/vmp/electron.exe.sha256)
+          have=$(sha256sum "$dist/electron.exe" | cut -d' ' -f1)
+          [ "$want" = "$have" ] || { echo "::error::electron.exe is not the one the VMP signature was made for ($have, expected $want): castLabs Electron changed, make packaging/windows/vmp again"; exit 1; }
+          cp packaging/windows/vmp/electron.exe.sig "$dist/electron.exe.sig"
+          mkdir -p "$(dirname "$EVS_CONFIG_FILE")"
+          python -m venv "$RUNNER_TEMP/evs"
+          "$RUNNER_TEMP/evs/Scripts/python" -m pip install -q castlabs-evs==1.3.3
+          "$RUNNER_TEMP/evs/Scripts/python" -m castlabs_evs.vmp verify-pkg "$dist" 2>&1 | tee "$RUNNER_TEMP/vmp.txt"
+          grep -q 'Signature is valid: streaming' "$RUNNER_TEMP/vmp.txt" || { echo "::error::the VMP signature is not a valid production (streaming) one"; exit 1; }
+          echo "castLabs Electron VMP: $(grep 'Signature is valid' "$RUNNER_TEMP/vmp.txt")" >> "$GITHUB_STEP_SUMMARY"
+
+      # The bridge alone, as the app starts it: Electron, the Widevine component, Apple's web
+      # player, a key system for the page, a catalog search. Signed out, muted, scratch profile.
+      - name: The playback engine answers
+        id: bridge
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: bash
+        run: |
+          for try in 1 2; do
+            node packaging/windows/bridge-smoke.mjs bridge && exit 0
+            echo "::warning::the bridge smoke test failed (try $try)"; sleep 15
+          done
+          exit 1
+
+      # The installer (Inno Setup, on the runner image), the zip and the checksums.
+      - name: Installer and zip
+        id: package
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: pwsh
+        env:
+          V: ${{ steps.v.outputs.version }}
+          B: ${{ steps.v.outputs.build }}
+        run: ./packaging/windows/build.ps1 -Version $env:V -Build ([int]$env:B)
+
+      # The staged programs for real: hidden, a test copy on scratch folders, `uzu` over the
+      # named pipe, the engine started by the app and ended with it.
+      - name: The app runs
+        id: app
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: pwsh
+        run: ./packaging/windows/app-smoke.ps1 -Dir target\windows-dist\Uzumaki
+
+      # A real install for this runner's user: silent, into a temp folder, the files, the PATH,
+      # the shortcuts, an update over it, uninstall (the user's data stays), and with /REMOVEDATA.
+      - name: Install and uninstall
+        id: install
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: pwsh
+        env:
+          V: ${{ steps.v.outputs.version }}
+          R: ${{ steps.v.outputs.release }}
+        run: ./packaging/windows/smoke.ps1 -Setup "target\windows-release\Uzumaki-$env:R-windows-x64-setup.exe" -Version $env:V
+
+      - name: The files
+        id: files
+        continue-on-error: ${{ env.PROBE == 'true' }}
+        shell: bash
+        env:
+          R: ${{ steps.v.outputs.release }}
+        run: |
+          cd target/windows-release
+          ls -l
+          [ "$(ls | wc -l)" = 4 ] || { echo "::error::expected exactly 4 files"; exit 1; }
+          for f in "Uzumaki-$R-windows-x64-setup.exe" "Uzumaki-$R-windows-x64.zip"; do
+            sha256sum -c "$f.sha256"
+            [ "$(wc -l < "$f.sha256")" = 1 ] || { echo "::error::$f.sha256 is not one line"; exit 1; }
+          done
+          unzip -l "Uzumaki-$R-windows-x64.zip" > list
+          for p in Uzumaki/uzumaki.exe Uzumaki/uzu.exe Uzumaki/README-WINDOWS.txt Uzumaki/LICENSE.txt Uzumaki/THIRD_PARTY_NOTICES.txt Uzumaki/bridge/main.js Uzumaki/bridge/node_modules/electron/dist/electron.exe Uzumaki/bridge/node_modules/electron/dist/electron.exe.sig; do
+            grep -q " $p\$" list || { echo "::error::$p missing from the zip"; exit 1; }
+          done
+          rm list
+          { echo '### Files (unsigned test build, not a release)'; echo '```'; cat ./*.sha256; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      # The installer and the zip, to download and try.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-release
+          path: target/windows-release/
+          if-no-files-found: ${{ env.PROBE == 'true' && 'warn' || 'error' }}
+          retention-days: 30
+          compression-level: 0
+
+      # The unpacked folder, for a quick look without an installer.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Uzumaki-windows-x64
+          path: target/windows-dist
+          if-no-files-found: ${{ env.PROBE == 'true' && 'warn' || 'error' }}
+          retention-days: 14
+
+      # What every check said, in one place. In a probe run this is where failures show.
+      - name: Verdict
+        if: always()
+        shell: bash
+        env:
+          OUTCOMES: >-
+            test=${{ steps.test.outcome }} node=${{ steps.node.outcome }} resources=${{ steps.resources.outcome }}
+            snaps=${{ steps.snaps.outcome }} uzu=${{ steps.uzu.outcome }} vmp=${{ steps.vmp.outcome }}
+            bridge=${{ steps.bridge.outcome }} package=${{ steps.package.outcome }} app=${{ steps.app.outcome }}
+            install=${{ steps.install.outcome }} files=${{ steps.files.outcome }}
+        run: |
+          { echo '### Checks'; echo '```'; echo "$OUTCOMES" | tr ' ' '\n' | grep .; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          if echo "$OUTCOMES" | grep -Eq '=(failure|cancelled|skipped)'; then
+            if [ "$PROBE" = true ]; then echo "::warning::some checks did not pass (a probe run reports them and stays green)"; else exit 1; fi
+          fi

@@ -5,6 +5,7 @@ use std::path::Path;
 /// Opens the file manager on `path`'s folder with the file selected (the freedesktop
 /// FileManager1 `ShowItems` call: Dolphin, Nautilus, Nemo, Thunar…), else just the folder.
 /// Runs on a thread: D-Bus activation can take a moment. On macOS, Finder does it (`open -R`).
+#[cfg(unix)]
 pub fn show_in_folder(path: &Path) {
     if cfg!(target_os = "macos") {
         let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
@@ -20,6 +21,14 @@ pub fn show_in_folder(path: &Path) {
     });
 }
 
+/// Windows: Explorer opens the folder with the file selected.
+#[cfg(windows)]
+pub fn show_in_folder(path: &Path) {
+    let path = path.to_path_buf();
+    std::thread::spawn(move || crate::win::show_in_folder(&path));
+}
+
+#[cfg(unix)]
 fn show_items(path: &Path) -> zbus::Result<()> {
     let conn = zbus::blocking::Connection::session()?;
     conn.call_method(
@@ -34,6 +43,7 @@ fn show_items(path: &Path) -> zbus::Result<()> {
 
 /// `file://` URI of an absolute path, percent-encoding everything but unreserved characters
 /// and '/'.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn file_uri(path: &Path) -> String {
     let mut out = String::from("file://");
     for b in path.as_os_str().as_encoded_bytes() {

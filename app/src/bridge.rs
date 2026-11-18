@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -88,8 +88,21 @@ pub enum Event {
 
 type ReplyFn<M> = Box<dyn FnOnce(Result<Value, String>) -> Option<M> + Send>;
 
+/// Where the commands are written: Electron's standard input; on Windows a named pipe
+/// (`win::CommandPipe` says why), or standard input for a test's stand-in process.
+#[cfg(not(windows))]
+type Commands = std::process::ChildStdin;
+#[cfg(windows)]
+type Commands = crate::win::Commands;
+
+/// Windows: the pipe a bridge about to start will read its commands from. Nothing elsewhere.
+#[cfg(not(windows))]
+type CommandPipe = std::convert::Infallible;
+#[cfg(windows)]
+type CommandPipe = crate::win::CommandPipe;
+
 struct Inner<M> {
-    stdin: Mutex<Option<ChildStdin>>,
+    stdin: Mutex<Option<Commands>>,
     child: Mutex<Child>,
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, ReplyFn<M>>>,
@@ -117,15 +130,43 @@ pub fn bridge_dir() -> PathBuf {
         .map(PathBuf::from)
         .or_else(installed_bridge_dir)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../bridge"));
-    dir.canonicalize().unwrap_or(dir)
+    plain(dir.canonicalize().unwrap_or(dir))
+}
+
+/// Windows: `canonicalize` gives the `\\?\C:\…` form, which Electron (given this folder as its
+/// app) and Node's module loader don't take. The plain `C:\…` form of the same path. Other
+/// systems: the path as it is.
+fn plain(path: PathBuf) -> PathBuf {
+    if cfg!(windows)
+        && let Some(rest) = path.to_string_lossy().strip_prefix(r"\\?\")
+        && rest.as_bytes().get(1) == Some(&b':')
+    {
+        return PathBuf::from(rest.to_string());
+    }
+    path
+}
+
+/// Where Electron's own messages go: the temp folder's `uzumaki-bridge.log` (`/tmp` on Linux);
+/// on Windows `%LOCALAPPDATA%\Uzumaki\Logs\bridge.log`, beside the app's log.
+pub fn log_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let dir = uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Logs);
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("bridge.log")
+    }
+    #[cfg(not(windows))]
+    std::env::temp_dir().join("uzumaki-bridge.log")
 }
 
 /// The castLabs Electron executable in a bridge folder's `node_modules`: inside the app bundle on
-/// macOS, a plain binary on Linux.
+/// macOS, a plain binary on Linux, `electron.exe` on Windows.
 fn electron_exe(bridge: &std::path::Path) -> PathBuf {
-    let dist = bridge.join("node_modules/electron/dist");
+    let dist = bridge.join("node_modules").join("electron").join("dist");
     if cfg!(target_os = "macos") {
         dist.join("Electron.app/Contents/MacOS/Electron")
+    } else if cfg!(windows) {
+        dist.join("electron.exe")
     } else {
         dist.join("electron")
     }
@@ -271,19 +312,54 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
         }
         // AirPlay: where the PCM socket will be while a speaker is connected.
         cmd.envs(crate::airplay::bridge_env());
+        // Windows: the sign-in profile lives in the local (not the roaming) AppData folder; the
+        // app says where, so both sides agree. A scratch profile from the environment wins.
+        #[cfg(windows)]
+        if std::env::var_os("UZUMAKI_PROFILE_DIR").is_none_or(|v| v.is_empty()) && std::env::var_os("CADENCE_PROFILE_DIR").is_none_or(|v| v.is_empty()) {
+            cmd.env("UZUMAKI_PROFILE_DIR", uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Bridge));
+        }
+        // Windows: Electron reads its commands from a named pipe of ours, not from its standard
+        // input (which it doesn't get there).
+        #[cfg(windows)]
+        {
+            let pipe = CommandPipe::create()?;
+            cmd.env(CommandPipe::ENV, pipe.name());
+            Self::start(cmd, log_path, sink, Some(pipe))
+        }
+        #[cfg(not(windows))]
         Self::spawn_command(cmd, log_path, sink)
     }
 
-    /// Starts `cmd` as the bridge (`spawn`; tests pass a stand-in process).
-    pub fn spawn_command(mut cmd: Command, log_path: &std::path::Path, sink: impl Fn(M) + Send + Sync + 'static) -> std::io::Result<Self> {
+    /// Starts `cmd` as the bridge (tests pass a stand-in process): commands go to its standard input.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn spawn_command(cmd: Command, log_path: &std::path::Path, sink: impl Fn(M) + Send + Sync + 'static) -> std::io::Result<Self> {
+        Self::start(cmd, log_path, sink, None)
+    }
+
+    /// Starts `cmd`; `pipe` (Windows) is where it will read its commands, else its standard input.
+    fn start(mut cmd: Command, log_path: &std::path::Path, sink: impl Fn(M) + Send + Sync + 'static, pipe: Option<CommandPipe>) -> std::io::Result<Self> {
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(std::fs::File::create(log_path)?)
             .spawn()?;
+        // Windows: Electron and its helpers end with the app however the app ends (a job object),
+        // as well as when their input closes.
+        #[cfg(windows)]
+        crate::win::end_with_us(&child);
         let stdout = child.stdout.take().expect("piped stdout");
+        #[cfg(not(windows))]
+        let commands = {
+            let _: Option<CommandPipe> = pipe;
+            child.stdin.take()
+        };
+        #[cfg(windows)]
+        let commands = match pipe {
+            Some(pipe) => Some(Commands::Pipe(pipe.into_writer())),
+            None => child.stdin.take().map(Commands::Stdin),
+        };
         let inner = Arc::new(Inner {
-            stdin: Mutex::new(child.stdin.take()),
+            stdin: Mutex::new(commands),
             child: Mutex::new(child),
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
@@ -536,9 +612,18 @@ pub(crate) mod engine_tests {
     use std::sync::atomic::AtomicUsize;
 
     /// A stand-in bridge: a process that reads its stdin and says nothing.
+    #[cfg(not(windows))]
     pub(crate) fn quiet_process() -> Command {
         let mut c = Command::new("sh");
         c.args(["-c", "cat > /dev/null"]);
+        c
+    }
+
+    /// Windows: `sort` reads all of its input before it says anything, and its output goes nowhere.
+    #[cfg(windows)]
+    pub(crate) fn quiet_process() -> Command {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "sort >NUL"]);
         c
     }
 

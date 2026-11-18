@@ -646,12 +646,17 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// `$XDG_CACHE_HOME/uzumaki/art`, else `~/.cache/uzumaki/art`.
 pub(crate) fn cache_dir() -> PathBuf {
+    #[cfg(windows)]
+    return uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Cache).join("art");
+    #[cfg(not(windows))]
+    {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
         .unwrap_or_else(std::env::temp_dir);
     base.join("uzumaki").join("art")
+    }
 }
 
 fn url_hash(url: &str) -> u64 {

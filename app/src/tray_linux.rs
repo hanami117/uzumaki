@@ -1,4 +1,4 @@
-//! The system tray icon (StatusNotifierItem through Rune): Play/Pause, Previous, Next, Show and
+//! The system tray icon (StatusNotifierItem through Rune; on Windows, Rune's notification-area icon): Play/Pause, Previous, Next, Show and
 //! Quit, plus the current song as the tooltip. A left click shows the window.
 //!
 //! The tray runs on its own thread; its events go to the UI thread with `handle.update`, so
@@ -13,7 +13,18 @@ use crate::settings::IconVariant;
 use crate::state::{Handle, State};
 
 /// Tray icon side in pixels; hosts scale it.
+#[cfg_attr(windows, allow(dead_code))]
 const ICON_PX: u32 = 64;
+
+/// The side the icon is handed over at. Linux hosts scale the 64 px drawing themselves. Windows
+/// draws exactly what it gets, so it gets the notification area's own size at the system's scale
+/// (16 px at 100 %, 20 at 125 %, 24 at 150 %, 32 at 200 %).
+fn icon_px() -> u32 {
+    #[cfg(windows)]
+    return crate::win::tray_icon_px();
+    #[cfg(not(windows))]
+    ICON_PX
+}
 
 pub struct TrayCtl {
     tray: Tray,
@@ -26,7 +37,7 @@ impl TrayCtl {
     /// The icon is the chosen app icon's; Rune's tray can't swap its image once shown, so a
     /// change in Settings shows here at the next start.
     pub fn start(handle: Handle, app_icon: IconVariant) -> Option<Self> {
-        let spec = TraySpec::new("uzumaki", "Uzumaki", icon(app_icon)).tooltip("Uzumaki").menu(menu(false));
+        let spec = TraySpec::new("uzumaki", "Uzumaki", icon(app_icon, icon_px())).tooltip("Uzumaki").menu(menu(false));
         let on_event = move |ev: TrayEvent| match ev {
             TrayEvent::Activate { token } => match token {
                 Some(t) => handle.activate(t),
@@ -96,8 +107,8 @@ fn menu(playing: bool) -> Vec<TrayItem> {
 
 /// The chosen app icon's small drawing (`assets/icons/variants/<name>/tray.png`, 64 px; the dark
 /// one is the original `uzumaki-tray.png`).
-fn icon(app_icon: IconVariant) -> TrayIcon {
-    TrayIcon::rgba(ICON_PX, ICON_PX, icon_pixels(app_icon))
+fn icon(app_icon: IconVariant, px: u32) -> TrayIcon {
+    TrayIcon::rgba(px, px, icon_pixels(app_icon, px))
 }
 
 fn tray_png(app_icon: IconVariant) -> &'static [u8] {
@@ -108,11 +119,11 @@ fn tray_png(app_icon: IconVariant) -> &'static [u8] {
     }
 }
 
-/// Straight RGBA rows of `icon` (decoded from the PNG built into the binary).
-fn icon_pixels(app_icon: IconVariant) -> Vec<u8> {
+/// Straight RGBA rows of `icon`, `px` pixels a side (decoded from the PNG built into the binary).
+fn icon_pixels(app_icon: IconVariant, px: u32) -> Vec<u8> {
     match image::load_from_memory_with_format(tray_png(app_icon), image::ImageFormat::Png) {
-        Ok(img) => img.resize_exact(ICON_PX, ICON_PX, image::imageops::FilterType::Lanczos3).to_rgba8().into_raw(),
-        Err(_) => vec![0; (ICON_PX * ICON_PX * 4) as usize],
+        Ok(img) => img.resize_exact(px, px, image::imageops::FilterType::Lanczos3).to_rgba8().into_raw(),
+        Err(_) => vec![0; (px * px * 4) as usize],
     }
 }
 
@@ -120,7 +131,7 @@ fn icon_pixels(app_icon: IconVariant) -> Vec<u8> {
 mod tests {
     #[test]
     fn the_icon_is_a_coral_swirl_on_a_dark_rounded_tile() {
-        let rgba = super::icon_pixels(super::IconVariant::Dark);
+        let rgba = super::icon_pixels(super::IconVariant::Dark, super::ICON_PX);
         assert_eq!(rgba.len(), (super::ICON_PX * super::ICON_PX * 4) as usize);
         let px = |x: u32, y: u32| {
             let i = ((y * super::ICON_PX + x) * 4) as usize;
@@ -141,13 +152,26 @@ mod tests {
     fn each_app_icon_has_its_own_tray_image() {
         use super::IconVariant;
         let tile = |i: IconVariant| {
-            let rgba = super::icon_pixels(i);
+            let rgba = super::icon_pixels(i, super::ICON_PX);
             let at = ((32 * super::ICON_PX + 10) * 4) as usize; // left edge of the tile
             [rgba[at], rgba[at + 1], rgba[at + 2], rgba[at + 3]]
         };
         assert!(tile(IconVariant::Light)[0] > 0xf0 && tile(IconVariant::Light)[2] > 0xf0, "white tile");
         assert!(tile(IconVariant::Coral)[0] > 0xf0 && tile(IconVariant::Coral)[1] > 0xc0 && tile(IconVariant::Coral)[1] < 0xe0, "pale coral tile");
         assert_eq!(super::tray_png(IconVariant::Dark), include_bytes!("../../assets/icons/uzumaki-tray.png"));
+    }
+
+    /// Windows asks for the notification area's own size: the drawing comes out at any of them.
+    #[test]
+    fn the_icon_is_drawn_at_the_size_asked_for() {
+        for px in [16u32, 20, 24, 32] {
+            let rgba = super::icon_pixels(super::IconVariant::Dark, px);
+            assert_eq!(rgba.len(), (px * px * 4) as usize);
+            // Scaling leaves a trace of the tile's edge in the corner pixel, never more.
+            assert!(rgba[3] < 48, "the rounded corner stays clear at {px} px, got alpha {}", rgba[3]);
+            let mid = ((px / 2 * px + px / 4) * 4) as usize;
+            assert!(rgba[mid + 3] > 200, "the tile is solid at {px} px, got alpha {}", rgba[mid + 3]);
+        }
     }
 
 }

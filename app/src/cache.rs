@@ -70,12 +70,17 @@ impl Cache {
     }
 
     pub fn default_location() -> Self {
+        #[cfg(windows)]
+        return Self::at(uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Cache).join("library"));
+        #[cfg(not(windows))]
+        {
         let base = std::env::var_os("XDG_CACHE_HOME")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
             .unwrap_or_else(std::env::temp_dir);
         Self::at(base.join("uzumaki").join("library"))
+        }
     }
 
     /// The directory everything lives in (Settings → clear caches).

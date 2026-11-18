@@ -437,6 +437,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_change_bumps_the_theme_folder_and_the_menu_entry() {
         let (prefix, plan) = install("touch");
         std::fs::create_dir_all(plan.desktop.parent().unwrap()).unwrap();

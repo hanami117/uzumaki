@@ -1,0 +1,12 @@
+# Text files are checked out with LF line ends on every system. Windows' Git would otherwise
+# turn them into CRLF, and the files built into the programs (uzu's default config, the docs the
+# tests read) would differ from the ones on Linux and macOS.
+* text=auto eol=lf
+# Files for Windows' own tools and for people on Windows: CRLF there (the installer's script and
+# the texts it shows and installs).
+*.iss text eol=crlf
+packaging/windows/*.txt text eol=crlf
+# Never text, whatever their bytes look like: a changed byte breaks the VMP signature and the icon.
+*.sig binary
+*.ico binary
+*.png binary

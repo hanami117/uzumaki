@@ -17,11 +17,24 @@ path = "src/main.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Terminal size (TIOCGWINSZ), raw-free signal handling for `uzu watch`. Already in the lock file.
-libc = "0.2"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 # The cover in the player (`tui/cover.rs`): kitty, sixel and iTerm2 graphics, halfblocks otherwise.
 # No `chafa` (it links libchafa); `image` decodes the cached JPEG (PNG comes with ratatui-image).
 ratatui-image = { version = "11.1", default-features = false, features = ["crossterm"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 toml = { version = "1.2", default-features = false, features = ["std", "serde", "parse"] }
+
+# Terminal size (TIOCGWINSZ), signal handling for `uzu watch`, getuid and confstr for the socket's
+# folder. Already in the lock file.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Windows: the named pipe (`pipe.rs`), Ctrl+C and the console (`winterm.rs`). The same windows-sys
+# Rune already builds.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Threading"] }
+
+# The icon, version details and manifest of the Windows program (`build.rs`). Build-time only, and
+# only when building on Windows: Linux and macOS never compile it.
+[target.'cfg(windows)'.build-dependencies]
+winresource = { version = "0.1.34", default-features = false }

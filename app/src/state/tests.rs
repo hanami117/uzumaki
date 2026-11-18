@@ -1994,8 +1994,10 @@ fn picking_an_app_icon_changes_the_setting_and_touches_no_files_offline() {
     // the .app bundle's icon (macOS) to change.
     #[cfg(target_os = "macos")]
     let requests = crate::bundle_icon::requests;
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     let requests = crate::app_icon::requests;
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let requests = || 0u64;
     let before = requests();
     let mut s = State::offline();
     assert_eq!(s.settings.app_icon, AppIcon::Dark);
@@ -2011,8 +2013,10 @@ fn follow_theme_applies_the_icon_only_when_it_changes_and_touches_no_files_offli
     use crate::settings::{AppIcon, IconVariant, Theme};
     #[cfg(target_os = "macos")]
     let requests = crate::bundle_icon::requests;
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     let requests = crate::app_icon::requests;
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let requests = || 0u64;
     let before = requests();
     let mut s = State::offline();
     assert_eq!(s.settings.theme, Theme::System);

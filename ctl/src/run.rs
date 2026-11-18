@@ -27,14 +27,23 @@ pub struct Term {
 impl Term {
     /// The real terminal: colour on a TTY unless `NO_COLOR`; width from the ioctl, `$COLUMNS`, or 80.
     pub fn detect() -> Self {
-        let color = unsafe { libc::isatty(1) } == 1 && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
-        let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
-        let from_ioctl = unsafe { libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) } == 0 && ws.ws_col > 0;
-        let width = if from_ioctl {
-            ws.ws_col as usize
-        } else {
-            std::env::var("COLUMNS").ok().and_then(|c| c.trim().parse().ok()).filter(|w| *w > 0).unwrap_or(80)
+        #[cfg(unix)]
+        let (tty, columns) = {
+            let tty = unsafe { libc::isatty(1) } == 1;
+            let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+            let from_ioctl = unsafe { libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) } == 0 && ws.ws_col > 0;
+            (tty, from_ioctl.then_some(ws.ws_col as usize))
         };
+        // Windows: the console's own answer. A console that can't take ANSI escapes (old conhost
+        // with virtual terminal processing refused) gets plain text.
+        #[cfg(windows)]
+        let (tty, columns) = {
+            use std::io::IsTerminal;
+            let tty = std::io::stdout().is_terminal() && crate::winterm::enable_ansi();
+            (tty, if tty { crate::winterm::columns() } else { None })
+        };
+        let color = tty && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
+        let width = columns.unwrap_or_else(|| std::env::var("COLUMNS").ok().and_then(|c| c.trim().parse().ok()).filter(|w| *w > 0).unwrap_or(80));
         Term { width, color }
     }
 }

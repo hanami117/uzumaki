@@ -3,21 +3,34 @@
 //
 // Protocol: newline-delimited JSON.
 //   stdin  <- commands  {"id": 1, "cmd": "search", "term": "..."}
+//             (Windows: from the named pipe in UZUMAKI_BRIDGE_PIPE instead; see commandInput)
 //   stdout -> replies   {"id": 1, "ok": true, "result": ...} | {"id": 1, "ok": false, "error": "..."}
 //          -> events    {"event": "ready" | "auth" | "storefront" | "nowPlaying" | "playbackState" | "time" | "widevine" | "window" | "error", ...}
 // stdout is the protocol channel: never console.log here, use log() (stderr).
 'use strict';
 
 const { app, BrowserWindow, components, ipcMain, screen, session, shell } = require('electron');
+const fs = require('node:fs');
+const net = require('node:net');
 const path = require('node:path');
 const readline = require('node:readline');
 const signin = require('./signin.js');
 
 const START_URL = 'https://music.apple.com/';
 
+const WINDOWS = process.platform === 'win32';
+
 // Login cookies / MusicKit tokens persist here. UZUMAKI_PROFILE_DIR (or the old CADENCE_PROFILE_DIR) points tests at a scratch
-// profile so they never touch the user's login or saved volume.
-app.setPath('userData', process.env.UZUMAKI_PROFILE_DIR || process.env.CADENCE_PROFILE_DIR || path.join(app.getPath('appData'), 'uzumaki', 'bridge'));
+// profile so they never touch the user's login or saved volume. Windows: the app passes the folder
+// (%LOCALAPPDATA%\Uzumaki\Bridge); the default here is the same one, never the roaming AppData
+// folder (a Chromium profile is hundreds of MB).
+const defaultProfile = () =>
+  WINDOWS
+    ? path.join(process.env.LOCALAPPDATA || path.join(app.getPath('home'), 'AppData', 'Local'), 'Uzumaki', 'Bridge')
+    : path.join(app.getPath('appData'), 'uzumaki', 'bridge');
+app.setPath('userData', process.env.UZUMAKI_PROFILE_DIR || process.env.CADENCE_PROFILE_DIR || defaultProfile());
+// Windows: the sign-in window belongs to Uzumaki in the taskbar (the app's own id), not to "Electron".
+if (WINDOWS) app.setAppUserModelId('io.github.hanami117.uzumaki');
 
 // Only one --disable-features switch takes effect, so keep all features in this call.
 // No Chromium media session / MPRIS player: Rust owns the media keys.
@@ -36,8 +49,9 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 // Present as plain Chrome (no "Electron/..." token) so Apple serves the normal web player.
+// Windows says Windows: a Linux user agent with Windows' Widevine would be an odd pair.
 app.userAgentFallback =
-  `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
+  `Mozilla/5.0 (${WINDOWS ? 'Windows NT 10.0; Win64; x64' : 'X11; Linux x86_64'}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
 
 const send = (obj) => {
   const t = Date.now();
@@ -297,6 +311,8 @@ function createWindow(show) {
     // Linux: a dialog window (_NET_WM_WINDOW_TYPE_DIALOG), so tiling window managers float it
     // instead of tiling the sign-in into half the screen. Electron sets the type only here.
     ...(process.platform === 'linux' ? { type: 'dialog' } : {}),
+    // Windows: Uzumaki's icon on the sign-in window (the installed copy has it beside this file).
+    ...(WINDOWS && fs.existsSync(path.join(__dirname, 'uzumaki.ico')) ? { icon: path.join(__dirname, 'uzumaki.ico') } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -646,6 +662,21 @@ function handle(msg) {
   }
 }
 
+// Where the commands come from: standard input. Not on Windows: Electron is a windowed program
+// there and its main process gets a stand-in for standard input that ends at once (seen with
+// Electron 45 on Windows Server 2025), which would read as "the app is gone". The app makes a
+// named pipe for this user only and passes its name; standard output works and still carries
+// the replies and events. (Only the Windows app sets the variable; a socket path given on
+// another system works the same, which is how the check is tried there.)
+function commandInput() {
+  const pipe = process.env.UZUMAKI_BRIDGE_PIPE;
+  if (!pipe) return process.stdin;
+  const sock = net.connect(pipe);
+  sock.on('connect', () => log('commands from', pipe));
+  sock.on('error', (err) => log('command pipe:', String(err?.message ?? err)));
+  return sock;
+}
+
 app.whenReady().then(async () => {
   try {
     await components.whenReady(); // downloads the Widevine CDM on first run
@@ -659,7 +690,10 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin') app.dock?.hide();
   createWindow(process.argv.includes('--show'));
 
-  const rl = readline.createInterface({ input: process.stdin });
+  const input = commandInput();
+  const rl = readline.createInterface({ input });
+  // A pipe that breaks (the app was killed) may close without an orderly end.
+  input.on('close', () => rl.close());
   rl.on('line', (line) => {
     line = line.trim();
     if (!line) return;
@@ -671,12 +705,19 @@ app.whenReady().then(async () => {
     }
     handle(msg);
   });
-  rl.on('close', shutdown); // parent closed our stdin
+  rl.on('close', () => {
+    // The parent closed our input (the app quit, or went away).
+    if (!quitting) log('input closed: quitting');
+    shutdown();
+  });
 });
 
 app.on('before-quit', () => {
   quitting = true;
 });
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => {
+  if (!quitting) log('all windows closed: quitting');
+  app.quit();
+});
 
 log('started, userData =', app.getPath('userData'));

@@ -1239,7 +1239,7 @@ impl State {
             Event::Exited => {
                 self.session.bridge_up = false;
                 if self.session.error.is_none() {
-                    self.session.error = Some("The playback engine (Electron) stopped. See /tmp/uzumaki-bridge.log.".into());
+                    self.session.error = Some(format!("The playback engine (Electron) stopped. See {}.", crate::bridge::log_path().display()));
                 }
             }
         }

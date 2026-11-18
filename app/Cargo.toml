@@ -12,8 +12,6 @@ rune = { git = "https://github.com/anomalyco/rune", rev = "f3d04f3f2069d177d04c9
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = "3"
-# Same zbus 5 that Rune's accessibility stack already builds (no extra copy); blocking API for MPRIS.
-zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 uzumaki-fx = { path = "../fx" }
 # The `uzu` control protocol and socket (the app answers, `uzu` asks).
@@ -26,7 +24,24 @@ roxmltree = "0.20"
 rodio = { version = "0.21", default-features = false, features = ["playback", "symphonia-flac", "symphonia-mp3", "symphonia-aac", "symphonia-isomp4", "symphonia-alac", "symphonia-vorbis", "symphonia-ogg", "symphonia-wav", "symphonia-pcm"] }
 lofty = "0.25"
 # Script hooks (hooks.rs): geteuid, killpg. On macOS also stderr into ~/Library/Logs/Uzumaki (logfile.rs): dup2.
+# Local time (update.rs): localtime_r, on Windows localtime_s.
 libc = "0.2"
+
+# Linux and macOS. Same zbus 5 that Rune's accessibility stack already builds (no extra copy);
+# blocking API for MPRIS, notifications and "Show in Folder". (macOS compiles `mpris.rs` for its
+# shared types and tests; Windows has no session bus and leaves it out.)
+[target.'cfg(unix)'.dependencies]
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+
+# Windows glue, on the windows-sys and windows crates Rune already builds (new features only).
+# - `win.rs`: the console and log output, the app id, the window's icon and title bar, Explorer's
+#   "show in folder", the job that ends Electron with the app, registry calls.
+# - `login_win.rs`: start at login (the Run key). `discord/pipe.rs`: Discord's named pipe.
+# - `smtc.rs`: media keys and the media overlay (WinRT `Windows.Media`, a hidden window).
+# - `notify/windows.rs`: toast notifications (WinRT `Windows.UI.Notifications`).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_Registry", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "Media", "Storage_Streams", "UI_Notifications", "Win32_Foundation", "Win32_System_Threading", "Win32_System_WinRT", "Win32_UI_WindowsAndMessaging"] }
 
 # macOS only, on the objc2 0.6 stack Rune already builds (minimal features: no extra frameworks).
 # Media keys and Control Center (nowplaying.rs): MPRemoteCommandCenter / MPNowPlayingInfoCenter.
@@ -39,6 +54,11 @@ objc2-media-player = { version = "0.3", default-features = false, features = ["s
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSImage", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSMenu", "NSMenuItem", "NSSharingService", "NSBitmapImageRep", "NSImageRep", "NSGraphicsContext", "NSGraphics", "NSWindow", "NSAppearance"] }
 block2 = "0.6"
 dispatch2 = "0.3"
+
+# The icon, version details and manifest of the Windows program (`build.rs`). Build-time only, and
+# only when building on Windows: Linux and macOS never compile it.
+[target.'cfg(windows)'.build-dependencies]
+winresource = { version = "0.1.34", default-features = false }
 
 # macOS: the menu bar's AppKit tidy on a real NSApplication menu, on the main thread, with no
 # window and no event loop (the same pattern as Rune's own menu tests). A no-op elsewhere.

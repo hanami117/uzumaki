@@ -1,21 +1,39 @@
 //! The control protocol between a running Uzumaki and `uzu`, its mpc-style command line.
 //!
 //! The app plays the part of mpd: it owns the one playback bridge, the library and the queue.
-//! It listens on a Unix stream socket ([`socket_path`]). `uzu` connects, writes one [`Request`]
-//! per line as JSON, and reads one [`Reply`] per line back. A connection may carry any number of
+//! It listens on a Unix stream socket ([`socket_path`]; on Windows a named pipe, `pipe.rs`). `uzu`
+//! connects, writes one [`Request`] per line as JSON, and reads one [`Reply`] per line back. A connection may carry any number of
 //! requests; they are answered in order.
 //!
 //! Both sides use this crate, so they can't drift apart: the app calls [`serve`] with a handler,
 //! `uzu` uses [`Client`].
 
 use std::io::{self, BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+
+pub mod paths;
+#[cfg(windows)]
+mod pipe;
+
+/// Windows: a private named pipe with one client, for a helper process of the app.
+#[cfg(windows)]
+pub mod private_pipe {
+    pub use crate::pipe::{serve_one, wait_client};
+}
+
+/// One connection: a Unix stream socket, or a named pipe on Windows.
+#[cfg(unix)]
+type Stream = UnixStream;
+#[cfg(windows)]
+type Stream = std::fs::File;
 
 /// The build number: a whole number that goes up with every package built from the same version
 /// (a DMG or AppImage rebuilt without code changes gets the next one). Its one source is the
@@ -85,16 +103,20 @@ pub fn dev_suffix() -> String {
     git_suffix(parse_facts(env!("UZUMAKI_GIT")))
 }
 
-/// `$UZUMAKI_CTL_SOCKET`, else `<runtime dir>/uzumaki.sock` (see [`runtime_dir`]).
+/// `$UZUMAKI_CTL_SOCKET`, else `<runtime dir>/uzumaki.sock` (see [`runtime_dir`]). On Windows
+/// a named pipe: `\\.\pipe\io.github.hanami117.uzumaki-<user SID>`.
 pub fn socket_path() -> PathBuf {
     if let Some(p) = std::env::var_os("UZUMAKI_CTL_SOCKET").filter(|v| !v.is_empty()) {
         return PathBuf::from(p);
     }
+    #[cfg(windows)]
+    return pipe::default_path();
+    #[cfg(unix)]
     runtime_dir().join("uzumaki.sock")
 }
 
 /// Linux: `$XDG_RUNTIME_DIR`, else `/tmp/uzumaki-<uid>`.
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn runtime_dir() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR")
         .filter(|v| !v.is_empty())
@@ -127,13 +149,20 @@ fn darwin_user_temp_dir() -> Option<PathBuf> {
 }
 
 /// Where `uzu` records the last numbered list it printed: the socket path plus `.last`, so an
-/// instance with its own `UZUMAKI_CTL_SOCKET` keeps its own record.
+/// instance with its own `UZUMAKI_CTL_SOCKET` keeps its own record. Windows has no socket file (a
+/// pipe isn't one): the record is a file named after the pipe, in the state folder.
 pub fn last_path() -> PathBuf {
-    let mut p = socket_path().into_os_string();
-    p.push(".last");
-    PathBuf::from(p)
+    #[cfg(windows)]
+    return paths::state_dir().join(format!("{}.last", pipe::file_stem(&socket_path())));
+    #[cfg(unix)]
+    {
+        let mut p = socket_path().into_os_string();
+        p.push(".last");
+        PathBuf::from(p)
+    }
 }
 
+#[cfg(unix)]
 fn uid() -> u32 {
     // SAFETY: getuid has no preconditions and can't fail.
     unsafe { libc::getuid() }
@@ -524,8 +553,8 @@ pub const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A connection to the running app.
 pub struct Client {
-    writer: UnixStream,
-    reader: BufReader<UnixStream>,
+    writer: Stream,
+    reader: BufReader<Stream>,
 }
 
 impl Client {
@@ -535,8 +564,16 @@ impl Client {
     }
 
     pub fn connect_to(path: &Path) -> io::Result<Self> {
-        let stream = UnixStream::connect(path)?;
-        stream.set_read_timeout(Some(REPLY_TIMEOUT))?;
+        #[cfg(unix)]
+        let stream = {
+            let stream = UnixStream::connect(path)?;
+            stream.set_read_timeout(Some(REPLY_TIMEOUT))?;
+            stream
+        };
+        // A pipe handle has no read timeout of its own: `request` puts a time limit on the wait
+        // (`pipe::with_deadline`).
+        #[cfg(windows)]
+        let stream = pipe::connect(path)?;
         let reader = BufReader::new(stream.try_clone()?);
         Ok(Self { writer: stream, reader })
     }
@@ -549,7 +586,16 @@ impl Client {
         self.writer.write_all(line.as_bytes())?;
         self.writer.flush()?;
         let mut answer = String::new();
-        if self.reader.read_line(&mut answer)? == 0 {
+        #[cfg(unix)]
+        let read = self.reader.read_line(&mut answer)?;
+        // Windows: the same wait, given up after the time limit (a hung app never holds `uzu`).
+        #[cfg(windows)]
+        let read = {
+            let reader = &mut self.reader;
+            let pipe = reader.get_ref().try_clone()?;
+            pipe::with_deadline(&pipe, REPLY_TIMEOUT, || reader.read_line(&mut answer))?
+        };
+        if read == 0 {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the app closed the connection"));
         }
         serde_json::from_str(&answer).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
@@ -557,9 +603,11 @@ impl Client {
 }
 
 /// The listening socket. Dropping it removes the socket file (the accept thread ends with the
-/// process).
+/// process); on Windows it frees the pipe's name.
 pub struct Server {
     path: PathBuf,
+    #[cfg(windows)]
+    pipe: pipe::Listener,
 }
 
 impl Server {
@@ -570,13 +618,17 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
+        #[cfg(unix)]
         let _ = std::fs::remove_file(&self.path);
+        #[cfg(windows)]
+        self.pipe.stop();
     }
 }
 
 /// Listens on `path` and answers every request with `handler`, which runs on a per-connection
 /// thread (it may block). A stale socket file from a crashed run is replaced; one that still
 /// answers means another app owns it (`AddrInUse`).
+#[cfg(unix)]
 pub fn serve(path: &Path, handler: impl Fn(Request) -> Reply + Send + Sync + 'static) -> io::Result<Server> {
     if let Some(dir) = path.parent() {
         if !dir.exists() {
@@ -603,7 +655,15 @@ pub fn serve(path: &Path, handler: impl Fn(Request) -> Reply + Send + Sync + 'st
     Ok(Server { path: path.to_path_buf() })
 }
 
-fn connection(stream: UnixStream, handler: &(dyn Fn(Request) -> Reply + Send + Sync)) {
+/// Windows: listens on the named pipe for `path` (see `pipe.rs`). The pipe's first instance is
+/// exclusive, so a second app gets `AddrInUse`; there is no stale file to clean up.
+#[cfg(windows)]
+pub fn serve(path: &Path, handler: impl Fn(Request) -> Reply + Send + Sync + 'static) -> io::Result<Server> {
+    let pipe = pipe::listen(path, Arc::new(handler))?;
+    Ok(Server { path: path.to_path_buf(), pipe })
+}
+
+fn connection(stream: Stream, handler: &(dyn Fn(Request) -> Reply + Send + Sync)) {
     let Ok(mut writer) = stream.try_clone() else { return };
     for line in BufReader::new(stream).lines() {
         let Ok(line) = line else { return };
@@ -704,6 +764,12 @@ mod tests {
         assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), with);
     }
 
+    #[cfg(windows)]
+    fn temp_socket(name: &str) -> PathBuf {
+        PathBuf::from(format!(r"\\.\pipe\uzumaki-ctl-test-{}-{name}", std::process::id()))
+    }
+
+    #[cfg(unix)]
     fn temp_socket(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("uzumaki-ctl-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -829,6 +895,17 @@ mod tests {
         assert_eq!(old.name, "Bedroom", "an older client reads the first speaker");
     }
 
+    /// Windows: the pipe is named after the user, and any `UZUMAKI_CTL_SOCKET` text is a pipe name.
+    #[test]
+    #[cfg(windows)]
+    fn the_pipe_is_the_users_and_any_path_becomes_a_pipe_name() {
+        let p = pipe::default_path();
+        assert!(p.to_string_lossy().starts_with(r"\\.\pipe\io.github.hanami117.uzumaki-S-1-"), "{}", p.display());
+        assert_eq!(pipe::pipe_name(Path::new(r"\\.\pipe\x")), r"\\.\pipe\x");
+        assert_eq!(pipe::pipe_name(Path::new(r"C:\Temp\uzu.sock")), r"\\.\pipe\C--Temp-uzu.sock");
+        assert_eq!(pipe::file_stem(Path::new(r"C:\Temp\uzu.sock")), "C--Temp-uzu.sock");
+    }
+
     #[test]
     fn pinned_first_is_stable() {
         let c = |id: &str, pinned: Option<u32>| CollectionInfo { kind: Kind::Playlist, id: id.into(), title: id.into(), subtitle: String::new(), count: None, favorites: false, editable: true, year: None, pinned };
@@ -895,19 +972,25 @@ mod tests {
         // A second app on the same path is refused while the first answers.
         assert_eq!(serve(&path, |_| Reply::Error { message: String::new() }).err().map(|e| e.kind()), Some(io::ErrorKind::AddrInUse));
         drop(server);
+        #[cfg(unix)]
         assert!(!path.exists());
+        assert!(Client::connect_to(&path).is_err(), "nobody answers after the app ends");
     }
 
     #[test]
     fn stale_socket_is_replaced_and_bad_lines_get_an_error() {
         let path = temp_socket("stale");
+        #[cfg(unix)]
         {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let _dead = UnixListener::bind(&path).unwrap(); // bound, then dropped: nobody answers
+            assert!(path.exists());
         }
-        assert!(path.exists());
         let _server = serve(&path, |_| Reply::Status(Status::default())).unwrap();
+        #[cfg(unix)]
         let mut s = UnixStream::connect(&path).unwrap();
+        #[cfg(windows)]
+        let mut s = pipe::connect(&path).unwrap();
         s.write_all(b"not json\n").unwrap();
         let mut line = String::new();
         BufReader::new(s).read_line(&mut line).unwrap();

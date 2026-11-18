@@ -22,6 +22,9 @@ use std::path::PathBuf;
 
 /// `$XDG_CACHE_HOME/uzumaki` (else `~/.cache/uzumaki`).
 pub fn cache_base() -> PathBuf {
+    #[cfg(windows)]
+    return uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Cache);
+    #[cfg(not(windows))]
     std::env::var_os("XDG_CACHE_HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)

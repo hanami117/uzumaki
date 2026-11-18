@@ -300,11 +300,16 @@ pub fn auto_wanted(enabled: bool, busy: bool, last_check: Option<u64>, last_atte
 /// `$XDG_STATE_HOME/uzumaki`, else `~/.local/state/uzumaki` (on macOS too): what the app
 /// remembers by itself, apart from the settings.
 pub fn state_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return Some(uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::State));
+    #[cfg(not(windows))]
+    {
     let base = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     Some(base.join("uzumaki"))
+    }
 }
 
 /// `$XDG_STATE_HOME/uzumaki/update.json`, else `~/.local/state/uzumaki/update.json`.
@@ -396,6 +401,31 @@ pub struct LocalTime {
 }
 
 /// `unix` in the computer's time zone.
+#[cfg(windows)]
+pub fn local_time(unix: u64) -> Option<LocalTime> {
+    let t = libc::time_t::try_from(unix).ok()?;
+    // SAFETY: localtime_s fills the zeroed `tm` we own; it reads `t` only.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_s(&mut tm, &t) } != 0 {
+        return None;
+    }
+    let (year, month, day) = (tm.tm_year + 1900, (tm.tm_mon + 1) as u32, tm.tm_mday as u32);
+    Some(LocalTime { year, month, day, hour: tm.tm_hour as u32, minute: tm.tm_min as u32, days: days_from_civil(year as i64, month as i64, day as i64) })
+}
+
+/// Days since 1970-01-01 of a calendar date (Howard Hinnant's `days_from_civil`).
+#[cfg(windows)]
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// `unix` in the computer's time zone.
+#[cfg(not(windows))]
 pub fn local_time(unix: u64) -> Option<LocalTime> {
     let t = libc::time_t::try_from(unix).ok()?;
     // SAFETY: localtime_r fills the zeroed `tm` we own; it reads `t` only.
@@ -578,6 +608,28 @@ impl Notice {
 /// A skip holds for one (version, build): a higher build of the same version shows again. Below
 /// `minimum_supported` the notice is `required` and shows even when skipped.
 pub fn notice(latest: &Latest, current: (&str, u32), skipped: Option<(&str, u32)>, install: Install, mac: bool) -> Option<Notice> {
+    let system = if mac {
+        System::Mac
+    } else if cfg!(windows) {
+        System::Windows
+    } else {
+        System::Linux
+    };
+    notice_on(latest, current, skipped, install, system)
+}
+
+/// The system a notice is for: which of the release's files its Download button offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum System {
+    Mac,
+    Linux,
+    /// `latest.json` names no Windows file yet: the button opens the release's page, never
+    /// another system's download.
+    Windows,
+}
+
+/// [`notice`] for a given system (tests ask for each on any machine).
+pub fn notice_on(latest: &Latest, current: (&str, u32), skipped: Option<(&str, u32)>, install: Install, system: System) -> Option<Notice> {
     let build = build_of(latest.build);
     let required = below_minimum(latest, current.0);
     let is_skipped = skipped.is_some_and(|(v, b)| same_version(v, &latest.version) && build_of(b) == build);
@@ -585,15 +637,14 @@ pub fn notice(latest: &Latest, current: (&str, u32), skipped: Option<(&str, u32)
         return None;
     }
     let d = &latest.downloads;
-    let file = if install == Install::AppImage {
-        &d.appimage
-    } else if mac {
-        &d.macos_dmg
-    } else {
-        &d.linux_tarball
+    let file = match (install, system) {
+        (Install::AppImage, _) => Some(&d.appimage),
+        (_, System::Mac) => Some(&d.macos_dmg),
+        (_, System::Linux) => Some(&d.linux_tarball),
+        (_, System::Windows) => None,
     };
     let download = match install {
-        Install::Direct | Install::AppImage => Some(file).filter(|u| is_web(u)).or(Some(&latest.notes_url).filter(|u| is_web(u))).cloned(),
+        Install::Direct | Install::AppImage => file.filter(|u| is_web(u)).or(Some(&latest.notes_url).filter(|u| is_web(u))).cloned(),
         Install::System | Install::Homebrew | Install::Aur => None,
     };
     Some(Notice { version: latest.version.clone(), build, notes_url: latest.notes_url.clone(), download, install, required })
@@ -1095,8 +1146,12 @@ mod tests {
         let mac = notice(&l, ("0.1.0", 1), None, Install::Direct, true).unwrap();
         assert_eq!(mac.download.as_deref(), Some(l.downloads.macos_dmg.as_str()));
         assert_eq!(mac.message(), "Uzumaki 0.2.0 is available.");
-        let linux = notice(&l, ("0.1.0", 1), None, Install::Direct, false).unwrap();
+        let linux = notice_on(&l, ("0.1.0", 1), None, Install::Direct, System::Linux).unwrap();
         assert_eq!(linux.download.as_deref(), Some(l.downloads.linux_tarball.as_str()));
+        // Windows: no file of its own in the feed yet, so the release page; never the Linux tarball.
+        let windows = notice_on(&l, ("0.1.0", 1), None, Install::Direct, System::Windows).unwrap();
+        assert_eq!(windows.download.as_deref(), Some(l.notes_url.as_str()));
+        assert_eq!(windows.message(), "Uzumaki 0.2.0 is available.");
         let appimage = notice(&l, ("0.1.0", 1), None, Install::AppImage, false).unwrap();
         assert_eq!(appimage.download.as_deref(), Some(l.downloads.appimage.as_str()));
         assert_eq!(appimage.message(), "Uzumaki 0.2.0 is available.");

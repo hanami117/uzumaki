@@ -11,6 +11,8 @@ mod last;
 mod list;
 mod run;
 mod tui;
+#[cfg(windows)]
+mod winterm;
 #[cfg(test)]
 mod config_tests;
 #[cfg(test)]
@@ -28,10 +30,12 @@ use run::{Env, Fail, Offline, Term, Timing};
 
 static STOP: AtomicBool = AtomicBool::new(false);
 
+#[cfg(unix)]
 extern "C" fn on_sigint(_: libc::c_int) {
     STOP.store(true, Ordering::Relaxed);
 }
 
+#[cfg(unix)]
 fn install_sigint() {
     // Plain signal(): the handler only sets a flag that `uzu watch` checks every few ms, so it
     // can show the cursor again. SIGTERM too (`kill`), or the terminal keeps a hidden cursor.
@@ -40,6 +44,19 @@ fn install_sigint() {
             libc::signal(sig, on_sigint as extern "C" fn(libc::c_int) as libc::sighandler_t);
         }
     }
+}
+
+/// Windows: Ctrl+C, Ctrl+Break and the console closing set the same flag.
+#[cfg(windows)]
+unsafe extern "system" fn on_console_ctrl(_kind: u32) -> windows_sys::Win32::Foundation::BOOL {
+    STOP.store(true, Ordering::Relaxed);
+    1
+}
+
+#[cfg(windows)]
+fn install_sigint() {
+    // SAFETY: the handler is a plain function that only stores a flag.
+    unsafe { windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(on_console_ctrl), 1) };
 }
 
 fn main() {

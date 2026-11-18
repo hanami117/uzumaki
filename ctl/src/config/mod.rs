@@ -141,11 +141,15 @@ pub struct Config {
 /// `$XDG_CONFIG_HOME/uzumaki/uzu.toml`, else `~/.config/uzumaki/uzu.toml`: next to the app's
 /// `settings.json`, but a file of its own.
 pub fn default_path() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return Some(uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Config).join("uzu.toml"));
+    #[cfg(not(windows))]
     path_in(std::env::var_os("XDG_CONFIG_HOME"), std::env::var_os("HOME"))
 }
 
 /// [`default_path`] for the given environment (a relative `XDG_CONFIG_HOME` is ignored, as the
 /// XDG rules say).
+#[cfg_attr(windows, allow(dead_code))]
 pub fn path_in(xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> Option<PathBuf> {
     let base = xdg.map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| home.map(|h| PathBuf::from(h).join(".config")))?;
     Some(base.join("uzumaki").join("uzu.toml"))

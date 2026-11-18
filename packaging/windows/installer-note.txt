@@ -1,0 +1,25 @@
+Uzumaki for Windows (preview).
+
+Please report what goes wrong at https://github.com/hanami117/uzumaki/issues
+
+Good to know:
+
+- Uzumaki is installed for you only. Setup never asks for administrator rights.
+
+- The programs are not signed yet. Windows may have said "Windows protected your PC" when
+  you started this Setup; it may say so again for a new version.
+
+- You need an Apple Music subscription for Apple Music. Your own music files play without
+  one. You sign in once, in a window of Apple's own web player.
+
+- Closing Uzumaki's window can keep it playing in the notification area (next to the clock,
+  maybe behind the ^ arrow) when "Close to tray" is on in Settings. Right-click its icon to
+  quit.
+
+- Your settings, your sign-in and the caches are kept in your user profile
+  (%APPDATA%\Uzumaki and %LOCALAPPDATA%\Uzumaki). Uninstalling Uzumaki keeps them unless you
+  say otherwise.
+
+Uzumaki is free software under the GNU General Public License, version 3 or later. It is not
+affiliated with Apple. Playback uses castLabs Electron and Google's Widevine, which Electron
+downloads on first start.

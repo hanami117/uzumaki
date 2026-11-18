@@ -9,7 +9,9 @@ description = "Uzumaki AirPlay: finds AirPlay speakers and sends the player's ou
 [dependencies]
 # Browse only (_airplay._tcp, _raop._tcp); MIT/Apache-2.0.
 mdns-sd = "0.13"
-# mkfifo, open(O_NONBLOCK), fcntl for cliairplay's command pipe.
-libc = "0.2"
 # This computer's addresses, to leave it out of the picker (mdns-sd already depends on it).
 if-addrs = "0.13"
+
+# mkfifo, open(O_NONBLOCK), fcntl for cliairplay's command pipe; signals to the helpers.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -598,6 +598,7 @@ fn row_el(r: &Rx, id: Row) -> El {
                 (Some(why), _) => why.to_string(),
                 (None, true) => "Waiting for your OK in System Settings, General, Login Items.".to_string(),
                 _ if MAC => "Opens Uzumaki when you log in to your Mac. It is listed in System Settings, General, Login Items.".to_string(),
+                _ if cfg!(windows) => "Opens Uzumaki when you sign in to Windows. It is listed in Windows Settings, Apps, Startup.".to_string(),
                 _ => "Adds Uzumaki to your desktop's autostart programs (~/.config/autostart).".to_string(),
             };
             let sw = switch("settings/start-at-login", "Start Uzumaki when I log in", l.on, l.available() && !s.login_busy, |s, on| s.set_start_at_login(on));
@@ -625,6 +626,8 @@ fn row_el(r: &Rx, id: Row) -> El {
             if MAC { "Show icon in the menu bar" } else { "Show in system tray" },
             Some(if MAC {
                 "Play, pause and skip from the menu bar.".into()
+            } else if cfg!(windows) {
+                "Play, pause and skip from the notification area, next to the clock.".into()
             } else {
                 "Play, pause and skip from the tray. Needs a tray host (on GNOME, the AppIndicator extension).".into()
             }),
@@ -1326,6 +1329,7 @@ fn block(title: &str, desc: &str, content: El) -> El {
 
 /// A path for display, with the home folder as `~`.
 pub fn tilde(path: &std::path::Path) -> String {
+    #[cfg(not(windows))]
     if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
         if let Ok(rest) = path.strip_prefix(&home) {
             return if rest.as_os_str().is_empty() { "~".into() } else { format!("~/{}", rest.display()) };
@@ -1585,7 +1589,7 @@ mod tests {
         assert!(rt.state.login.on && !rt.state.login_busy);
         click(&mut rt, "settings/start-hidden");
         assert!(rt.state.settings.start_hidden);
-        if cfg!(target_os = "linux") {
+        if cfg!(any(target_os = "linux", windows)) {
             assert_eq!(rt.state.login.hidden, Some(true), "the entry gets --hidden");
         }
         click(&mut rt, "settings/start-at-login");

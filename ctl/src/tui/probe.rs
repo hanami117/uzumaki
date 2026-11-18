@@ -5,6 +5,9 @@
 //! to wait for), keeps the raw replies for `uzu cover-info`, and doesn't drop a kitty answer
 //! when the cell size is missing. The terminal must be in raw mode.
 
+// Windows: no query yet (`ask` says so; the cover falls back to half blocks).
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
 use std::time::{Duration, Instant};
 
 use ratatui_image::picker::ProtocolType;

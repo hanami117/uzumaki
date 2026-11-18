@@ -20,7 +20,10 @@
 mod activity;
 mod ipc;
 
-#[cfg(test)]
+#[cfg(windows)]
+mod pipe;
+// The tests play Discord on a Unix socket (Windows: a pipe, in `pipe.rs`).
+#[cfg(all(test, unix))]
 mod tests;
 
 use std::path::PathBuf;
@@ -221,7 +224,7 @@ impl Presence {
     }
 
     /// Stops and waits (up to `wait`) for the card to be cleared.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn close(&mut self, wait: Duration) {
         self.stop();
         if let Some(done) = self.retiring.take() {

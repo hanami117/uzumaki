@@ -48,10 +48,18 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../bridge"));
     let dir = dir.canonicalize().unwrap_or(dir);
-    // Inside the app bundle on macOS, a plain binary on Linux (the same rule as the app's bridge.rs).
-    let dist = dir.join("node_modules/electron/dist");
+    // Windows: `canonicalize` gives `\\?\C:\…`, which Electron doesn't take as its app folder.
+    let dir = match dir.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(rest) if cfg!(windows) && rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => dir,
+    };
+    // Inside the app bundle on macOS, a plain binary on Linux, `electron.exe` on Windows (the
+    // same rule as the app's bridge.rs).
+    let dist = dir.join("node_modules").join("electron").join("dist");
     let electron = if cfg!(target_os = "macos") {
         dist.join("Electron.app/Contents/MacOS/Electron")
+    } else if cfg!(windows) {
+        dist.join("electron.exe")
     } else {
         dist.join("electron")
     };
