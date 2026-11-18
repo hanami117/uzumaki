@@ -134,6 +134,18 @@ fn accept(pipe: &File) -> bool {
     ok || io::Error::last_os_error().raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32)
 }
 
+/// One pipe for one client of ours (the app's playback bridge gets its commands through one):
+/// only the current user may open it, remote clients are refused, and nobody else can have
+/// taken the name first. The client connects later; [`wait_client`] waits for it.
+pub fn serve_one(name: &str) -> io::Result<File> {
+    instance(&wide(name), true, &OnlyMe::new())
+}
+
+/// Waits until a client has opened `pipe` (made by [`serve_one`]).
+pub fn wait_client(pipe: &File) -> bool {
+    accept(pipe)
+}
+
 /// The listening side; [`Listener::stop`] ends its thread and frees the name.
 pub struct Listener {
     name: String,

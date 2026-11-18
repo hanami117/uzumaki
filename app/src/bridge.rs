@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -88,8 +88,21 @@ pub enum Event {
 
 type ReplyFn<M> = Box<dyn FnOnce(Result<Value, String>) -> Option<M> + Send>;
 
+/// Where the commands are written: Electron's standard input; on Windows a named pipe
+/// (`win::CommandPipe` says why), or standard input for a test's stand-in process.
+#[cfg(not(windows))]
+type Commands = std::process::ChildStdin;
+#[cfg(windows)]
+type Commands = crate::win::Commands;
+
+/// Windows: the pipe a bridge about to start will read its commands from. Nothing elsewhere.
+#[cfg(not(windows))]
+type CommandPipe = std::convert::Infallible;
+#[cfg(windows)]
+type CommandPipe = crate::win::CommandPipe;
+
 struct Inner<M> {
-    stdin: Mutex<Option<ChildStdin>>,
+    stdin: Mutex<Option<Commands>>,
     child: Mutex<Child>,
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, ReplyFn<M>>>,
@@ -305,11 +318,26 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
         if std::env::var_os("UZUMAKI_PROFILE_DIR").is_none_or(|v| v.is_empty()) && std::env::var_os("CADENCE_PROFILE_DIR").is_none_or(|v| v.is_empty()) {
             cmd.env("UZUMAKI_PROFILE_DIR", uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Bridge));
         }
+        // Windows: Electron reads its commands from a named pipe of ours, not from its standard
+        // input (which it doesn't get there).
+        #[cfg(windows)]
+        {
+            let pipe = CommandPipe::create()?;
+            cmd.env(CommandPipe::ENV, pipe.name());
+            Self::start(cmd, log_path, sink, Some(pipe))
+        }
+        #[cfg(not(windows))]
         Self::spawn_command(cmd, log_path, sink)
     }
 
-    /// Starts `cmd` as the bridge (`spawn`; tests pass a stand-in process).
-    pub fn spawn_command(mut cmd: Command, log_path: &std::path::Path, sink: impl Fn(M) + Send + Sync + 'static) -> std::io::Result<Self> {
+    /// Starts `cmd` as the bridge (tests pass a stand-in process): commands go to its standard input.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn spawn_command(cmd: Command, log_path: &std::path::Path, sink: impl Fn(M) + Send + Sync + 'static) -> std::io::Result<Self> {
+        Self::start(cmd, log_path, sink, None)
+    }
+
+    /// Starts `cmd`; `pipe` (Windows) is where it will read its commands, else its standard input.
+    fn start(mut cmd: Command, log_path: &std::path::Path, sink: impl Fn(M) + Send + Sync + 'static, pipe: Option<CommandPipe>) -> std::io::Result<Self> {
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -320,8 +348,18 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
         #[cfg(windows)]
         crate::win::end_with_us(&child);
         let stdout = child.stdout.take().expect("piped stdout");
+        #[cfg(not(windows))]
+        let commands = {
+            let _: Option<CommandPipe> = pipe;
+            child.stdin.take()
+        };
+        #[cfg(windows)]
+        let commands = match pipe {
+            Some(pipe) => Some(Commands::Pipe(pipe.into_writer())),
+            None => child.stdin.take().map(Commands::Stdin),
+        };
         let inner = Arc::new(Inner {
-            stdin: Mutex::new(child.stdin.take()),
+            stdin: Mutex::new(commands),
             child: Mutex::new(child),
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),

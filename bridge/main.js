@@ -3,6 +3,7 @@
 //
 // Protocol: newline-delimited JSON.
 //   stdin  <- commands  {"id": 1, "cmd": "search", "term": "..."}
+//             (Windows: from the named pipe in UZUMAKI_BRIDGE_PIPE instead; see commandInput)
 //   stdout -> replies   {"id": 1, "ok": true, "result": ...} | {"id": 1, "ok": false, "error": "..."}
 //          -> events    {"event": "ready" | "auth" | "storefront" | "nowPlaying" | "playbackState" | "time" | "widevine" | "window" | "error", ...}
 // stdout is the protocol channel: never console.log here, use log() (stderr).
@@ -10,6 +11,7 @@
 
 const { app, BrowserWindow, components, ipcMain, screen, session, shell } = require('electron');
 const fs = require('node:fs');
+const net = require('node:net');
 const path = require('node:path');
 const readline = require('node:readline');
 const signin = require('./signin.js');
@@ -660,6 +662,21 @@ function handle(msg) {
   }
 }
 
+// Where the commands come from: standard input. Not on Windows: Electron is a windowed program
+// there and its main process gets a stand-in for standard input that ends at once (seen with
+// Electron 45 on Windows Server 2025), which would read as "the app is gone". The app makes a
+// named pipe for this user only and passes its name; standard output works and still carries
+// the replies and events. (Only the Windows app sets the variable; a socket path given on
+// another system works the same, which is how the check is tried there.)
+function commandInput() {
+  const pipe = process.env.UZUMAKI_BRIDGE_PIPE;
+  if (!pipe) return process.stdin;
+  const sock = net.connect(pipe);
+  sock.on('connect', () => log('commands from', pipe));
+  sock.on('error', (err) => log('command pipe:', String(err?.message ?? err)));
+  return sock;
+}
+
 app.whenReady().then(async () => {
   try {
     await components.whenReady(); // downloads the Widevine CDM on first run
@@ -673,7 +690,10 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin') app.dock?.hide();
   createWindow(process.argv.includes('--show'));
 
-  const rl = readline.createInterface({ input: process.stdin });
+  const input = commandInput();
+  const rl = readline.createInterface({ input });
+  // A pipe that breaks (the app was killed) may close without an orderly end.
+  input.on('close', () => rl.close());
   rl.on('line', (line) => {
     line = line.trim();
     if (!line) return;
@@ -686,7 +706,7 @@ app.whenReady().then(async () => {
     handle(msg);
   });
   rl.on('close', () => {
-    // The parent closed our stdin (the app quit, or went away).
+    // The parent closed our input (the app quit, or went away).
     if (!quitting) log('input closed: quitting');
     shutdown();
   });

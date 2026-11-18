@@ -286,6 +286,116 @@ fn fit(wanted: (f32, f32), min: (f32, f32), area: (f32, f32)) -> (f32, f32) {
     (wanted.0.min(area.0 - 24.0).max(min.0), wanted.1.min(area.1 - 56.0).max(min.1))
 }
 
+/// The playback bridge's command channel on Windows.
+///
+/// Elsewhere the app writes its commands to Electron's standard input. On Windows Electron is a
+/// windowed program and its main process gets no usable standard input: reading it ends at once
+/// (seen on a Windows runner; the bridge took that for "the app is gone" and quit). So the app
+/// makes a named pipe for the current user only, tells Electron its name
+/// ([`CommandPipe::ENV`]), and Electron connects and reads its commands there. Events still come
+/// back on Electron's standard output, which works.
+pub struct CommandPipe {
+    name: String,
+    pipe: std::fs::File,
+}
+
+impl CommandPipe {
+    /// The environment variable that carries the pipe's name to `bridge/main.js`.
+    pub const ENV: &'static str = "UZUMAKI_BRIDGE_PIPE";
+
+    /// A new pipe under a name of its own (this process, a counter, the clock).
+    pub fn create() -> std::io::Result<Self> {
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+        let name = format!(r"\\.\pipe\{}-bridge-{}-{n}-{nanos:08x}", crate::APP_ID, std::process::id());
+        let pipe = uzumaki_ctl::private_pipe::serve_one(&name)?;
+        Ok(Self { name, pipe })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The writing end. Writes never wait: a thread waits for Electron to connect (it does after
+    /// its own start-up, seconds later) and passes on what was written meanwhile, in order.
+    pub fn into_writer(self) -> PipeWriter {
+        use std::io::Write;
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let connected = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (seen, mut pipe) = (connected.clone(), self.pipe);
+        let spawned = std::thread::Builder::new().name("bridge-commands".into()).spawn(move || {
+            if !uzumaki_ctl::private_pipe::wait_client(&pipe) {
+                return;
+            }
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            // Ends when the writer is dropped (the channel closes) or Electron is gone (a write
+            // fails); closing the pipe then is what tells Electron the app is gone.
+            for chunk in rx {
+                if pipe.write_all(&chunk).is_err() {
+                    break;
+                }
+            }
+        });
+        PipeWriter { tx: spawned.is_ok().then_some(tx), name: self.name, connected }
+    }
+}
+
+/// See [`CommandPipe::into_writer`].
+pub struct PipeWriter {
+    tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
+    name: String,
+    connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl std::io::Write for PipeWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match &self.tx {
+            Some(tx) if tx.send(buf.to_vec()).is_ok() => Ok(buf.len()),
+            _ => Err(std::io::ErrorKind::BrokenPipe.into()),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for PipeWriter {
+    fn drop(&mut self) {
+        // The thread passes on what is still queued, then closes the pipe.
+        self.tx = None;
+        // Electron never connected (it died first, or a test's stand-in never does): the thread
+        // still waits for a client. Be that client for a moment, so it can end.
+        if !self.connected.load(std::sync::atomic::Ordering::SeqCst) {
+            let _ = std::fs::OpenOptions::new().read(true).open(&self.name);
+        }
+    }
+}
+
+/// Where the bridge's commands go: the named pipe for Electron, standard input for the
+/// stand-in processes of the tests.
+pub enum Commands {
+    Stdin(std::process::ChildStdin),
+    Pipe(PipeWriter),
+}
+
+impl std::io::Write for Commands {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Commands::Stdin(s) => s.write(buf),
+            Commands::Pipe(p) => p.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Commands::Stdin(s) => s.flush(),
+            Commands::Pipe(p) => p.flush(),
+        }
+    }
+}
+
 /// The side of a notification-area icon in pixels at the system's scale: 16 at 100 %, 20 at
 /// 125 %, 24 at 150 %, 32 at 200 %.
 pub fn tray_icon_px() -> u32 {
@@ -382,6 +492,45 @@ mod tests {
         if let Some((w, h)) = work_area() {
             assert!((200.0..20000.0).contains(&w) && (200.0..20000.0).contains(&h), "{w}x{h}");
         }
+    }
+
+    /// The bridge's command pipe with a stand-in for Electron: what is written before the
+    /// client connects arrives in order, and dropping the writer closes the pipe.
+    #[test]
+    fn commands_reach_a_client_that_connects_late_and_the_pipe_closes_with_the_writer() {
+        use std::io::{BufRead, BufReader, Write};
+        let pipe = CommandPipe::create().unwrap();
+        let name = pipe.name().to_string();
+        assert!(name.starts_with(r"\\.\pipe\io.github.hanami117.uzumaki-bridge-"), "{name}");
+        let mut writer = Commands::Pipe(pipe.into_writer());
+        writeln!(writer, "{{\"cmd\":\"one\"}}").unwrap();
+        writeln!(writer, "{{\"cmd\":\"two\"}}").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let client = std::fs::OpenOptions::new().read(true).write(true).open(&name).unwrap();
+        let mut lines = BufReader::new(client).lines();
+        assert_eq!(lines.next().unwrap().unwrap(), "{\"cmd\":\"one\"}");
+        assert_eq!(lines.next().unwrap().unwrap(), "{\"cmd\":\"two\"}");
+        writeln!(writer, "{{\"cmd\":\"quit\"}}").unwrap();
+        drop(writer);
+        assert_eq!(lines.next().unwrap().unwrap(), "{\"cmd\":\"quit\"}", "what was queued still arrives");
+        assert!(lines.next().is_none_or(|l| l.is_err()), "then the pipe is closed");
+    }
+
+    /// A bridge that never connects (it died at start): dropping the writer ends its thread.
+    #[test]
+    fn a_writer_nobody_connected_to_goes_away_quietly() {
+        use std::io::Write;
+        let pipe = CommandPipe::create().unwrap();
+        let name = pipe.name().to_string();
+        let mut writer = pipe.into_writer();
+        writer.write_all(b"x\n").unwrap();
+        drop(writer);
+        // The pipe's one instance is gone a moment later: nobody can open it any more.
+        let gone = (0..100).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::fs::OpenOptions::new().read(true).open(&name).is_err()
+        });
+        assert!(gone, "the pipe was closed");
     }
 
     #[test]

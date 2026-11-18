@@ -9,6 +9,7 @@
 // Exit code 0: all checks passed. Used by .github/workflows/windows.yml; works on any system.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -33,10 +34,34 @@ const log = fs.openSync(logPath, 'w');
 const args = [bridge];
 // A CI container has no user namespaces for Chromium's sandbox (Linux only).
 if (process.platform === 'linux' && process.env.CI) args.push('--no-sandbox');
-const child = spawn(electron, args, {
-  stdio: ['pipe', 'pipe', log],
-  env: { ...process.env, UZUMAKI_PROFILE_DIR: profile, UZUMAKI_MUTE: '1' },
-});
+const env = { ...process.env, UZUMAKI_PROFILE_DIR: profile, UZUMAKI_MUTE: '1' };
+
+// Commands go to the bridge's standard input; on Windows through a named pipe it connects to
+// (Electron's main process has no usable standard input there), as the app does it.
+let commands = null; // a writable stream
+let pipeServer = null;
+// SMOKE_PIPE=1 tries the pipe on another system too (a socket in the scratch folder).
+const WINDOWS = process.platform === 'win32';
+const usePipe = WINDOWS || process.env.SMOKE_PIPE === '1';
+if (usePipe) {
+  const name = WINDOWS ? `\\\\.\\pipe\\uzumaki-bridge-smoke-${process.pid}` : path.join(os.tmpdir(), `uzumaki-smoke-${process.pid}.sock`);
+  env.UZUMAKI_BRIDGE_PIPE = name;
+  const connected = new Promise((resolve) => {
+    pipeServer = net.createServer((sock) => {
+      sock.on('error', () => {});
+      resolve(sock);
+    });
+  });
+  await new Promise((resolve) => pipeServer.listen(name, resolve));
+  commands = { pending: connected };
+}
+const child = spawn(electron, args, { stdio: ['pipe', 'pipe', log], env });
+if (!usePipe) commands = { stream: child.stdin };
+// The stream to write commands to (on Windows: once the bridge has connected).
+async function commandStream() {
+  if (!commands.stream) commands.stream = await Promise.race([commands.pending, timeout(TIMEOUT_MS, 'the bridge to connect to the command pipe')]);
+  return commands.stream;
+}
 
 const TIMEOUT_MS = 180000;
 const waiting = new Map(); // id -> resolve
@@ -88,10 +113,10 @@ function event(name) {
   ]);
 }
 
-function call(cmd) {
+async function call(cmd) {
   const id = nextId++;
   const reply = new Promise((resolve) => waiting.set(id, resolve));
-  child.stdin.write(JSON.stringify({ ...cmd, id }) + '\n');
+  (await commandStream()).write(JSON.stringify({ ...cmd, id }) + '\n');
   return Promise.race([reply, timeout(60000, `the reply to ${cmd.cmd}`)]);
 }
 
@@ -119,12 +144,14 @@ try {
 
 // Asked to quit, the bridge ends by itself; closing its input must end it too (the app's way).
 try {
-  child.stdin.write(JSON.stringify({ cmd: 'quit', id: nextId++ }) + '\n');
-  child.stdin.end();
+  const stream = await commandStream();
+  stream.write(JSON.stringify({ cmd: 'quit', id: nextId++ }) + '\n');
+  stream.end();
 } catch {}
 await Promise.race([new Promise((r) => (exited ? r() : child.on('exit', r))), new Promise((r) => setTimeout(r, 15000))]);
 check(exited, 'the bridge ends when told to quit');
 if (!exited) child.kill();
+pipeServer?.close();
 
 console.log('--- bridge log (last lines)');
 try {

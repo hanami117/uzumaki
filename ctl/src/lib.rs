@@ -23,6 +23,12 @@ pub mod paths;
 #[cfg(windows)]
 mod pipe;
 
+/// Windows: a private named pipe with one client, for a helper process of the app.
+#[cfg(windows)]
+pub mod private_pipe {
+    pub use crate::pipe::{serve_one, wait_client};
+}
+
 /// One connection: a Unix stream socket, or a named pipe on Windows.
 #[cfg(unix)]
 type Stream = UnixStream;
