@@ -26,6 +26,19 @@ fn has(std_handle: u32) -> bool {
     !h.is_null() && h != INVALID_HANDLE_VALUE
 }
 
+/// True when the handle is the NUL device: what a program gets that was started "with no
+/// output" (`uzu start`, which starts the app detached). A character device that isn't a console.
+fn is_nul(std_handle: u32) -> bool {
+    use windows_sys::Win32::Storage::FileSystem::{FILE_TYPE_CHAR, GetFileType};
+    use windows_sys::Win32::System::Console::GetConsoleMode;
+    // SAFETY: plain queries on a handle of this process; an invalid one just fails them.
+    unsafe {
+        let h: HANDLE = GetStdHandle(std_handle);
+        let mut mode = 0u32;
+        !h.is_null() && h != INVALID_HANDLE_VALUE && GetFileType(h) == FILE_TYPE_CHAR && GetConsoleMode(h, &mut mode) == 0
+    }
+}
+
 fn point(std_handle: u32, file: std::fs::File) {
     // SAFETY: the handle stays open for the life of the process (it is never closed).
     unsafe { SetStdHandle(std_handle, file.into_raw_handle()) };
@@ -34,10 +47,13 @@ fn point(std_handle: u32, file: std::fs::File) {
 /// Uzumaki is a windowed program, so it starts with no console. This gives its messages a place:
 /// - output that is already redirected (`uzumaki --list-scenes > file`, a pipe) is left alone;
 /// - started from a terminal, it writes to that terminal;
-/// - started from Explorer, the Start menu or at login, it appends to
-///   `%LOCALAPPDATA%\Uzumaki\Logs\uzumaki.log`.
+/// - started from Explorer, the Start menu or at login, or by `uzu` (which gives it no output
+///   at all), it appends to `%LOCALAPPDATA%\Uzumaki\Logs\uzumaki.log`. A headless run
+///   (`--snap … > NUL`) never writes the log.
 pub fn attach_output() {
-    let (out, err) = (has(STD_OUTPUT_HANDLE), has(STD_ERROR_HANDLE));
+    let app = !rune::is_headless();
+    let wanted = |h: u32| has(h) && !(app && is_nul(h));
+    let (out, err) = (wanted(STD_OUTPUT_HANDLE), wanted(STD_ERROR_HANDLE));
     if out && err {
         return;
     }
@@ -71,6 +87,17 @@ fn log_file() -> Option<std::fs::File> {
         let _ = std::fs::rename(&path, path.with_extension("log.1"));
     }
     std::fs::OpenOptions::new().create(true).append(true).open(&path).ok()
+}
+
+/// This program's own path in its plain form: a copy started by `uzu` (which hands Windows the
+/// `\\?\C:\…` form of the path) would otherwise write that form into the Run key.
+pub fn exe_path() -> std::io::Result<std::path::PathBuf> {
+    let exe = std::env::current_exe()?;
+    let text = exe.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => Ok(std::path::PathBuf::from(rest.to_string())),
+        _ => Ok(exe),
+    }
 }
 
 /// The second copy calls this before it asks the running one to show its window: Windows only
@@ -180,10 +207,10 @@ pub fn show_in_folder(path: &Path) {
         ok
     };
     // The file is gone, or the shell refused: open the folder.
-    if !shown {
-        if let Some(dir) = path.parent() {
-            let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
-        }
+    if !shown
+        && let Some(dir) = path.parent()
+    {
+        let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
     }
 }
 
@@ -215,6 +242,48 @@ pub fn end_with_us(child: &std::process::Child) {
         // means the old behaviour: Electron ends when its input closes.
         unsafe { AssignProcessToJobObject(job as HANDLE, child.as_raw_handle() as HANDLE) };
     }
+}
+
+/// The primary screen's work area (the screen less the taskbar) in points. None when Windows
+/// doesn't say.
+pub fn work_area() -> Option<(f32, f32)> {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint};
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+
+    // SAFETY: plain calls; `info` has its size set, as GetMonitorInfoW asks, and the out
+    // pointers live across the calls.
+    unsafe {
+        let monitor = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+        if monitor.is_null() {
+            return None;
+        }
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, rcMonitor: RECT { left: 0, top: 0, right: 0, bottom: 0 }, rcWork: RECT { left: 0, top: 0, right: 0, bottom: 0 }, dwFlags: 0 };
+        if GetMonitorInfoW(monitor, &mut info) == 0 {
+            return None;
+        }
+        let (mut dx, mut dy) = (96u32, 96u32);
+        if GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dx, &mut dy) != 0 || dx == 0 {
+            dx = 96;
+        }
+        points((info.rcWork.right - info.rcWork.left, info.rcWork.bottom - info.rcWork.top), dx)
+    }
+}
+
+/// A size in pixels at `dpi` as points (96 dpi is scale 1). None for an empty area.
+fn points(px: (i32, i32), dpi: u32) -> Option<(f32, f32)> {
+    let scale = dpi.max(48) as f32 / 96.0;
+    (px.0 > 0 && px.1 > 0).then(|| (px.0 as f32 / scale, px.1 as f32 / scale))
+}
+
+/// `wanted`, made smaller to fit the primary screen's work area (with room for the title bar and
+/// the borders), but never under `min`.
+pub fn window_size(wanted: (f32, f32), min: (f32, f32)) -> (f32, f32) {
+    work_area().map_or(wanted, |area| fit(wanted, min, area))
+}
+
+fn fit(wanted: (f32, f32), min: (f32, f32), area: (f32, f32)) -> (f32, f32) {
+    (wanted.0.min(area.0 - 24.0).max(min.0), wanted.1.min(area.1 - 56.0).max(min.1))
 }
 
 /// The side of a notification-area icon in pixels at the system's scale: 16 at 100 %, 20 at
@@ -300,6 +369,20 @@ pub mod reg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_fits_the_screen() {
+        assert_eq!(points((1920, 1040), 96), Some((1920.0, 1040.0)));
+        assert_eq!(points((2880, 1704), 144), Some((1920.0, 1136.0)));
+        assert_eq!(points((0, 0), 96), None);
+        let (wanted, min) = ((1360.0, 860.0), (640.0, 500.0));
+        assert_eq!(fit(wanted, min, (1920.0, 1040.0)), wanted, "a full HD screen has room");
+        assert_eq!(fit(wanted, min, (1366.0, 728.0)), (1342.0, 672.0), "a small laptop: inside the work area");
+        assert_eq!(fit(wanted, min, (800.0, 480.0)), (776.0, 500.0), "never under the smallest window");
+        if let Some((w, h)) = work_area() {
+            assert!((200.0..20000.0).contains(&w) && (200.0..20000.0).contains(&h), "{w}x{h}");
+        }
+    }
 
     #[test]
     fn this_machine_answers_sanely() {

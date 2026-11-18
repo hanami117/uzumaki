@@ -196,6 +196,15 @@ fn walk(dir: &Path, out: &mut Vec<(PathBuf, u64, u64)>, seen: &mut HashSet<PathB
         if entry.file_name().to_string_lossy().starts_with('.') {
             continue;
         }
+        // Windows: hidden and system entries (Explorer's own, `$RECYCLE.BIN`, a hidden folder).
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+            if entry.metadata().is_ok_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0) {
+                continue;
+            }
+        }
         let path = entry.path();
         let Ok(ft) = entry.file_type() else { continue };
         if ft.is_dir() {

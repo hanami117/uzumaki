@@ -132,6 +132,8 @@ pub enum IconVariant {
     Coral,
 }
 
+// Windows has no "App icon" setting yet: the list and the folder names go unused there.
+#[cfg_attr(windows, allow(dead_code))]
 impl IconVariant {
     pub const ALL: [IconVariant; 3] = [IconVariant::Dark, IconVariant::Light, IconVariant::Coral];
 

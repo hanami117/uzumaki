@@ -4,6 +4,9 @@
 //! - Linux (`login_linux.rs`): an XDG autostart entry, `~/.config/autostart/<app id>.desktop`,
 //!   whose `Exec` runs this copy (the AppImage file, the packaged binary or a source install),
 //!   with `--hidden` when "Start in the background" is on.
+//! - Windows (`login_win.rs`): a value under the current user's Run key in the registry, with
+//!   `--hidden` when "Start in the background" is on; Windows' own switch for it (Task Manager,
+//!   Settings → Apps → Startup) is read too.
 //! - macOS (`login_mac.rs`): the app itself as a login item (`SMAppService.mainApp`). A login
 //!   item gets no arguments, so the background start is decided at launch: with both switches
 //!   on the app starts windowless and opens its window at once unless macOS says this launch is
@@ -19,7 +22,11 @@ mod imp;
 #[path = "login_mac.rs"]
 mod imp;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(windows)]
+#[path = "login_win.rs"]
+mod imp;
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 pub use imp::*;
 
 // The autostart entry's text is plain std: its tests run on the Mac too.
@@ -36,7 +43,7 @@ pub struct Login {
     /// Starts at login (Linux: the autostart entry exists and isn't turned off; macOS: the login
     /// item is registered, approved or not).
     pub on: bool,
-    /// Linux: the entry starts with `--hidden`. None where the system doesn't say (macOS, or no entry).
+    /// Linux and Windows: the entry starts with `--hidden`. None where the system doesn't say (macOS, or no entry).
     pub hidden: Option<bool>,
     /// macOS: registered, but waiting for the user's OK in System Settings → Login Items.
     pub needs_approval: bool,
@@ -53,7 +60,7 @@ impl Login {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 mod other {
     use super::Login;
 
@@ -67,5 +74,5 @@ mod other {
 
     pub fn repair() {}
 }
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub use other::*;

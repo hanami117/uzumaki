@@ -211,6 +211,18 @@ fn paint_window_bg(handle: &rune::WindowHandle) {
     });
 }
 
+/// The window's opening size in points. Windows: made smaller where the primary screen's work
+/// area (the screen less the taskbar) is smaller, so the window never opens larger than the
+/// screen of a small laptop. Headless runs take `--size`.
+fn window_size() -> (f32, f32) {
+    const WANTED: (f32, f32) = (1360.0, 860.0);
+    #[cfg(windows)]
+    if !rune::is_headless() {
+        return win::window_size(WANTED, (640.0, 500.0));
+    }
+    WANTED
+}
+
 fn main() {
     #[cfg(windows)]
     win::attach_output();
@@ -227,7 +239,7 @@ fn main() {
         on_key: Some(ui::on_key),
         poll: Some(ui::poll),
         min_size: Some((640.0, 500.0)),
-        ..AppSpec::new("Uzumaki", (1360.0, 860.0), State::offline, ui::view)
+        ..AppSpec::new("Uzumaki", window_size(), State::offline, ui::view)
     };
     // macOS: the traffic lights pinned over the sidebar rail (`theme::TRAFFIC_LIGHTS`).
     // Tab visits buttons too, not only fields and lists (macOS's default without "Keyboard

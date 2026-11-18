@@ -4542,6 +4542,7 @@ dependencies = [
  "uzumaki-airplay",
  "uzumaki-ctl",
  "uzumaki-fx",
+ "windows 0.62.2",
  "windows-sys 0.59.0",
  "winresource",
  "zbus 5.19.0",

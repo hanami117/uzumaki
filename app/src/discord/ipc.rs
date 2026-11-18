@@ -7,9 +7,9 @@
 //! with a frame whose `evt` is `READY` (or closes the socket: unknown client id, or it is not
 //! ready yet).
 //!
-//! Only Unix sockets are done (Linux, macOS; the app does not build elsewhere yet). On Windows
-//! Discord listens on the named pipe `\\.\pipe\discord-ipc-N`; `pipe_names` has the names for when
-//! that port happens.
+//! Linux and macOS: a Unix socket. Windows: Discord listens on the named pipe
+//! `\\.\pipe\discord-ipc-N` (`pipe.rs` gives it the socket's read time limits); the frames and
+//! the handshake are the same.
 
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -84,22 +84,31 @@ pub fn dirs(env: &dyn Fn(&str) -> Option<OsString>) -> Vec<PathBuf> {
     out
 }
 
-/// Every socket path to try, in order: socket 0 in every folder, then socket 1, …
+/// Every socket path to try, in order: socket 0 in every folder, then socket 1, … On Windows:
+/// the ten pipes.
 pub fn candidates(env: &dyn Fn(&str) -> Option<OsString>) -> Vec<PathBuf> {
+    if cfg!(windows) {
+        return pipe_names().into_iter().map(PathBuf::from).collect();
+    }
     let dirs = dirs(env);
     (0..SOCKETS).flat_map(|n| dirs.iter().map(move |d| d.join(format!("discord-ipc-{n}")))).collect()
 }
 
-/// The named pipes Discord listens on, on Windows (not used yet).
-#[allow(dead_code)]
+/// The named pipes Discord listens on, on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn pipe_names() -> Vec<String> {
     (0..SOCKETS).map(|n| format!(r"\\.\pipe\discord-ipc-{n}")).collect()
 }
 
+/// The connection under a [`Conn`]: a Unix socket, on Windows a named pipe.
+#[cfg(unix)]
+type Stream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type Stream = super::pipe::PipeStream;
+
 /// An open, handshaken connection.
 pub struct Conn {
-    #[cfg(unix)]
-    stream: std::os::unix::net::UnixStream,
+    stream: Stream,
     nonce: u64,
 }
 
@@ -111,7 +120,6 @@ pub fn describe(e: &io::Error) -> String {
     }
 }
 
-#[cfg(unix)]
 impl Conn {
     /// Tries each path in turn; the first Discord that answers the handshake wins. The error is
     /// the last one seen (NotFound when no socket exists at all).
@@ -131,7 +139,7 @@ impl Conn {
     }
 
     fn open(path: &std::path::Path, client_id: &str, timeout: Duration) -> io::Result<Self> {
-        let stream = std::os::unix::net::UnixStream::connect(path)?;
+        let stream = Stream::connect(path)?;
         stream.set_read_timeout(Some(timeout))?;
         stream.set_write_timeout(Some(timeout))?;
         let mut c = Conn { stream, nonce: 0 };
@@ -204,19 +212,6 @@ impl Conn {
     }
 }
 
-#[cfg(not(unix))]
-impl Conn {
-    pub fn connect(_: &[PathBuf], _: &str, _: Duration) -> io::Result<Self> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "Discord Rich Presence needs a Unix socket"))
-    }
-    pub fn set_activity(&mut self, _: Option<&Value>) -> io::Result<Option<String>> {
-        Err(io::ErrorKind::Unsupported.into())
-    }
-    pub fn poll(&mut self) -> io::Result<()> {
-        Err(io::ErrorKind::Unsupported.into())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,6 +260,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn sockets_are_tried_zero_first_in_every_folder() {
         let c = candidates(&env(&[("XDG_RUNTIME_DIR", "/run/user/1000")]));
         let n = dirs(&env(&[("XDG_RUNTIME_DIR", "/run/user/1000")])).len();

@@ -276,7 +276,7 @@ impl State {
         }
         self.settings.start_hidden = on;
         self.save_settings();
-        if self.login.on && cfg!(target_os = "linux") {
+        if self.login.on && cfg!(any(target_os = "linux", windows)) {
             self.apply_login(true);
         }
     }
@@ -287,7 +287,7 @@ impl State {
         let hidden = self.settings.start_hidden;
         self.login.on = on;
         self.login.needs_approval = false;
-        self.login.hidden = (on && cfg!(target_os = "linux")).then_some(hidden);
+        self.login.hidden = (on && cfg!(any(target_os = "linux", windows))).then_some(hidden);
         let Some(h) = self.handle.clone().filter(|_| !rune::is_headless()) else { return };
         self.login_busy = true;
         std::thread::spawn(move || {

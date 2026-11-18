@@ -825,6 +825,8 @@ const TAGLINE: &str = if cfg!(target_os = "macos") {
     "Alternative native frontend for Apple Music. For your Mac."
 } else if cfg!(target_os = "linux") {
     "Alternative native frontend for Apple Music. For Linux."
+} else if cfg!(windows) {
+    "Alternative native frontend for Apple Music. For Windows."
 } else {
     "Alternative native frontend for Apple Music."
 };
