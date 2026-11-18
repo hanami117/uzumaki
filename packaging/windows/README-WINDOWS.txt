@@ -1,5 +1,5 @@
-Uzumaki for Windows (preview)
-=============================
+Uzumaki for Windows
+===================
 
 A desktop player for Apple Music and for your own music files.
 Please report what goes wrong (see the end of this file). The programs are not signed yet.
@@ -57,12 +57,12 @@ What should work
 Updates
 -------
 Once a day Uzumaki asks getuzumaki.app whether a new version is out and shows a notice.
-Nothing is downloaded by itself. There is no Windows download on the site yet, so the
-notice's button opens the release's page. Switch the check off in Settings, General.
+Nothing is downloaded by itself: the notice's Download button opens the new installer in
+your browser; run it over the old version. Switch the check off in Settings, General.
 
 
-What does not work on Windows yet
----------------------------------
+What does not work on Windows
+-----------------------------
 - AirPlay speakers (the AirPlay button is hidden).
 - Script hooks (on-song-change, on-state-change).
 - Animated album artwork needs ffmpeg.exe on your PATH; without it covers stay still.

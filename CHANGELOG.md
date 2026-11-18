@@ -5,14 +5,17 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-18
+
+Uzumaki now runs on Windows. You need an Apple Music subscription.
+
 ### Added
-- **Windows (preview):** Uzumaki builds for Windows 10 and 11 (x64): an installer for your account only (no
-  administrator rights, Start menu entry, `uzu` on your PATH, a clean uninstall) and a zip. Apple Music plays through
-  castLabs Electron with its Widevine signature, your own files through the built-in player. Media keys and Windows'
-  media overlay, the notification-area icon, song notifications, start at login, Discord and `uzu` (over a named
-  pipe) work as on Linux and macOS. Not on Windows yet: AirPlay and script hooks; the update notice opens the
-  release's page (no Windows download there yet). Not signed yet: Windows SmartScreen asks once ("More info",
-  "Run anyway"). Not released yet: built by the `windows` workflow.
+- **Windows 10 and 11 (x64):** an installer for your account only (no administrator rights, a Start menu entry,
+  `uzu` on your PATH, an uninstaller) and a zip. Apple Music plays with Widevine as on the other systems, and your own
+  music files play too. Media keys and the Windows media overlay, song notifications, the tray icon, start at login,
+  Discord and `uzu` (over a named pipe) all work. The update notice offers the new installer.
+  Not on Windows: AirPlay and script hooks. The app is not code-signed yet: if SmartScreen stops it, click
+  "More info", then "Run anyway".
 
 ## [0.2.4] - 2026-11-18
 

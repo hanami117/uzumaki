@@ -1,4 +1,4 @@
-Uzumaki for Windows (preview).
+Uzumaki for Windows.
 
 Please report what goes wrong at https://github.com/hanami117/uzumaki/issues
 

@@ -167,6 +167,10 @@ say "Writing release notes from CHANGELOG.md"
 - **Other Linux** (x86_64): download \`Uzumaki-$release-x86_64.AppImage\`, \`chmod +x\` it and run it. It needs FUSE
   (\`fuse2\` or \`fuse3\`); without it, run it with \`--appimage-extract-and-run\`. Or build from source: download
   \`$src\`, unpack it and run \`./install.sh\` (needs Rust, Node.js and npm).
+- **Windows** (10 or 11, x64): download \`Uzumaki-$release-windows-x64-setup.exe\` and run it. It installs for your
+  user only (no administrator rights) and adds Uzumaki to the Start menu. It is not code-signed yet, so Windows
+  SmartScreen may stop it: click **More info**, then **Run anyway**. Or unzip \`Uzumaki-$release-windows-x64.zip\`
+  anywhere and run \`uzumaki.exe\`. AirPlay is not available on Windows.
 
 Checksums are in \`SHA256SUMS\`.
 NOTES
@@ -187,6 +191,8 @@ cat >"$out/latest.json" <<JSON
     "macos_dmg": "$latest/$DMG_LATEST",
     "linux_tarball": "$dl/$src",
     "appimage": "$latest/$APPIMAGE_LATEST",
+    "windows_installer": "$dl/Uzumaki-$release-windows-x64-setup.exe",
+    "windows_zip": "$dl/Uzumaki-$release-windows-x64.zip",
     "aur": "https://aur.archlinux.org/packages/uzumaki",
     "brew": "brew install --cask hanami117/uzumaki/uzumaki"
   }

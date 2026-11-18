@@ -49,8 +49,8 @@ pub const RECHECK: Duration = Duration::from_secs(3600);
 /// The whole request (connect, TLS, body); a slow site never holds anything up.
 const TIMEOUT: Duration = Duration::from_secs(6);
 
-/// `latest.json`: `{version, build, date, notes_url, downloads: {macos_dmg, linux_tarball, appimage, aur, brew}}`.
-/// Every field but `version` may be missing (older files have no `appimage` and no `build`).
+/// `latest.json`: `{version, build, date, notes_url, downloads: {macos_dmg, linux_tarball, appimage, windows_installer, windows_zip, aur, brew}}`.
+/// Every field but `version` may be missing (older files have no `appimage`, no Windows files and no `build`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Latest {
     pub version: String,
@@ -76,6 +76,10 @@ pub struct Downloads {
     pub linux_tarball: String,
     /// The Linux x86_64 AppImage.
     pub appimage: String,
+    /// The Windows x64 installer (per user), a versioned link.
+    pub windows_installer: String,
+    /// The same Windows files as a zip, a versioned link.
+    pub windows_zip: String,
     pub aur: String,
     pub brew: String,
 }
@@ -623,8 +627,8 @@ pub fn notice(latest: &Latest, current: (&str, u32), skipped: Option<(&str, u32)
 pub enum System {
     Mac,
     Linux,
-    /// `latest.json` names no Windows file yet: the button opens the release's page, never
-    /// another system's download.
+    /// The installer; a file without one (0.2.x) opens the release's page, never another
+    /// system's download.
     Windows,
 }
 
@@ -641,7 +645,7 @@ pub fn notice_on(latest: &Latest, current: (&str, u32), skipped: Option<(&str, u
         (Install::AppImage, _) => Some(&d.appimage),
         (_, System::Mac) => Some(&d.macos_dmg),
         (_, System::Linux) => Some(&d.linux_tarball),
-        (_, System::Windows) => None,
+        (_, System::Windows) => Some(&d.windows_installer),
     };
     let download = match install {
         Install::Direct | Install::AppImage => file.filter(|u| is_web(u)).or(Some(&latest.notes_url).filter(|u| is_web(u))).cloned(),
@@ -1148,10 +1152,20 @@ mod tests {
         assert_eq!(mac.message(), "Uzumaki 0.2.0 is available.");
         let linux = notice_on(&l, ("0.1.0", 1), None, Install::Direct, System::Linux).unwrap();
         assert_eq!(linux.download.as_deref(), Some(l.downloads.linux_tarball.as_str()));
-        // Windows: no file of its own in the feed yet, so the release page; never the Linux tarball.
+        // Windows, a feed from before 0.3.0 (no Windows file): the release page; never the Linux tarball.
         let windows = notice_on(&l, ("0.1.0", 1), None, Install::Direct, System::Windows).unwrap();
         assert_eq!(windows.download.as_deref(), Some(l.notes_url.as_str()));
         assert_eq!(windows.message(), "Uzumaki 0.2.0 is available.");
+        // A feed with the installer: that file.
+        let setup = "https://github.com/hanami117/uzumaki/releases/download/v0.2.0/Uzumaki-0.2.0-windows-x64-setup.exe";
+        let with_setup: Latest = serde_json::from_str(&format!(
+            r#"{{"version":"0.2.0","notes_url":"https://x/notes","downloads":{{"windows_installer":"{setup}","windows_zip":"https://x/U.zip"}}}}"#
+        ))
+        .unwrap();
+        assert_eq!(with_setup.downloads.windows_zip, "https://x/U.zip");
+        let windows = notice_on(&with_setup, ("0.1.0", 1), None, Install::Direct, System::Windows).unwrap();
+        assert_eq!(windows.download.as_deref(), Some(setup));
+        assert_eq!(notice_on(&with_setup, ("0.1.0", 1), None, Install::Direct, System::Linux).unwrap().download.as_deref(), Some("https://x/notes"));
         let appimage = notice(&l, ("0.1.0", 1), None, Install::AppImage, false).unwrap();
         assert_eq!(appimage.download.as_deref(), Some(l.downloads.appimage.as_str()));
         assert_eq!(appimage.message(), "Uzumaki 0.2.0 is available.");

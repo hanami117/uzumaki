@@ -4522,7 +4522,7 @@ dependencies = [
 
 [[package]]
 name = "uzumaki"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "block2 0.6.2",
  "dispatch2",
@@ -4550,7 +4550,7 @@ dependencies = [
 
 [[package]]
 name = "uzumaki-airplay"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "if-addrs",
  "libc",
@@ -4559,14 +4559,14 @@ dependencies = [
 
 [[package]]
 name = "uzumaki-cli"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "uzumaki-ctl"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "image",
  "libc",
@@ -4581,7 +4581,7 @@ dependencies = [
 
 [[package]]
 name = "uzumaki-fx"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "image",
  "serde",
@@ -4589,7 +4589,7 @@ dependencies = [
 
 [[package]]
 name = "uzumaki-fx-web"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "image",
  "uzumaki-fx",

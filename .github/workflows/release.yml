@@ -1,6 +1,7 @@
-# Release: push a signed annotated tag v<version>[-<build>] on main; this builds every file once,
-# makes a draft release, and (after the maintainer approves the `release` environment) publishes it,
-# updates site/latest.json + the packaging copies on main, the AUR packages and the Homebrew tap.
+# Release: push a signed annotated tag v<version>[-<build>] on main; this builds every file once
+# (Linux, macOS, Windows), makes a draft release only when all of them are ready, publishes it
+# (public, then Latest once every file answers), and updates site/latest.json + the packaging
+# copies on main, the AUR packages and the Homebrew tap. No manual approvals.
 #
 # Switches (repository variables):
 #   MACOS_CI=true   build the DMG here (environment `build`, castLabs EVS secrets). Otherwise the
@@ -16,10 +17,10 @@
 # makes new bytes. Delete the draft and the tag and start again instead (the draft job refuses to
 # touch an existing release).
 #
-# Order: check, linux and macos start together (macos waits only for linux, whose tarball and
-# AppImage it reuses). draft and everything after it need all three green.
+# Order: check, linux, windows and macos start together (macos waits only for linux, whose tarball
+# and AppImage it reuses). draft and everything after it need all four green.
 # Speed: only `check` uses a cargo cache (restore only; .github/workflows/cargo-cache.yml saves it on
-# main, because a tag run cannot read caches saved by another tag). `linux` and `macos` never use a
+# main, because a tag run cannot read caches saved by another tag). `linux`, `macos` and `windows` never use a
 # cache: release files come from a clean build.
 #
 # Pins: actions by commit SHA; appimagetool + AppImage runtime by sha256 (the files used since 0.1.0); the Arch
@@ -226,11 +227,119 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # 4. Draft release: 12 files with the DMG, 8 without (DMG added by hand before approving).
+  # 3b. Windows x64: the installer (per user, Inno Setup) and the zip, unsigned (no Authenticode).
+  # castLabs Electron gets its production VMP signature from EVS here, on the tag (environment
+  # `build`); if EVS fails, the signature committed in packaging/windows/vmp is used, but only for
+  # the very electron.exe it was made for. Either way castLabs' tool must call it valid for streaming.
+  # No cache: release files come from a clean build. Runs beside check and linux.
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    environment: build
+    env:
+      CARGO_TERM_COLOR: never
+      CARGO_INCREMENTAL: '0'
+      EVS_NO_ASK: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Release name (Cargo.toml + BUILD; the check job validates the tag)
+        id: v
+        run: |
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          build=$(tr -d '[:space:]' < BUILD)
+          if [ "$build" = 1 ]; then r=$version; else r=$version-$build; fi
+          [ "v$r" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME != v$r"; exit 1; }
+          { echo "version=$version"; echo "build=$build"; echo "release=$r"; } >> "$GITHUB_OUTPUT"
+          echo "EVS_CONFIG_FILE=$RUNNER_TEMP/evs-config/config.json" >> "$GITHUB_ENV"
+      - run: rustup toolchain install stable --profile minimal && rustup default stable && rustc --version
+      - name: Release build
+        run: cargo build --release --locked -p uzumaki -p uzumaki-ctl
+      - name: uzu without the app
+        shell: pwsh
+        run: |
+          & target\release\uzu.exe --version | Out-Host
+          $said = & target\release\uzu.exe quit 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0 -or $said -notmatch "isn't running") { throw "unexpected answer to 'uzu quit': $said" }
+      - name: castLabs Electron
+        run: |
+          cd bridge && npm ci --no-audit --no-fund
+          for try in 1 2 3; do node node_modules/electron/install.js && break; [ $try = 3 ] && exit 1; sleep 10; done
+      - name: castLabs VMP signature
+        env:
+          EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
+          EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
+        run: |
+          dist=bridge/node_modules/electron/dist
+          mkdir -p "$(dirname "$EVS_CONFIG_FILE")"
+          python -m venv "$RUNNER_TEMP/evs"
+          py=$RUNNER_TEMP/evs/Scripts/python
+          "$py" -m pip install -q castlabs-evs==1.3.3
+          signed=
+          if [ -n "$EVS_ACCOUNT_NAME" ] && [ -n "$EVS_PASSWD" ] &&
+             "$py" -m castlabs_evs.account reauth && "$py" -m castlabs_evs.vmp sign-pkg "$dist"; then
+            signed="EVS, on this tag"
+          else
+            echo "::warning::EVS signing failed; trying the committed signature (packaging/windows/vmp)"
+            want=$(cut -d' ' -f1 packaging/windows/vmp/electron.exe.sha256)
+            have=$(sha256sum "$dist/electron.exe" | cut -d' ' -f1)
+            [ "$want" = "$have" ] || { echo "::error::electron.exe ($have) is not the one the committed signature was made for ($want)"; exit 1; }
+            cp packaging/windows/vmp/electron.exe.sig "$dist/electron.exe.sig"
+            signed="the committed signature (packaging/windows/vmp)"
+          fi
+          "$py" -m castlabs_evs.vmp verify-pkg "$dist" 2>&1 | tee "$RUNNER_TEMP/vmp.txt"
+          grep -q 'Signature is valid: streaming' "$RUNNER_TEMP/vmp.txt" || { echo "::error::the VMP signature is not a valid production (streaming) one"; exit 1; }
+          echo "castLabs Electron VMP: $signed; $(grep 'Signature is valid' "$RUNNER_TEMP/vmp.txt")" >> "$GITHUB_STEP_SUMMARY"
+      - name: Forget the EVS login
+        if: always()
+        run: rm -rf "$(dirname "$EVS_CONFIG_FILE")" "$RUNNER_TEMP/evs"
+      # The engine as the app starts it: signed out, muted, scratch profile (Apple's page, key system, a search).
+      - name: The playback engine answers
+        run: |
+          for try in 1 2 3; do
+            node packaging/windows/bridge-smoke.mjs bridge && exit 0
+            echo "::warning::the bridge smoke test failed (try $try)"; sleep 20
+          done
+          exit 1
+      - name: Installer and zip
+        shell: pwsh
+        env:
+          V: ${{ steps.v.outputs.version }}
+          B: ${{ steps.v.outputs.build }}
+        run: ./packaging/windows/build.ps1 -Version $env:V -Build ([int]$env:B)
+      - name: The app runs (hidden test copy, uzu over the pipe, the engine, quit)
+        shell: pwsh
+        run: ./packaging/windows/app-smoke.ps1 -Dir target\windows-dist\Uzumaki
+      - name: Install, update, uninstall
+        shell: pwsh
+        env:
+          V: ${{ steps.v.outputs.version }}
+          R: ${{ steps.v.outputs.release }}
+        run: ./packaging/windows/smoke.ps1 -Setup "target\windows-release\Uzumaki-$env:R-windows-x64-setup.exe" -Version $env:V
+      - name: The files
+        env:
+          R: ${{ steps.v.outputs.release }}
+        run: |
+          cd target/windows-release
+          [ "$(ls | wc -l)" = 4 ] || { echo "::error::expected exactly 4 files"; ls; exit 1; }
+          for f in "Uzumaki-$R-windows-x64-setup.exe" "Uzumaki-$R-windows-x64.zip"; do sha256sum -c "$f.sha256"; done
+          unzip -l "Uzumaki-$R-windows-x64.zip" | grep -q ' Uzumaki/bridge/node_modules/electron/dist/electron.exe.sig$' || { echo "::error::no VMP signature in the zip"; exit 1; }
+          ls -l >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows
+          path: target/windows-release/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  # 4. Draft release: 20 files (Linux 8, macOS 4, Windows 8); without MACOS_CI 16 and the DMG is
+  # added by hand. The draft is made only once every system's files are here, all in one go.
   draft:
-    needs: [check, linux, macos]
+    needs: [check, linux, macos, windows]
     if: >-
       always() && needs.check.result == 'success' && needs.linux.result == 'success' &&
+      needs.windows.result == 'success' &&
       ((vars.MACOS_CI == 'true' && needs.macos.result == 'success') ||
        (vars.MACOS_CI != 'true' && needs.macos.result == 'skipped'))
     runs-on: ubuntu-24.04
@@ -248,6 +357,8 @@ jobs:
       - if: vars.MACOS_CI == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with: { name: macos, path: '${{ runner.temp }}/a/macos' }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: windows, path: '${{ runner.temp }}/a/windows' }
       - name: Assemble and check the files
         run: |
           a=$RUNNER_TEMP/a; up=$RUNNER_TEMP/up; mkdir "$up"
@@ -267,6 +378,18 @@ jobs:
             want=8
           fi
           cp "$a/linux/Uzumaki-x86_64.AppImage.zsync" "$up/"
+          # Windows: the versioned installer and zip, the same bytes under stable names (the site's
+          # buttons), a .sha256 each, and their lines in SHA256SUMS.
+          w=$a/windows
+          (cd "$w" && sha256sum -c ./*.sha256)
+          for k in setup.exe zip; do
+            cp "$w/Uzumaki-$R-windows-x64-$k" "$w/Uzumaki-$R-windows-x64-$k.sha256" "$up/"
+            cp "$w/Uzumaki-$R-windows-x64-$k" "$up/Uzumaki-windows-x64-$k"
+            (cd "$up" && sha256sum "Uzumaki-windows-x64-$k" > "Uzumaki-windows-x64-$k.sha256")
+            files+=(Uzumaki-$R-windows-x64-$k Uzumaki-windows-x64-$k)
+          done
+          for f in "${files[@]}"; do grep -q "  $f\$" "$up/SHA256SUMS" || cat "$up/$f.sha256" >> "$up/SHA256SUMS"; done
+          want=$((want + 8))
           cd "$up"
           sha256sum -c ./*.sha256
           sha256sum -c SHA256SUMS
@@ -351,35 +474,63 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # 5. The approval: environment `release`. Publishes the draft as the latest release.
+  # 5. Publish. The draft is complete (every system's files went up in one go); it goes public first
+  # NOT Latest, every file must answer 200 from outside, and only then it becomes Latest (which moves
+  # the site's releases/latest/download/ buttons) and site/latest.json follows (job `site`).
+  # Environment `release` holds the secrets of the later jobs; it has no approval step.
   publish:
     needs: [check, draft, pkg]
     if: vars.DRY_RUN != 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     environment: release
     permissions: { contents: write }
     env:
       GH_TOKEN: ${{ github.token }}
       R: ${{ needs.check.outputs.release }}
     steps:
-      - name: The draft has all 12 files and they match SHA256SUMS
+      - name: The draft has all 20 files and they match SHA256SUMS
         run: |
           cd "$RUNNER_TEMP"
           gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json isDraft,assets > rel.json
           [ "$(jq .isDraft rel.json)" = true ] || { echo "::error::not a draft any more"; exit 1; }
           n=$(jq '.assets|length' rel.json)
-          [ "$n" = 12 ] || { echo "::error::draft has $n assets, not 12 (DMG still to add with release.sh --assets?)"; exit 1; }
+          [ "$n" = 20 ] || { echo "::error::draft has $n assets, not 20 (DMG still to add with release.sh --assets?)"; exit 1; }
           gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -D sums
-          jq -r '.assets[] | select(.name|test("\\.(dmg|tar\\.gz|AppImage)$")) | (.digest|sub("^sha256:";"")) + "  " + .name' rel.json | sort -k2 > remote
+          jq -r '.assets[] | select(.name|test("\\.(dmg|tar\\.gz|AppImage|exe|zip)$")) | (.digest|sub("^sha256:";"")) + "  " + .name' rel.json | sort -k2 > remote
           sort -k2 sums/SHA256SUMS | diff - remote
-      - run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest
-      - name: Stable links resolve
+          jq -r '.assets[].name' rel.json > names
+      - name: Publish, not Latest yet
+        run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest=false
+      - name: Every file answers 200 from outside
         if: github.repository == env.PUBLIC_REPO
         run: |
-          for f in Uzumaki-macOS.dmg Uzumaki-x86_64.AppImage Uzumaki-x86_64.AppImage.zsync; do
-            curl -sfI -o /dev/null -w "%{http_code} $f\n" --retry 3 \
-              "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$f"
+          bad=
+          while read -r f; do
+            url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$f"
+            code=000
+            for try in 1 2 3 4 5 6; do
+              code=$(curl -sLI -o /dev/null -w '%{http_code}' "$url") && [ "$code" = 200 ] && break
+              sleep 10
+            done
+            echo "$code $f"; [ "$code" = 200 ] || bad=1
+          done < "$RUNNER_TEMP/names"
+          [ -z "$bad" ] || { echo "::error::some files don't answer 200: the release is public but not Latest; re-run this job"; exit 1; }
+      - name: Mark Latest
+        run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --latest
+      - name: The stable names lead to this release
+        if: github.repository == env.PUBLIC_REPO
+        run: |
+          for f in Uzumaki-macOS.dmg Uzumaki-x86_64.AppImage Uzumaki-x86_64.AppImage.zsync Uzumaki-windows-x64-setup.exe Uzumaki-windows-x64.zip; do
+            ok=
+            for try in $(seq 1 12); do
+              loc=$(curl -sI "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$f" | tr -d '\r' | sed -n 's/^[Ll]ocation: //p' | head -1)
+              case $loc in */releases/download/$GITHUB_REF_NAME/$f) ok=1; break ;; esac
+              sleep 10      # GitHub can show the old Latest for a minute
+            done
+            [ -n "$ok" ] || { echo "::error::$f: releases/latest leads to '$loc'"; exit 1; }
+            echo "ok $f -> $loc"
+            [ "$(curl -sLI -o /dev/null -w '%{http_code}' "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$f")" = 200 ] || { echo "::error::$f not 200"; exit 1; }
           done
 
   # 6. site/latest.json + the packaging copies on main, as a signed (API) commit = the site deploy.
