@@ -93,20 +93,16 @@ impl TrayCtl {
 }
 
 fn menu(playing: bool) -> Vec<TrayItem> {
-    let mut items = vec![
+    vec![
         TrayItem::action("play-pause", if playing { "Pause" } else { "Play" }),
         TrayItem::action("previous", "Previous"),
         TrayItem::action("next", "Next"),
         TrayItem::Separator,
         TrayItem::action("show", "Show Uzumaki"),
-    ];
-    // The Windows preview has no update feed yet.
-    if !cfg!(windows) {
-        items.push(TrayItem::action("check-updates", "Check for Updates\u{2026}"));
-    }
-    items.push(TrayItem::Separator);
-    items.push(TrayItem::action("quit", "Quit Uzumaki"));
-    items
+        TrayItem::action("check-updates", "Check for Updates\u{2026}"),
+        TrayItem::Separator,
+        TrayItem::action("quit", "Quit Uzumaki"),
+    ]
 }
 
 /// The chosen app icon's small drawing (`assets/icons/variants/<name>/tray.png`, 64 px; the dark

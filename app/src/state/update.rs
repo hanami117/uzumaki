@@ -173,12 +173,10 @@ impl State {
     }
 }
 
-/// A test instance never fetches unless `UZUMAKI_UPDATE_URL` points it somewhere. Neither does
-/// the Windows preview: the feed has no Windows download yet, and its notice would offer the
-/// Linux one.
+/// A test instance never fetches unless `UZUMAKI_UPDATE_URL` points it somewhere.
 fn may_fetch() -> bool {
     let var = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
-    !((var("UZUMAKI_TEST_INSTANCE") || cfg!(windows)) && !var("UZUMAKI_UPDATE_URL"))
+    !(var("UZUMAKI_TEST_INSTANCE") && !var("UZUMAKI_UPDATE_URL"))
 }
 
 #[cfg(test)]

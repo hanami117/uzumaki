@@ -278,8 +278,6 @@ fn available(s: &State, row: Row) -> bool {
         Row::AppleMusic | Row::ExplicitContent | Row::Quality | Row::Lyrics | Row::AutoPlay => !s.local_only(),
         Row::NpCoverEffect => s.settings.appearance.np == NpBg::Cover,
         Row::AppIcon => cfg!(any(target_os = "linux", target_os = "macos")),
-        // The Windows preview has no update feed yet (no release, no download to offer).
-        Row::CheckUpdates | Row::CheckNow => !cfg!(windows),
         // No cliairplay helper (Linux for now): no AirPlay anywhere, the setting included.
         Row::AirPlay => s.airplay.available,
         Row::Binding(i) => i < super::keys::BINDINGS.len(),

@@ -54,12 +54,18 @@ What should work
   run .\uzu in Uzumaki's folder.)
 
 
+Updates
+-------
+Once a day Uzumaki asks getuzumaki.app whether a new version is out and shows a notice.
+Nothing is downloaded by itself. There is no Windows download on the site yet, so the
+notice's button opens the release's page. Switch the check off in Settings, General.
+
+
 What does not work on Windows yet
 ---------------------------------
 - AirPlay speakers (the AirPlay button is hidden).
 - Script hooks (on-song-change, on-state-change).
 - Animated album artwork needs ffmpeg.exe on your PATH; without it covers stay still.
-- The update notice: this preview does not check for new versions.
 - Windows' volume mixer and Task Manager list the playback engine as "Electron".
 - Lossless and Dolby Atmos: Apple's web player does not offer them.
 - The programs are not signed: SmartScreen warns at every new version.

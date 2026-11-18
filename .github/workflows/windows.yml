@@ -33,6 +33,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
+  # "true": a step that fails is reported by the Verdict step and the run goes on and stays green,
+  # so one run shows everything that is wrong (used while the workflow itself was being built).
+  # "false": the normal rule, the first failing step fails the run.
+  PROBE: "true"
 
 jobs:
   build:
@@ -65,9 +69,13 @@ jobs:
         run: cargo build --workspace --locked
 
       - name: cargo test
+        id: test
+        continue-on-error: ${{ env.PROBE == 'true' }}
         run: cargo test --workspace --locked --no-fail-fast
 
       - name: Bridge tests (node)
+        id: node
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: bash
         run: node --test bridge/signin.test.js bridge/storefront.test.js
 
@@ -76,6 +84,8 @@ jobs:
 
       # The icon, the version details and the manifest are in the programs (app/build.rs, ctl/build.rs).
       - name: Program resources
+        id: resources
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: pwsh
         env:
           V: ${{ steps.v.outputs.version }}
@@ -103,6 +113,8 @@ jobs:
       # Headless snaps with the program that ships. Uzumaki is a windowed program: the pipe makes
       # PowerShell wait for it and show its output. No GPU here, so Windows' software adapter draws.
       - name: Headless snaps
+        id: snaps
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: pwsh
         env:
           RUNE_GPU_LOG: "1"
@@ -119,6 +131,8 @@ jobs:
 
       # uzu with no app running: `quit` must say so and start nothing; a status line stays empty.
       - name: uzu without the app
+        id: uzu
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: pwsh
         run: |
           & target\release\uzu.exe --version | Out-Host
@@ -147,6 +161,8 @@ jobs:
       # electron.exe it was made for, and castLabs' own tool says whether Widevine will take it.
       # No login is needed to verify.
       - name: Widevine VMP signature
+        id: vmp
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: bash
         env:
           EVS_NO_ASK: "1"
@@ -167,6 +183,8 @@ jobs:
       # The bridge alone, as the app starts it: Electron, the Widevine component, Apple's web
       # player, a key system for the page, a catalog search. Signed out, muted, scratch profile.
       - name: The playback engine answers
+        id: bridge
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: bash
         run: |
           for try in 1 2; do
@@ -177,6 +195,8 @@ jobs:
 
       # The installer (Inno Setup, on the runner image), the zip and the checksums.
       - name: Installer and zip
+        id: package
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: pwsh
         env:
           V: ${{ steps.v.outputs.version }}
@@ -186,12 +206,16 @@ jobs:
       # The staged programs for real: hidden, a test copy on scratch folders, `uzu` over the
       # named pipe, the engine started by the app and ended with it.
       - name: The app runs
+        id: app
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: pwsh
         run: ./packaging/windows/app-smoke.ps1 -Dir target\windows-dist\Uzumaki
 
       # A real install for this runner's user: silent, into a temp folder, the files, the PATH,
       # the shortcuts, an update over it, uninstall (the user's data stays), and with /REMOVEDATA.
       - name: Install and uninstall
+        id: install
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: pwsh
         env:
           V: ${{ steps.v.outputs.version }}
@@ -199,6 +223,8 @@ jobs:
         run: ./packaging/windows/smoke.ps1 -Setup "target\windows-release\Uzumaki-$env:R-windows-x64-setup.exe" -Version $env:V
 
       - name: The files
+        id: files
+        continue-on-error: ${{ env.PROBE == 'true' }}
         shell: bash
         env:
           R: ${{ steps.v.outputs.release }}
@@ -222,7 +248,7 @@ jobs:
         with:
           name: windows-release
           path: target/windows-release/
-          if-no-files-found: error
+          if-no-files-found: ${{ env.PROBE == 'true' && 'warn' || 'error' }}
           retention-days: 30
           compression-level: 0
 
@@ -231,5 +257,21 @@ jobs:
         with:
           name: Uzumaki-windows-x64
           path: target/windows-dist
-          if-no-files-found: error
+          if-no-files-found: ${{ env.PROBE == 'true' && 'warn' || 'error' }}
           retention-days: 14
+
+      # What every check said, in one place. In a probe run this is where failures show.
+      - name: Verdict
+        if: always()
+        shell: bash
+        env:
+          OUTCOMES: >-
+            test=${{ steps.test.outcome }} node=${{ steps.node.outcome }} resources=${{ steps.resources.outcome }}
+            snaps=${{ steps.snaps.outcome }} uzu=${{ steps.uzu.outcome }} vmp=${{ steps.vmp.outcome }}
+            bridge=${{ steps.bridge.outcome }} package=${{ steps.package.outcome }} app=${{ steps.app.outcome }}
+            install=${{ steps.install.outcome }} files=${{ steps.files.outcome }}
+        run: |
+          { echo '### Checks'; echo '```'; echo "$OUTCOMES" | tr ' ' '\n' | grep .; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          if echo "$OUTCOMES" | grep -Eq '=(failure|cancelled|skipped)'; then
+            if [ "$PROBE" = true ]; then echo "::warning::some checks did not pass (a probe run reports them and stays green)"; else exit 1; fi
+          fi
