@@ -21,6 +21,10 @@ name: windows
 on:
   push:
     branches: [windows]
+    # The bridge's own quick workflow (windows-bridge.yml) covers these.
+    paths-ignore:
+      - 'packaging/windows/probe/**'
+      - '.github/workflows/windows-bridge.yml'
   workflow_dispatch:
 
 permissions:

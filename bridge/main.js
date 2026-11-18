@@ -685,12 +685,19 @@ app.whenReady().then(async () => {
     }
     handle(msg);
   });
-  rl.on('close', shutdown); // parent closed our stdin
+  rl.on('close', () => {
+    // The parent closed our stdin (the app quit, or went away).
+    if (!quitting) log('input closed: quitting');
+    shutdown();
+  });
 });
 
 app.on('before-quit', () => {
   quitting = true;
 });
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => {
+  if (!quitting) log('all windows closed: quitting');
+  app.quit();
+});
 
 log('started, userData =', app.getPath('userData'));
