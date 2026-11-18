@@ -9,6 +9,13 @@ takes each release's notes from its section here.
 - **Support Uzumaki** (Settings → About): a quiet heart, one line and a "Support on Ko-fi" button that
   opens https://ko-fi.com/hanami117 in your browser. No popups, no reminders. Also in Settings search ("donate", "ko-fi").
 
+- **Windows (preview):** Uzumaki builds for Windows 10 and 11 (x64): an installer for your account only (no
+  administrator rights, Start menu entry, `uzu` on your PATH, a clean uninstall) and a zip. Apple Music plays through
+  castLabs Electron with its Widevine signature, your own files through the built-in player. Media keys and Windows'
+  media overlay, the notification-area icon, song notifications, start at login, Discord and `uzu` (over a named
+  pipe) work as on Linux and macOS. Not on Windows yet: AirPlay, script hooks, the update notice. Not signed yet:
+  Windows SmartScreen asks once ("More info", "Run anyway"). Not released yet: built by the `windows` workflow.
+
 ### Changed
 - **Settings has its own About page** (last in the list, after Keyboard), moved out of General: the app icon, the
   version and build, the copyright, the licences (GPL-3.0-or-later; castLabs Electron, symphonia, rodio, Rune and the

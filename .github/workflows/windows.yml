@@ -1,9 +1,13 @@
 # Uzumaki for Windows (x64): build, tests, headless snaps, the playback engine started for real
-# (signed out, muted) and a test download, on every push to the `windows` branch. Nothing here publishes: no release, no tag, no site. The files are
+# (signed out, muted), the installer installed and removed, and the test downloads, on every push
+# to the `windows` branch. Nothing here publishes: no release, no tag, no site. The files are
 # workflow artifacts only (sign in to GitHub to download them from the run's page).
 #
 # The artifacts:
-#   Uzumaki-windows-x64   the programs and the playback engine, unpacked: run Uzumaki\uzumaki.exe
+#   windows-release       Uzumaki-<release>-windows-x64-setup.exe  the installer (per user, no admin)
+#                         Uzumaki-<release>-windows-x64.zip        the same files without an installer
+#                         and a .sha256 for each
+#   Uzumaki-windows-x64   the unpacked folder (what the zip holds), for a quick look
 #   snaps                 headless pictures of the app drawn on this runner, and the programs' icons
 #
 # UNSIGNED (no Authenticode): Windows SmartScreen asks once ("More info", "Run anyway").
@@ -168,20 +172,58 @@ jobs:
           done
           exit 1
 
-      # The programs and the playback engine as they will ship (the installer comes with a later stage).
-      - name: Stage the programs
-        shell: bash
-        run: |
-          d=target/windows-dist/Uzumaki
-          mkdir -p "$d/bridge/node_modules/electron"
-          cp target/release/uzumaki.exe target/release/uzu.exe "$d/"
-          cp bridge/main.js bridge/preload.js bridge/signin.js bridge/airplay.js bridge/package.json packaging/windows/uzumaki.ico "$d/bridge/"
-          cp -r bridge/node_modules/electron/dist "$d/bridge/node_modules/electron/dist"
-          cp LICENSE "$d/LICENSE.txt"
-          cp THIRD_PARTY_NOTICES.md "$d/THIRD_PARTY_NOTICES.txt"
-          ls -l "$d" "$d/bridge"
+      # The installer (Inno Setup, on the runner image), the zip and the checksums.
+      - name: Installer and zip
+        shell: pwsh
+        env:
+          V: ${{ steps.v.outputs.version }}
+          B: ${{ steps.v.outputs.build }}
+        run: ./packaging/windows/build.ps1 -Version $env:V -Build ([int]$env:B)
 
-      # The unpacked folder: download it, unpack, run Uzumaki\uzumaki.exe.
+      # The staged programs for real: hidden, a test copy on scratch folders, `uzu` over the
+      # named pipe, the engine started by the app and ended with it.
+      - name: The app runs
+        shell: pwsh
+        run: ./packaging/windows/app-smoke.ps1 -Dir target\windows-dist\Uzumaki
+
+      # A real install for this runner's user: silent, into a temp folder, the files, the PATH,
+      # the shortcuts, an update over it, uninstall (the user's data stays), and with /REMOVEDATA.
+      - name: Install and uninstall
+        shell: pwsh
+        env:
+          V: ${{ steps.v.outputs.version }}
+          R: ${{ steps.v.outputs.release }}
+        run: ./packaging/windows/smoke.ps1 -Setup "target\windows-release\Uzumaki-$env:R-windows-x64-setup.exe" -Version $env:V
+
+      - name: The files
+        shell: bash
+        env:
+          R: ${{ steps.v.outputs.release }}
+        run: |
+          cd target/windows-release
+          ls -l
+          [ "$(ls | wc -l)" = 4 ] || { echo "::error::expected exactly 4 files"; exit 1; }
+          for f in "Uzumaki-$R-windows-x64-setup.exe" "Uzumaki-$R-windows-x64.zip"; do
+            sha256sum -c "$f.sha256"
+            [ "$(wc -l < "$f.sha256")" = 1 ] || { echo "::error::$f.sha256 is not one line"; exit 1; }
+          done
+          unzip -l "Uzumaki-$R-windows-x64.zip" > list
+          for p in Uzumaki/uzumaki.exe Uzumaki/uzu.exe Uzumaki/README-WINDOWS.txt Uzumaki/LICENSE.txt Uzumaki/THIRD_PARTY_NOTICES.txt Uzumaki/bridge/main.js Uzumaki/bridge/node_modules/electron/dist/electron.exe Uzumaki/bridge/node_modules/electron/dist/electron.exe.sig; do
+            grep -q " $p\$" list || { echo "::error::$p missing from the zip"; exit 1; }
+          done
+          rm list
+          { echo '### Files (unsigned test build, not a release)'; echo '```'; cat ./*.sha256; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      # The installer and the zip, to download and try.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-release
+          path: target/windows-release/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      # The unpacked folder, for a quick look without an installer.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Uzumaki-windows-x64
