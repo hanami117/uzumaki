@@ -28,7 +28,7 @@ concurrency:
 
 env:
   # "true": a failing check is reported by the Verdict step and the run stays green (see windows.yml).
-  PROBE: "true"
+  PROBE: "false"
 
 jobs:
   bridge:

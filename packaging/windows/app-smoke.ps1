@@ -56,7 +56,8 @@ try {
     Check ($said -notmatch "connecting to Apple Music") "the playback engine started and found Apple's web player"
     Check ($said -match "not signed in") "signed out, as a scratch profile is"
     Check ((Engines).Count -gt 0) "castLabs Electron runs from the staged folder ($((Engines).Count) processes)"
-    Check (Test-Path (Join-Path $env:UZUMAKI_PROFILE_DIR "Local State")) "the engine's profile is the scratch one"
+    # Chromium fills its profile folder as it goes (some files only when it quits): anything in it will do.
+    Check (@(Get-ChildItem $env:UZUMAKI_PROFILE_DIR -Force -ErrorAction SilentlyContinue).Count -gt 0) "the engine's profile is the scratch one"
     Check (Test-Path (Join-Path $scratch "state\uzumaki\Logs\bridge.log")) "the app keeps its files in the scratch folders (the engine's log)"
     # A second copy must not start: this one is a test copy (no single-instance check), so only `uzu` is tried.
     $said = & $uzu search "bach cello suite" 2>&1 | Out-String

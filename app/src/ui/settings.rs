@@ -626,6 +626,8 @@ fn row_el(r: &Rx, id: Row) -> El {
             if MAC { "Show icon in the menu bar" } else { "Show in system tray" },
             Some(if MAC {
                 "Play, pause and skip from the menu bar.".into()
+            } else if cfg!(windows) {
+                "Play, pause and skip from the notification area, next to the clock.".into()
             } else {
                 "Play, pause and skip from the tray. Needs a tray host (on GNOME, the AppIndicator extension).".into()
             }),
