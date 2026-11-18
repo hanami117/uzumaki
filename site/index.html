@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Uzumaki: a free Apple Music app for Linux and macOS</title>
-<meta name="description" content="Uzumaki is a free, GPU-rendered Apple Music desktop app for Linux and macOS: synced lyrics, local files, media keys, a terminal player. AUR, AppImage, Homebrew.">
+<title>Uzumaki: a free Apple Music app for Linux, macOS and Windows</title>
+<meta name="description" content="Uzumaki is a free, GPU-rendered Apple Music desktop app for Linux, macOS and Windows: synced lyrics, local files, media keys, a terminal player. AUR, AppImage, Homebrew, Windows installer.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0e0e11">
-<meta property="og:title" content="Uzumaki: a free Apple Music app for Linux and macOS">
-<meta property="og:description" content="Uzumaki is a free, GPU-rendered Apple Music desktop app for Linux and macOS: synced lyrics, local files, media keys, a terminal player. AUR, AppImage, Homebrew.">
+<meta property="og:title" content="Uzumaki: a free Apple Music app for Linux, macOS and Windows">
+<meta property="og:description" content="Uzumaki is a free, GPU-rendered Apple Music desktop app for Linux, macOS and Windows: synced lyrics, local files, media keys, a terminal player. AUR, AppImage, Homebrew, Windows installer.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://getuzumaki.app/">
 <meta property="og:site_name" content="Uzumaki">
@@ -19,8 +19,8 @@
 <meta property="og:image:alt" content="The Uzumaki logo">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@Uzumaki_App">
-<meta name="twitter:title" content="Uzumaki: a free Apple Music app for Linux and macOS">
-<meta name="twitter:description" content="Uzumaki is a free, GPU-rendered Apple Music desktop app for Linux and macOS: synced lyrics, local files, media keys, a terminal player. AUR, AppImage, Homebrew.">
+<meta name="twitter:title" content="Uzumaki: a free Apple Music app for Linux, macOS and Windows">
+<meta name="twitter:description" content="Uzumaki is a free, GPU-rendered Apple Music desktop app for Linux, macOS and Windows: synced lyrics, local files, media keys, a terminal player. AUR, AppImage, Homebrew, Windows installer.">
 <meta name="twitter:image" content="https://getuzumaki.app/assets/og-v2.jpg">
 <link rel="canonical" href="https://getuzumaki.app/">
 <link rel="icon" href="assets/icon-coral.svg" type="image/svg+xml">
@@ -47,11 +47,11 @@
    "@id": "https://getuzumaki.app/#app",
    "name": "Uzumaki",
    "alternateName": "Uzumaki music player",
-   "description": "A free, GPU-rendered Apple Music desktop client for Linux and macOS, written in Rust. Synced lyrics, local files in the same queue, media keys (MPRIS) and a terminal player, uzu. Streaming needs an Apple Music subscription.",
+   "description": "A free, GPU-rendered Apple Music desktop client for Linux, macOS and Windows, written in Rust. Synced lyrics, local files in the same queue, media keys and a terminal player, uzu. Streaming needs an Apple Music subscription.",
    "url": "https://getuzumaki.app/",
-   "operatingSystem": "Linux, macOS",
+   "operatingSystem": "Linux, macOS, Windows",
    "applicationCategory": "MultimediaApplication",
-   "softwareVersion": "0.2.4",
+   "softwareVersion": "0.3.0",
    "license": "https://www.gnu.org/licenses/gpl-3.0.html",
    "offers": {
     "@type": "Offer",
@@ -136,7 +136,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
   <div class="wrap hero-in">
     <div class="demo-text" id="demo-text">
     <span class="eyebrow">$ uzumaki</span>
-    <h1><span class="w" style="--i:0">A</span> <span class="w" style="--i:1">native</span> <span class="w" style="--i:2">Apple</span> <span class="w" style="--i:3">Music</span> <span class="w" style="--i:4">desktop</span> <span class="w" style="--i:5">client</span> <span class="w" style="--i:6">for</span> <span class="w" style="--i:7">Linux</span> <span class="w" style="--i:8">and</span> <span class="w" style="--i:9">macOS.</span></h1>
+    <h1><span class="w" style="--i:0">A</span> <span class="w" style="--i:1">native</span> <span class="w" style="--i:2">Apple</span> <span class="w" style="--i:3">Music</span> <span class="w" style="--i:4">desktop</span> <span class="w" style="--i:5">client</span> <span class="w" style="--i:6">for</span> <span class="w" style="--i:7">Linux,</span> <span class="w" style="--i:8">macOS</span> <span class="w" style="--i:9">and</span> <span class="w" style="--i:10">Windows.</span></h1>
     <p class="sub">GPU&#8209;rendered and written in Rust. Your library, your playlists, synced lyrics and your own music files, in one fast window that works with your media keys and your terminal.</p>
 
     <div class="cta" id="get">
@@ -148,9 +148,13 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
         <span>Linux AppImage</span>
       </a>
+      <a class="btn" href="https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-windows-x64-setup.exe">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+        <span>Windows installer</span>
+      </a>
     </div>
-    <p class="soon"><a href="#download">All ways to install</a> &middot; <a href="/download/windows/">Windows: coming soon</a> &middot; <a href="https://github.com/hanami117/uzumaki">Follow on GitHub</a></p>
-    <p class="fineprint">Free &middot; Linux and macOS &middot; an Apple Music subscription for streaming, or play only your own files without one</p>
+    <p class="soon"><a href="#download">All ways to install</a> &middot; <a href="/download/windows/">Windows zip and install guide</a> &middot; <a href="https://github.com/hanami117/uzumaki">Follow on GitHub</a></p>
+    <p class="fineprint">Free &middot; Linux, macOS and Windows &middot; an Apple Music subscription for streaming, or play only your own files without one</p>
     </div>
 
     <div class="demo-stage" id="demo-stage">
@@ -350,7 +354,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
     </li>
     <li class="reveal">
       <h3>Media keys, tray and notifications</h3>
-      <p>MPRIS on Linux and Now Playing on macOS, so media keys and desktop widgets just work. A tray icon with playback controls, optional close-to-tray, song-change notifications, and hook scripts that run on every song change.</p>
+      <p>MPRIS on Linux, Now Playing on macOS and the media overlay on Windows, so media keys and desktop widgets just work. A tray icon with playback controls, optional close-to-tray, song-change notifications, and hook scripts that run on every song change.</p>
     </li>
     <li class="reveal">
       <h3>Your whole library, fast</h3>
@@ -359,7 +363,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
     <li class="reveal wide" id="discord">
       <div>
         <h3>Show it on Discord</h3>
-        <p>An optional setting, off by default: Settings &rarr; General &rarr; Show on Discord. Your Discord profile then says &ldquo;Listening to Uzumaki&rdquo; with the title, the artist, the cover and a progress bar. It works for Apple Music songs and local files, on macOS and Linux (Flatpak and Snap Discord too). It needs the Discord desktop app on the same computer; the web version can&rsquo;t show it.</p>
+        <p>An optional setting, off by default: Settings &rarr; General &rarr; Show on Discord. Your Discord profile then says &ldquo;Listening to Uzumaki&rdquo; with the title, the artist, the cover and a progress bar. It works for Apple Music songs and local files, on macOS, Linux (Flatpak and Snap Discord too) and Windows. It needs the Discord desktop app on the same computer; the web version can&rsquo;t show it.</p>
       </div>
       <!-- MOCK, not a real screenshot: made-up name, no real avatar or account. -->
       <div class="dmock" role="img" aria-label="A mock-up of a Discord profile card: Listening to Uzumaki, a song title, an artist, a cover and a progress bar.">
@@ -517,7 +521,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
           <li><span>Keyboard shortcuts</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>/</kbd></span></li>
           <li class="keys-num"><span>Number keys: the main pages, or your sidebar pins</span><span class="keys-k"><kbd>Ctrl</kbd><kbd>1</kbd><i>to</i><kbd>9</kbd></span></li>
       </ul>
-      <p class="note">The defaults, as shown on Linux; on a Mac, Ctrl is Cmd.</p>
+      <p class="note">The defaults, as shown on Linux and Windows; on a Mac, Ctrl is Cmd.</p>
     </div>
   </div>
 </section>
@@ -529,7 +533,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
     <li class="reveal">
       <span class="n">01</span>
       <h3>Install</h3>
-      <p>On Arch, from the AUR; on other Linux, as an AppImage or from source; on macOS, the DMG or Homebrew. Version 0.2.4 is out for macOS and Linux: see <a href="#download">Download</a>.</p>
+      <p>On Arch, from the AUR; on other Linux, as an AppImage or from source; on macOS, the DMG or Homebrew; on Windows, the installer or a zip. Version 0.3.0 is out for Linux, macOS and Windows: see <a href="#download">Download</a>.</p>
     </li>
     <li class="reveal">
       <span class="n">02</span>
@@ -619,8 +623,8 @@ Juniper Vale - Small Rooms
       <p>Songs stream at 256 kbps AAC, the quality Apple offers on the web. Lossless and Dolby Atmos aren't available this way. There's also a 64 kbps data saver.</p>
     </div>
     <div class="card reveal">
-      <h3>Linux or macOS</h3>
-      <p>On Linux, a GPU with Vulkan drivers, on Wayland or X11. On macOS 13 or later with Apple silicon it runs as a regular app, with media keys, a menu bar icon and notifications.</p>
+      <h3>Linux, macOS or Windows</h3>
+      <p>On Linux, a GPU with Vulkan drivers, on Wayland or X11. On macOS 13 or later with Apple silicon it runs as a regular app, with media keys, a menu bar icon and notifications. On Windows 10 or 11 (x64) it has media keys, a tray icon and notifications too.</p>
     </div>
   </div>
 </section>
@@ -628,7 +632,7 @@ Juniper Vale - Small Rooms
 <section class="wrap dl" id="download" aria-labelledby="dl-h">
   <span class="eyebrow reveal"><b>05</b> &middot; download</span>
   <h2 id="dl-h" class="reveal">Get Uzumaki</h2>
-  <p class="lead reveal">The latest beta, version 0.2.4, is out for macOS and Linux. Free and open source under the GPL. Each system has an install page, and <a href="/apple-music-linux/">Apple Music on Linux</a> sums up what you get on Linux.</p>
+  <p class="lead reveal">The latest beta, version 0.3.0, is out for Linux, macOS and Windows. Free and open source under the GPL. Each system has an install page, and <a href="/apple-music-linux/">Apple Music on Linux</a> sums up what you get on Linux.</p>
   <div class="dl-grid stagger">
     <div class="card reveal" id="download-macos">
       <h3>macOS</h3>
@@ -665,12 +669,17 @@ Juniper Vale - Small Rooms
     </div>
     <div class="card reveal" id="download-windows">
       <h3>Windows</h3>
-      <span class="pill">Coming soon</span>
-      <p>Planned, after Linux and macOS. Playback on Windows needs more Widevine work first.</p>
-      <a class="more" href="/download/windows/">About Windows &rarr;</a>
+      <p>Windows 10 or 11, x64. The installer is per user: no administrator rights, a Start menu entry, and <code>uzu</code> on your PATH.</p>
+      <a class="btn primary" href="https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-windows-x64-setup.exe">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+        <span>Download for Windows</span>
+      </a>
+      <p class="dl-first"><strong>First launch:</strong> Uzumaki isn&rsquo;t code-signed yet, so Windows SmartScreen shows &ldquo;Windows protected your PC&rdquo;. Click <b>More info</b>, then <b>Run anyway</b>.</p>
+      <p>Or take the <a href="https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-windows-x64.zip">zip</a>: unzip it anywhere and run <code>uzumaki.exe</code>.</p>
+      <a class="more" href="/download/windows/">Windows install guide &rarr;</a>
     </div>
   </div>
-  <p class="note reveal">Once a day Uzumaki asks this site whether a new version is out and tells you; it never downloads or installs anything by itself. Settings &rarr; General turns it off. Checksums are on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.2.4">release page</a>.</p>
+  <p class="note reveal">Once a day Uzumaki asks this site whether a new version is out and tells you; it never downloads or installs anything by itself. Settings &rarr; General turns it off. Checksums are on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.3.0">release page</a>.</p>
 </section>
 
 <section class="wrap faq" id="faq" aria-labelledby="faq-h">
@@ -709,27 +718,27 @@ Juniper Vale - Small Rooms
 
   <details class="reveal">
     <summary>Do media keys and desktop widgets work?</summary>
-    <p>Yes. On Linux Uzumaki registers with MPRIS, so media keys, KDE and GNOME widgets and tools like playerctl see it, whether an Apple Music song or a local file is playing. On macOS it uses the system's Now Playing controls.</p>
+    <p>Yes. On Linux Uzumaki registers with MPRIS, so media keys, KDE and GNOME widgets and tools like playerctl see it, whether an Apple Music song or a local file is playing. On macOS it uses the system's Now Playing controls, and on Windows the media overlay (SMTC).</p>
   </details>
 
   <details class="reveal">
     <summary>Can it show what I&rsquo;m playing on Discord?</summary>
-    <p>Yes. It&rsquo;s an optional setting, off by default (Settings &rarr; General &rarr; Show on Discord). Your profile then shows &ldquo;Listening to Uzumaki&rdquo; with the title, artist, cover and a progress bar, for Apple Music songs and local files. It needs the Discord desktop app on the same computer, on macOS or Linux (Flatpak and Snap too). Uzumaki talks to Discord locally and has no account or login for this. You can hide the song title, or the cover, if you prefer.</p>
+    <p>Yes. It&rsquo;s an optional setting, off by default (Settings &rarr; General &rarr; Show on Discord). Your profile then shows &ldquo;Listening to Uzumaki&rdquo; with the title, artist, cover and a progress bar, for Apple Music songs and local files. It needs the Discord desktop app on the same computer, on macOS, Linux (Flatpak and Snap too) or Windows. Uzumaki talks to Discord locally and has no account or login for this. You can hide the song title, or the cover, if you prefer.</p>
   </details>
 
   <details class="reveal">
     <summary>When can I download it?</summary>
-    <p>Now: version 0.2.4 is out for macOS and Linux (AUR and AppImage). The <a href="#download">Download</a> section has an install page for each system, and releases appear on the <a href="https://github.com/hanami117/uzumaki/releases">GitHub releases page</a>.</p>
+    <p>Now: version 0.3.0 is out for Linux (AUR and AppImage), macOS and Windows. The <a href="#download">Download</a> section has an install page for each system, and releases appear on the <a href="https://github.com/hanami117/uzumaki/releases">GitHub releases page</a>.</p>
   </details>
 
   <details class="reveal">
     <summary>How do I update?</summary>
-    <p>Uzumaki tells you when a new version is out. With the AUR or Homebrew, update as you update everything else (<code>yay</code>, <code>brew upgrade</code>). With an AppImage, download the new file and replace the old one. From source, run <code>./install.sh</code> again.</p>
+    <p>Uzumaki tells you when a new version is out. With the AUR or Homebrew, update as you update everything else (<code>yay</code>, <code>brew upgrade</code>). With an AppImage, download the new file and replace the old one. On Windows, download the new installer and run it over the old one. From source, run <code>./install.sh</code> again.</p>
   </details>
 
   <details class="reveal">
     <summary>Is there a Windows version?</summary>
-    <p>Not yet. It&rsquo;s planned. See <a href="/download/windows/">Windows</a>.</p>
+    <p>Yes, since version 0.3.0, for Windows 10 and 11 on x64. Download the installer or a zip: see the <a href="/download/windows/">Windows install guide</a>. It plays Apple Music, local files and has media keys, a tray icon, notifications, Discord status and the <code>uzu</code> command. AirPlay isn&rsquo;t available on Windows. Uzumaki isn&rsquo;t code-signed yet, so SmartScreen warns you the first time.</p>
   </details>
 
   <details class="reveal">
@@ -747,7 +756,7 @@ Juniper Vale - Small Rooms
       <span>Uzumaki</span>
     </div>
     <p class="foot-social"><a href="https://x.com/Uzumaki_App" target="_blank" rel="me noopener"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3zm-1.08 16.17h1.7L7.4 4.74H5.58l11.09 14.43z"/></svg> Follow @Uzumaki_App on X</a> <a href="https://ko-fi.com/hanami117" target="_blank" rel="me noopener"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M3 5.5h14V13a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5V5.5zm7 9.3 2.7-2.6a1.7 1.7 0 0 0-2.4-2.4l-.3.3-.3-.3a1.7 1.7 0 0 0-2.4 2.4L10 14.8zM17 7.5h1.2a3.3 3.3 0 0 1 0 6.6H17v-2h1.2a1.3 1.3 0 0 0 0-2.6H17v-2zM2.5 19.8h15v1.7h-15z"/></svg> Support Uzumaki on Ko-fi</a></p>
-    <p class="foot-contact">Install: <a href="/download/macos/">macOS</a> · <a href="/download/arch/">Arch Linux</a> · <a href="/download/linux/">AppImage · any distro</a> · <a href="/download/windows/">Windows (soon)</a></p>
+    <p class="foot-contact">Install: <a href="/download/macos/">macOS</a> · <a href="/download/arch/">Arch Linux</a> · <a href="/download/linux/">AppImage · any distro</a> · <a href="/download/windows/">Windows</a></p>
     <p class="foot-contact"><a href="/apple-music-linux/">Apple Music on Linux</a> · <a href="https://github.com/hanami117/uzumaki">GitHub</a> · <a href="https://github.com/hanami117/uzumaki/blob/main/CHANGELOG.md">Changelog</a> · License: <a href="https://github.com/hanami117/uzumaki/blob/main/LICENSE">GPL-3.0</a></p>
     <p class="foot-contact">Questions or ideas: <a href="mailto:hello@getuzumaki.app">hello@getuzumaki.app</a> · Help with the app: <a href="mailto:support@getuzumaki.app">support@getuzumaki.app</a></p>
     <p class="disclaimer">Uzumaki is an independent project, not affiliated with or endorsed by Apple. Apple Music is a trademark of Apple Inc.</p>

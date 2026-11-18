@@ -5,8 +5,8 @@
 <h1 align="center">Uzumaki</h1>
 
 <p align="center">
-  A native Apple Music desktop client for Linux and macOS.<br>
-  Written in Rust and drawn on the GPU. Windows is coming later.
+  A native Apple Music desktop client for Linux, macOS and Windows.<br>
+  Written in Rust and drawn on the GPU.
 </p>
 
 <p align="center">
@@ -53,7 +53,7 @@ The screenshots use made-up albums and artists.
   Apple Music. You can also use Uzumaki with local files only, without an Apple Music subscription.
 - **Make it yours:** dark, light or system theme, three app icons, and backgrounds (the built-in swirl, your
   own picture or the current cover) with dither, ASCII, halftone, scanline or blur effects.
-- **Desktop integration:** media keys and desktop widgets (MPRIS on Linux, Now Playing on macOS), a tray or
+- **Desktop integration:** media keys and desktop widgets (MPRIS on Linux, Now Playing on macOS, the media overlay on Windows), a tray or
   menu bar icon, close to tray, and song notifications.
 - **Keyboard first:** you can change every shortcut in Settings → Keyboard.
 - **`uzu`:** a command line and terminal player for the running app (see below).
@@ -67,12 +67,14 @@ The screenshots use made-up albums and artists.
 - **Linux:** x86_64, Wayland or X11, and a GPU with Vulkan (the Vulkan loader and your GPU's driver). On X11
   you also need `libxkbcommon-x11` (`libxkbcommon-x11-0` on Debian and Ubuntu).
 - **macOS:** a Mac with Apple silicon (M1 or later), macOS 13 Ventura or later.
+- **Windows:** Windows 10 or 11, 64-bit (x64). AirPlay is not available on Windows, and animated artwork
+  needs `ffmpeg.exe` on your PATH.
 - **Disk space:** about 300 MB, most of it for the hidden player (castLabs Electron). On the first start,
   Google's Widevine module downloads by itself.
 
 ## Install
 
-> **Uzumaki 0.2.4 is out for macOS and Linux**: a disk image and Homebrew on macOS; the AUR and an AppImage on Linux.
+> **Uzumaki 0.3.0 is out for Linux, macOS and Windows**: the AUR and an AppImage on Linux; a disk image and Homebrew on macOS; an installer and a zip on Windows.
 > The install pages on
 > [getuzumaki.app](https://getuzumaki.app/#download) have the same steps.
 
@@ -147,6 +149,24 @@ brew uninstall --cask uzumaki
 brew uninstall --cask --zap uzumaki
 ```
 
+### Windows (installer or zip)
+
+Windows 10 or 11, 64-bit (x64). Two downloads:
+
+- [`Uzumaki-windows-x64-setup.exe`](https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-windows-x64-setup.exe),
+  the installer. It installs for your user only, with no administrator rights, into
+  `%LOCALAPPDATA%\Programs\Uzumaki`. It adds a Start menu entry (a desktop shortcut is optional) and puts `uzu`
+  on your PATH.
+- [`Uzumaki-windows-x64.zip`](https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-windows-x64.zip),
+  the same app without an installer: unzip it anywhere and run `uzumaki.exe`.
+
+Each file has a `.sha256` checksum on the [release page](https://github.com/hanami117/uzumaki/releases/latest).
+
+**First launch.** Uzumaki isn't code-signed yet, so Windows SmartScreen shows "Windows protected your PC" the
+first time. This is expected. Click **More info**, then **Run anyway**.
+
+To uninstall, use Settings → Apps → Installed apps → Uzumaki → Uninstall. It asks whether to remove your data too.
+
 ### From source (Linux)
 
 You need Rust with cargo, Node.js with npm, git, pkg-config and the ALSA development files (`alsa-lib`,
@@ -180,6 +200,7 @@ How you update depends on how you installed it. Quit Uzumaki first.
 - **AUR:** with the rest of your system (`yay -Syu`). The notice tells you to use your package manager.
 - **AppImage:** the notice has a Download button. Replace the old file with the new one.
 - **Disk image:** download the new DMG and drag the new app over the old one in Applications.
+- **Windows:** download the new installer and run it over the old one. Your settings and sign-in stay.
 - **Homebrew:** `brew update && brew upgrade --cask uzumaki`.
 - **From source:** `git pull && ./install.sh`.
 
@@ -202,6 +223,8 @@ Where Uzumaki keeps its files:
 - library and cover caches: `~/.cache/uzumaki`;
 - update-check state: `~/.local/state/uzumaki`;
 - on macOS also `~/Library/Application Support/uzumaki` and the log in `~/Library/Logs/Uzumaki`.
+- on Windows: settings in `%APPDATA%\Uzumaki`, caches in `%LOCALAPPDATA%\Uzumaki` and logs in
+  `%LOCALAPPDATA%\Uzumaki\Logs` (the paths above are for Linux and macOS).
 
 To forget everything, quit Uzumaki and delete those folders.
 
@@ -256,7 +279,7 @@ For the details, see [docs/bridge-protocol.md](docs/bridge-protocol.md).
 - **Apple Music:** you sign in to Apple directly, in Apple's own sign-in window. Uzumaki never sees your
   password. Your login stays on your computer, in the hidden player's profile.
 - **Update check:** once a day, a plain GET of `https://updates.getuzumaki.app/latest.json` with the
-  User-Agent `Uzumaki/<version>` and four values: the Uzumaki version, the OS (Linux or macOS), the processor
+  User-Agent `Uzumaki/<version>` and four values: the Uzumaki version, the OS (Linux, macOS or Windows), the processor
   type (x86_64 or arm64) and how it was installed (AppImage, AUR, Homebrew, DMG, …), plus a flag on the first
   check of a week and of a month. The server adds one to a counter for that day and that combination; those
   daily counts are all it keeps: no IP address, no install or device id, no cookies. The code is in
