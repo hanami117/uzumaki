@@ -192,6 +192,7 @@ fn a_file_that_is_not_utf8_still_loads() {
 }
 
 #[test]
+#[cfg(unix)]
 fn the_path_follows_xdg_first_and_ignores_a_relative_one() {
     let os = |s: &str| Some(std::ffi::OsString::from(s));
     assert_eq!(config::path_in(os("/tmp/x"), os("/home/me")), Some(PathBuf::from("/tmp/x/uzumaki/uzu.toml")));

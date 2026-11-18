@@ -29,8 +29,9 @@ mod imp;
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 pub use imp::*;
 
-// The autostart entry's text is plain std: its tests run on the Mac too.
-#[cfg(all(test, not(target_os = "linux")))]
+// The autostart entry's text is plain std: its tests run on the Mac too (not on Windows: they
+// are about Unix paths).
+#[cfg(all(test, unix, not(target_os = "linux")))]
 #[path = "login_linux.rs"]
 #[allow(dead_code)]
 mod linux_entry;

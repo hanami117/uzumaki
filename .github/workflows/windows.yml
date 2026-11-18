@@ -56,7 +56,10 @@ jobs:
           { echo "version=$version"; echo "build=$build"; echo "release=$release"; } >> "$GITHUB_OUTPUT"
           echo "Uzumaki $version (build $build) for Windows, $(git rev-parse --short HEAD): a test build, not a release" >> "$GITHUB_STEP_SUMMARY"
 
+      # Saved after a failed run too: a test that fails must not cost the next run a cold build.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
 
       - name: cargo build
         run: cargo build --workspace --locked

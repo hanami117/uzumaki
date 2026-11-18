@@ -22,6 +22,12 @@ pub enum Last {
 
 pub fn save(path: &Path, last: &Last) {
     if let Ok(text) = serde_json::to_string(last) {
+        // Windows: the record is a file in the state folder (a pipe has no folder of its own),
+        // and that folder may not exist yet.
+        #[cfg(windows)]
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
         let _ = std::fs::write(path, text);
     }
 }

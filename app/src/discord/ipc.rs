@@ -241,6 +241,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn linux_looks_in_the_runtime_dir_and_the_sandboxes_below_it() {
         let d = dirs(&env(&[("XDG_RUNTIME_DIR", "/run/user/1000"), ("TMPDIR", "/tmp")]));
         let s: Vec<_> = d.iter().map(|p| p.to_str().unwrap()).collect();
@@ -252,11 +253,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn macos_looks_in_tmpdir() {
         let d = dirs(&env(&[("TMPDIR", "/var/folders/ab/cd/T/")]));
         assert_eq!(d[0], PathBuf::from("/var/folders/ab/cd/T/"));
         assert_eq!(candidates(&env(&[("TMPDIR", "/var/folders/ab/cd/T/")]))[0], PathBuf::from("/var/folders/ab/cd/T/discord-ipc-0"));
         assert!(dirs(&env(&[("XDG_RUNTIME_DIR", "")])).iter().all(|p| p.as_os_str() != ""), "an empty variable is no folder");
+    }
+
+    /// Windows: no folders, the ten pipes in order.
+    #[test]
+    #[cfg(windows)]
+    fn windows_tries_the_ten_pipes() {
+        let c = candidates(&env(&[("TEMP", r"C:\Temp")]));
+        assert_eq!(c.len(), 10);
+        assert_eq!(c[0], PathBuf::from(r"\\.\pipe\discord-ipc-0"));
+        assert_eq!(c[9], PathBuf::from(r"\\.\pipe\discord-ipc-9"));
     }
 
     #[test]
