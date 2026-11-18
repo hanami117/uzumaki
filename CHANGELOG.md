@@ -5,6 +5,10 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-18
+
+A new About page in Settings, and a quiet way to support the project. You need an Apple Music subscription.
+
 ### Added
 - **Support Uzumaki** (Settings → About): a quiet heart, one line and a "Support on Ko-fi" button that
   opens https://ko-fi.com/hanami117 in your browser. No popups, no reminders. Also in Settings search ("donate", "ko-fi").
