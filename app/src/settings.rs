@@ -591,13 +591,20 @@ mod tests {
     fn discord_is_off_by_default_with_its_choices_and_old_files_load() {
         let d = Settings::default().discord;
         assert!(!d.enabled && d.artwork && d.buttons && d.hide_when_paused && !d.hide_title && d.client_id.is_none());
+        assert_eq!(d.status, crate::discord::StatusDisplay::Title);
         let old: Settings = serde_json::from_str(r#"{"tray_icon":false}"#).unwrap();
         assert_eq!(old.discord, d);
         let s: Settings = serde_json::from_str(r#"{"discord":{"enabled":true,"hide_title":true,"client_id":"123456789012345678"}}"#).unwrap();
         assert!(s.discord.enabled && s.discord.hide_title && s.discord.artwork, "unnamed choices keep their defaults");
+        assert_eq!(s.discord.status, crate::discord::StatusDisplay::Title, "an old file gets the song");
         assert_eq!(s.discord.client_id.as_deref(), Some("123456789012345678"));
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back.discord, s.discord);
+        let a: Settings = serde_json::from_str(r#"{"discord":{"status":"artist"}}"#).unwrap();
+        assert_eq!(a.discord.status, crate::discord::StatusDisplay::Artist);
+        let t: Settings = serde_json::from_str(r#"{"discord":{"status":"title_artist"}}"#).unwrap();
+        assert_eq!(t.discord.status, crate::discord::StatusDisplay::TitleArtist);
+        assert_eq!(serde_json::to_value(crate::discord::StatusDisplay::TitleArtist).unwrap(), "title_artist");
     }
 
     #[test]

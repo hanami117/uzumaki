@@ -52,6 +52,7 @@ pub enum Row {
     DiscordButtons,
     DiscordHidePaused,
     DiscordHideTitle,
+    DiscordStatus,
     CheckUpdates,
     /// "Check now" and when the last check ran.
     CheckNow,
@@ -111,6 +112,7 @@ impl Row {
             Row::DiscordButtons => "discord-buttons",
             Row::DiscordHidePaused => "discord-hide-paused",
             Row::DiscordHideTitle => "discord-hide-title",
+            Row::DiscordStatus => "discord-status",
             Row::CheckUpdates => "check-updates",
             Row::CheckNow => "check-now",
             Row::Tour => "tour",
@@ -227,6 +229,7 @@ const SPECS: &[Spec] = &[
     spec(Row::DiscordButtons, Tab::General, "Show buttons", "An \"Open in Apple Music\" button on your Discord card, for songs from Apple Music.", "discord button link share apple music"),
     spec(Row::DiscordHidePaused, Tab::General, "Hide when paused", "Takes the card off your profile while the music is paused or stopped. Off: it stays, without the progress bar.", "discord pause paused stop remove clear"),
     spec(Row::DiscordHideTitle, Tab::General, "Hide song title", "Shows \"Listening to music\" and the artist, not the song, the album or a link to it.", "discord private privacy hide title song name secret"),
+    spec(Row::DiscordStatus, Tab::General, "Show in status", STATUS_NOTE, "discord status line member list mini profile compact song title artist app name"),
     spec(Row::CheckUpdates, Tab::General, "Check for updates", "Once a day, asks getuzumaki.app whether a new version is out. Nothing about you is sent.", "update updates upgrade new version release download"),
     spec(Row::CheckNow, Tab::General, "Check now", "Asks getuzumaki.app now whether a new version is out. Shows when it last checked.", "update updates upgrade new version release check for updates last checked"),
     spec(Row::Tour, Tab::General, "Welcome tour", "Plays the welcome and the shortcuts tour again.", "onboarding intro help tutorial shortcuts keys keyboard"),
@@ -290,6 +293,8 @@ pub fn find(query: &str) -> Vec<usize> {
 /// Settings → Appearance → Animated artwork: what it does.
 /// "Show on Discord" (`discord/`).
 pub const DISCORD: &str = "Shows what you're listening to on your Discord profile, like Spotify does: the song, the artist, a progress bar. Needs the Discord app running on this computer. Nothing is sent by Uzumaki itself; Discord shows the card to your friends.";
+/// "Show in status" (`discord::StatusDisplay`).
+pub const STATUS_NOTE: &str = "What Discord shows after the music note in the member list and the mini profile. Needs a recent Discord.";
 pub const ANIMATED_ARTWORK: &str = "Apple's video loop of an album, when it has one: in the Now Playing cover and, with Always, at the top of an album page. Off keeps still covers and downloads no video.";
 
 #[cfg(test)]

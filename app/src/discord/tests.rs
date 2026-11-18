@@ -185,6 +185,7 @@ fn handshake_then_set_activity_with_the_song() {
         activity_of(&f).unwrap(),
         &json!({
             "type": 2,
+            "status_display_type": 2,
             "details": "Redbone",
             "state": "Childish Gambino",
             "assets": {

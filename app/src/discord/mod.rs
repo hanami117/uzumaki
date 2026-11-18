@@ -52,6 +52,33 @@ const IO_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long quitting waits for the card to be cleared.
 const QUIT_WAIT: Duration = Duration::from_millis(1000);
 
+/// What Discord shows after the music note in the member list and the mini profile
+/// (`status_display_type`): the app's name, the song, the artist or both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusDisplay {
+    /// "Uzumaki" (Discord's own default: the activity name).
+    Name,
+    #[default]
+    Title,
+    Artist,
+    /// "Title – Artist" (the album on the card's second line).
+    TitleArtist,
+}
+
+impl StatusDisplay {
+    pub const ALL: [StatusDisplay; 4] = [Self::Name, Self::Title, Self::Artist, Self::TitleArtist];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "App name",
+            Self::Title => "Song title",
+            Self::Artist => "Artist",
+            Self::TitleArtist => "Title \u{2013} Artist",
+        }
+    }
+}
+
 /// The user's choices (settings.json, `discord`). Off by default.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -66,13 +93,15 @@ pub struct Prefs {
     pub hide_when_paused: bool,
     /// Show "Listening to music" instead of the title (no album, no button).
     pub hide_title: bool,
+    /// What the compact status line (member list, mini profile) shows after the note.
+    pub status: StatusDisplay,
     /// Another Discord Application id than the app's own (docs/DISCORD.md), for builds of your own.
     pub client_id: Option<String>,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { enabled: false, artwork: true, buttons: true, hide_when_paused: true, hide_title: false, client_id: None }
+        Self { enabled: false, artwork: true, buttons: true, hide_when_paused: true, hide_title: false, status: StatusDisplay::Title, client_id: None }
     }
 }
 

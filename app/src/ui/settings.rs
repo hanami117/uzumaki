@@ -684,6 +684,24 @@ fn row_el(r: &Rx, id: Row) -> El {
             Some("Shows \"Listening to music\" and the artist, not the song, the album or a link to it.".to_string()),
             switch("settings/discord-hide-title", "Hide song title", d.hide_title, d.enabled, |s, on| s.set_discord_hide_title(on)),
         ),
+        Row::DiscordStatus => {
+            use crate::discord::StatusDisplay as S;
+            let segs = S::ALL
+                .iter()
+                .map(|&v| {
+                    let key = match v {
+                        S::Name => "settings/discord-show/name",
+                        S::Title => "settings/discord-show/title",
+                        S::Artist => "settings/discord-show/artist",
+                        S::TitleArtist => "settings/discord-show/title-artist",
+                    };
+                    let seg = segment(key, v.label(), d.status == v);
+                    if d.enabled { seg.on_press(move |s: &mut State| s.set_discord_status(v)) } else { seg.focusable(false).cursor(Cursor::NotAllowed) }
+                })
+                .collect();
+            let bar = segmented("settings/discord-status-bar", segs);
+            setting(narrow, "Show in status", Some(super::settings_search::STATUS_NOTE.to_string()), if d.enabled { bar } else { bar.opacity(0.4) })
+        }
         Row::CheckUpdates => setting(
             narrow,
             "Check for updates",
@@ -991,7 +1009,7 @@ fn cache_row(s: &State, narrow: bool, kind: CacheKind, title: &str, key: &'stati
 }
 
 fn general(r: &Rx) -> Vec<El> {
-    let mut v = rows(r, &[Row::OpenOn, Row::StartAtLogin, Row::StartHidden, Row::Tray, Row::CloseToTray, Row::Notify, Row::Discord, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle, Row::CheckUpdates, Row::CheckNow, Row::Tour]);
+    let mut v = rows(r, &[Row::OpenOn, Row::StartAtLogin, Row::StartHidden, Row::Tray, Row::CloseToTray, Row::Notify, Row::Discord, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle, Row::DiscordStatus, Row::CheckUpdates, Row::CheckNow, Row::Tour]);
     v.push(divider());
     v.push(text("Caches").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
     v.extend(rows(r, &[Row::ArtCache, Row::LibraryCache]));
@@ -1519,7 +1537,7 @@ mod tests {
         rt.update(|s, _| set_query(s, "discord"));
         settle(&mut rt, 10);
         let found: Vec<Row> = results(&rt.state).iter().map(|(_, r)| *r).collect();
-        for r in [Row::Discord, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle] {
+        for r in [Row::Discord, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle, Row::DiscordStatus] {
             assert!(found.contains(&r), "{r:?} in {found:?}");
         }
         assert!(!rt.state.settings.discord.enabled, "off by default");
@@ -1531,8 +1549,17 @@ mod tests {
         click(&mut rt, "settings/discord-artwork");
         click(&mut rt, "settings/discord-hide-paused");
         click(&mut rt, "settings/discord-buttons");
+        // The last row sits below the fold: scroll the results up first.
+        let r = rt.presented("settings/discord-hide-title").unwrap().0;
+        rt.wheel_event(rune::WheelEvent::new(0.0, -4000.0).at(r[0], r[1]));
+        settle(&mut rt, 30);
+        click(&mut rt, "settings/discord-show/artist");
+        assert_eq!(rt.state.settings.discord.status, crate::discord::StatusDisplay::Artist);
         let d = &rt.state.settings.discord;
         assert!(d.hide_title && !d.artwork && !d.hide_when_paused && !d.buttons, "{d:?}");
+        let r = rt.presented("settings/discord-hide-title").unwrap().0;
+        rt.wheel_event(rune::WheelEvent::new(0.0, 4000.0).at(r[0], r[1]));
+        settle(&mut rt, 30);
         click(&mut rt, "settings/discord");
         assert!(!rt.state.settings.discord.enabled);
     }

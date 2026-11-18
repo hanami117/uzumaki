@@ -7,7 +7,7 @@
 
 use serde_json::{Value, json};
 
-use super::Prefs;
+use super::{Prefs, StatusDisplay};
 
 /// Discord's activity type for "Listening to …".
 const LISTENING: u8 = 2;
@@ -56,6 +56,7 @@ pub struct Activity {
     pub start: Option<u64>,
     pub end: Option<u64>,
     pub button: Option<String>,
+    pub status: StatusDisplay,
 }
 
 impl Activity {
@@ -73,6 +74,13 @@ impl Activity {
         if let Some(s) = &self.state {
             a["state"] = json!(s);
         }
+        // Discord's `status_display_type`: 0 the activity name, 1 `state` (the artist), 2 `details`
+        // (the title). With no artist line to show, the title stands in.
+        a["status_display_type"] = json!(match self.status {
+            StatusDisplay::Name => 0,
+            StatusDisplay::Artist if self.state.is_some() => 1,
+            StatusDisplay::Artist | StatusDisplay::Title | StatusDisplay::TitleArtist => 2,
+        });
         if let Some(start) = self.start {
             let mut t = json!({"start": start});
             if let Some(end) = self.end {
@@ -111,6 +119,16 @@ fn line(s: &str) -> Option<String> {
     Some(out)
 }
 
+/// `s` cut to the 128 characters Discord takes, with an ellipsis when something was left out.
+fn fit(s: &str) -> String {
+    if s.chars().count() <= MAX_TEXT {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(MAX_TEXT - 1).collect();
+    out.push('\u{2026}');
+    out
+}
+
 fn https(url: &Option<String>, max: usize) -> Option<String> {
     url.as_ref().filter(|u| u.starts_with("https://") && u.len() <= max).cloned()
 }
@@ -123,7 +141,25 @@ pub fn build(snap: Option<&Snapshot>, prefs: &Prefs, now: u64) -> Option<Activit
         return None;
     }
     let hidden = prefs.hide_title;
-    let details = if hidden { HIDDEN_TITLE.to_string() } else { line(&snap.title).unwrap_or_else(|| "Unknown song".into()) };
+    let both = prefs.status == StatusDisplay::TitleArtist && !hidden;
+    let details = if hidden {
+        HIDDEN_TITLE.to_string()
+    } else if both {
+        // "Title – Artist" (just the title with no artist), cut to fit.
+        let title = snap.title.trim();
+        let title = if title.is_empty() { "Unknown song" } else { title };
+        let full = match snap.artist.trim() {
+            "" => title.to_string(),
+            artist => format!("{title} \u{2013} {artist}"),
+        };
+        line(&fit(&full)).unwrap_or_else(|| "Unknown song".into())
+    } else {
+        line(&snap.title).unwrap_or_else(|| "Unknown song".into())
+    };
+    let large_text = if hidden || snap.album_is_fallback { None } else { line(&snap.album) };
+    // The artist is already in the title line, so the card's second line is the album (the artist
+    // again only when there is no album to show).
+    let state = if both { large_text.clone().or_else(|| line(&snap.artist)) } else { line(&snap.artist) };
     let cover = if prefs.artwork { https(&snap.artwork_url, MAX_IMAGE_URL) } else { None };
     // The icon is the big picture when there is no cover, and then needs no small copy of itself.
     let (large_image, small_image) = match cover {
@@ -138,10 +174,9 @@ pub fn build(snap: Option<&Snapshot>, prefs: &Prefs, now: u64) -> Option<Activit
     };
     // The link names the song, so it goes with the title.
     let button = if prefs.buttons && !hidden { https(&snap.song_url, MAX_BUTTON_URL) } else { None };
-    let large_text = if hidden || snap.album_is_fallback { None } else { line(&snap.album) };
     Some(Activity {
         details,
-        state: line(&snap.artist),
+        state,
         large_image,
         large_text,
         small_text: small_image.as_ref().map(|_| if snap.playing { "Uzumaki" } else { "Uzumaki \u{b7} Paused" }.to_string()),
@@ -149,6 +184,7 @@ pub fn build(snap: Option<&Snapshot>, prefs: &Prefs, now: u64) -> Option<Activit
         start,
         end,
         button,
+        status: prefs.status,
     })
 }
 
@@ -181,6 +217,7 @@ mod tests {
             a.to_json(),
             json!({
                 "type": 2,
+                "status_display_type": 2,
                 "details": "Redbone",
                 "state": "Childish Gambino",
                 "assets": {
@@ -193,6 +230,53 @@ mod tests {
                 "buttons": [{"label": "Open in Apple Music", "url": "https://music.apple.com/us/album/redbone/1161018478?i=1161018480"}]
             })
         );
+    }
+
+    #[test]
+    fn the_status_line_shows_the_song_the_artist_or_the_app_name() {
+        let ty = |status, s: &Snapshot| build(Some(s), &Prefs { status, ..on() }, 1000).unwrap().to_json()["status_display_type"].clone();
+        assert_eq!(Prefs::default().status, StatusDisplay::Title, "the song by default");
+        assert_eq!(ty(StatusDisplay::Name, &song()), 0);
+        assert_eq!(ty(StatusDisplay::Title, &song()), 2);
+        assert_eq!(ty(StatusDisplay::Artist, &song()), 1);
+        assert_eq!(ty(StatusDisplay::TitleArtist, &song()), 2);
+        let no_artist = Snapshot { artist: " ".into(), ..song() };
+        assert_eq!(ty(StatusDisplay::Artist, &no_artist), 2, "no artist line: the title stands in");
+        let a = build(Some(&song()), &on(), 1000).unwrap();
+        let b = build(Some(&song()), &Prefs { status: StatusDisplay::Artist, ..on() }, 1000).unwrap();
+        assert!(!a.same_as(&b), "changing it is sent again, live");
+    }
+
+    #[test]
+    fn title_and_artist_share_the_details_line_and_the_album_takes_the_second() {
+        let p = Prefs { status: StatusDisplay::TitleArtist, ..on() };
+        let j = build(Some(&song()), &p, 1000).unwrap().to_json();
+        assert_eq!(j["details"], "Redbone \u{2013} Childish Gambino");
+        assert_eq!(j["state"], "\"Awaken, My Love!\"");
+        assert_eq!(j["status_display_type"], 2);
+        // No album (or only a stand-in folder name): the artist is the second line.
+        let fallback = Snapshot { album_is_fallback: true, ..song() };
+        assert_eq!(build(Some(&fallback), &p, 1000).unwrap().to_json()["state"], "Childish Gambino");
+        let blank = Snapshot { album: " ".into(), ..song() };
+        assert_eq!(build(Some(&blank), &p, 1000).unwrap().to_json()["state"], "Childish Gambino");
+        // No artist: just the title, the album below. Nothing to show below: no second line.
+        let solo = Snapshot { artist: "".into(), ..song() };
+        let j = build(Some(&solo), &p, 1000).unwrap().to_json();
+        assert_eq!((j["details"].as_str(), j["state"].as_str()), (Some("Redbone"), Some("\"Awaken, My Love!\"")));
+        let bare = Snapshot { artist: "".into(), album: "".into(), ..song() };
+        assert!(build(Some(&bare), &p, 1000).unwrap().to_json().get("state").is_none());
+        // Long: cut to 128 characters with an ellipsis.
+        let long = Snapshot { title: "T".repeat(100), artist: "A".repeat(100), ..song() };
+        let d = build(Some(&long), &p, 1000).unwrap().to_json()["details"].as_str().unwrap().to_string();
+        assert_eq!(d.chars().count(), 128);
+        assert!(d.ends_with('\u{2026}') && d.starts_with("TTT"));
+        // Hide song title: the generic text, the artist below, no album.
+        let h = build(Some(&song()), &Prefs { hide_title: true, ..p.clone() }, 1000).unwrap().to_json();
+        assert_eq!((h["details"].as_str(), h["state"].as_str()), (Some(HIDDEN_TITLE), Some("Childish Gambino")));
+        assert!(h["assets"].get("large_text").is_none());
+        // The other modes keep the artist on the second line.
+        let t = build(Some(&song()), &Prefs { status: StatusDisplay::Artist, ..on() }, 1000).unwrap().to_json();
+        assert_eq!((t["details"].as_str(), t["state"].as_str()), (Some("Redbone"), Some("Childish Gambino")));
     }
 
     #[test]

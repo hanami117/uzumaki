@@ -78,6 +78,10 @@ impl State {
         self.set_discord(|d| d.hide_when_paused = on);
     }
 
+    pub fn set_discord_status(&mut self, status: crate::discord::StatusDisplay) {
+        self.set_discord(|d| d.status = status);
+    }
+
     pub fn set_discord_hide_title(&mut self, on: bool) {
         self.set_discord(|d| d.hide_title = on);
     }
