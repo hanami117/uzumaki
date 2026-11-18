@@ -456,10 +456,11 @@ jobs:
           AUR_KNOWN_HOSTS: ${{ secrets.AUR_KNOWN_HOSTS }}
         run: |
           [ -n "$AUR_SSH_KEY" ] && [ -n "$AUR_KNOWN_HOSTS" ] || { echo "::error::AUR secrets missing (environment release)"; exit 1; }
-          install -d -m700 ~/.ssh
-          printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur; chmod 600 ~/.ssh/aur
-          printf '%s\n' "$AUR_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          export GIT_SSH_COMMAND='ssh -i ~/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
+          ssh_dir="$HOME/.ssh"
+          install -d -m700 "$ssh_dir"
+          printf '%s\n' "$AUR_SSH_KEY" > "$ssh_dir/aur"; chmod 600 "$ssh_dir/aur"
+          printf '%s\n' "$AUR_KNOWN_HOSTS" > "$ssh_dir/known_hosts"; chmod 600 "$ssh_dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $ssh_dir/aur -o UserKnownHostsFile=$ssh_dir/known_hosts -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
           for p in uzumaki uzumaki-bin; do
             git clone -q "ssh://aur@aur.archlinux.org/$p.git" "$RUNNER_TEMP/$p"
             cp "$GITHUB_WORKSPACE/.ci/aur/$p/PKGBUILD" "$GITHUB_WORKSPACE/.ci/aur/$p/.SRCINFO" "$RUNNER_TEMP/$p/"
@@ -473,7 +474,7 @@ jobs:
             cd - >/dev/null
           done
       - if: always()
-        run: rm -rf ~/.ssh/aur
+        run: rm -f "$HOME/.ssh/aur" "$HOME/.ssh/known_hosts"
 
   # 8. Homebrew tap: the cask's version and the published DMG's sha256.
   tap:
