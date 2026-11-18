@@ -323,7 +323,9 @@ jobs:
           cd target/windows-release
           [ "$(ls | wc -l)" = 4 ] || { echo "::error::expected exactly 4 files"; ls; exit 1; }
           for f in "Uzumaki-$R-windows-x64-setup.exe" "Uzumaki-$R-windows-x64.zip"; do sha256sum -c "$f.sha256"; done
-          unzip -l "Uzumaki-$R-windows-x64.zip" | grep -q ' Uzumaki/bridge/node_modules/electron/dist/electron.exe.sig$' || { echo "::error::no VMP signature in the zip"; exit 1; }
+          # A file, not a pipe: grep -q would end the pipe early and pipefail would count unzip's SIGPIPE.
+          unzip -l "Uzumaki-$R-windows-x64.zip" > "$RUNNER_TEMP/zip.txt"
+          grep -q ' Uzumaki/bridge/node_modules/electron/dist/electron.exe.sig$' "$RUNNER_TEMP/zip.txt" || { echo "::error::no VMP signature in the zip"; exit 1; }
           ls -l >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -524,7 +526,8 @@ jobs:
           for f in Uzumaki-macOS.dmg Uzumaki-x86_64.AppImage Uzumaki-x86_64.AppImage.zsync Uzumaki-windows-x64-setup.exe Uzumaki-windows-x64.zip; do
             ok=
             for try in $(seq 1 12); do
-              loc=$(curl -sI "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$f" | tr -d '\r' | sed -n 's/^[Ll]ocation: //p' | head -1)
+              # One request, no early-closing pipe (pipefail): the redirect target, as curl saw it.
+              loc=$(curl -s -o /dev/null -w '%{redirect_url}' "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$f" || true)
               case $loc in */releases/download/$GITHUB_REF_NAME/$f) ok=1; break ;; esac
               sleep 10      # GitHub can show the old Latest for a minute
             done
