@@ -382,11 +382,11 @@ jobs:
           # buttons), a .sha256 each, and their lines in SHA256SUMS.
           w=$a/windows
           (cd "$w" && sha256sum -c ./*.sha256)
-          for k in setup.exe zip; do
-            cp "$w/Uzumaki-$R-windows-x64-$k" "$w/Uzumaki-$R-windows-x64-$k.sha256" "$up/"
-            cp "$w/Uzumaki-$R-windows-x64-$k" "$up/Uzumaki-windows-x64-$k"
-            (cd "$up" && sha256sum "Uzumaki-windows-x64-$k" > "Uzumaki-windows-x64-$k.sha256")
-            files+=(Uzumaki-$R-windows-x64-$k Uzumaki-windows-x64-$k)
+          for k in -setup.exe .zip; do
+            cp "$w/Uzumaki-$R-windows-x64$k" "$w/Uzumaki-$R-windows-x64$k.sha256" "$up/"
+            cp "$w/Uzumaki-$R-windows-x64$k" "$up/Uzumaki-windows-x64$k"
+            (cd "$up" && sha256sum "Uzumaki-windows-x64$k" > "Uzumaki-windows-x64$k.sha256")
+            files+=("Uzumaki-$R-windows-x64$k" "Uzumaki-windows-x64$k")
           done
           for f in "${files[@]}"; do grep -q "  $f\$" "$up/SHA256SUMS" || cat "$up/$f.sha256" >> "$up/SHA256SUMS"; done
           want=$((want + 8))
