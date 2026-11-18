@@ -1,8 +1,15 @@
-# Uzumaki for Windows (x64): build, tests, headless snaps and a test download on every push to
-# the `windows` branch. Nothing here publishes: no release, no tag, no site. The files are
+# Uzumaki for Windows (x64): build, tests, headless snaps, the playback engine started for real
+# (signed out, muted) and a test download, on every push to the `windows` branch. Nothing here publishes: no release, no tag, no site. The files are
 # workflow artifacts only (sign in to GitHub to download them from the run's page).
 #
+# The artifacts:
+#   Uzumaki-windows-x64   the programs and the playback engine, unpacked: run Uzumaki\uzumaki.exe
+#   snaps                 headless pictures of the app drawn on this runner, and the programs' icons
+#
 # UNSIGNED (no Authenticode): Windows SmartScreen asks once ("More info", "Run anyway").
+# The playback engine (castLabs Electron) carries its production Widevine VMP signature: a branch
+# can't use the EVS login (the `build` environment is for `v*` tags only, and stays so), so the
+# signature made beforehand is copied in and verified here. See packaging/windows/vmp/README.md.
 #
 # Pins: actions by commit SHA.
 name: windows
@@ -41,7 +48,8 @@ jobs:
           build=$(tr -d '[:space:]' < BUILD)
           [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::bad version in Cargo.toml: $version"; exit 1; }
           [[ $build =~ ^[1-9][0-9]*$ ]] || { echo "::error::BUILD is not a number: $build"; exit 1; }
-          { echo "version=$version"; echo "build=$build"; } >> "$GITHUB_OUTPUT"
+          if [ "$build" = 1 ]; then release=$version; else release=$version-$build; fi
+          { echo "version=$version"; echo "build=$build"; echo "release=$release"; } >> "$GITHUB_OUTPUT"
           echo "Uzumaki $version (build $build) for Windows, $(git rev-parse --short HEAD): a test build, not a release" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -54,7 +62,6 @@ jobs:
 
       - name: Bridge tests (node)
         shell: bash
-        # (airplay.test.js plays the app's side on a Unix socket; AirPlay is not on Windows.)
         run: node --test bridge/signin.test.js bridge/storefront.test.js
 
       - name: Release build
@@ -121,20 +128,63 @@ jobs:
           path: out
           if-no-files-found: warn
 
-      # The programs and the bridge's own files, for a look. (Electron itself comes with the next stage.)
+      # castLabs Electron, as release.yml's macOS job gets it (npm ci, then its own downloader).
+      - name: castLabs Electron
+        shell: bash
+        run: |
+          cd bridge && npm ci --no-audit --no-fund
+          for try in 1 2 3; do node node_modules/electron/install.js && break; [ $try = 3 ] && exit 1; sleep 10; done
+          ls -l node_modules/electron/dist | head -30
+
+      # The production VMP signature (packaging/windows/vmp/README.md): it fits exactly the
+      # electron.exe it was made for, and castLabs' own tool says whether Widevine will take it.
+      # No login is needed to verify.
+      - name: Widevine VMP signature
+        shell: bash
+        env:
+          EVS_NO_ASK: "1"
+          EVS_CONFIG_FILE: ${{ runner.temp }}/evs-config/config.json
+        run: |
+          dist=bridge/node_modules/electron/dist
+          want=$(cut -d' ' -f1 packaging/windows/vmp/electron.exe.sha256)
+          have=$(sha256sum "$dist/electron.exe" | cut -d' ' -f1)
+          [ "$want" = "$have" ] || { echo "::error::electron.exe is not the one the VMP signature was made for ($have, expected $want): castLabs Electron changed, make packaging/windows/vmp again"; exit 1; }
+          cp packaging/windows/vmp/electron.exe.sig "$dist/electron.exe.sig"
+          mkdir -p "$(dirname "$EVS_CONFIG_FILE")"
+          python -m venv "$RUNNER_TEMP/evs"
+          "$RUNNER_TEMP/evs/Scripts/python" -m pip install -q castlabs-evs==1.3.3
+          "$RUNNER_TEMP/evs/Scripts/python" -m castlabs_evs.vmp verify-pkg "$dist" 2>&1 | tee "$RUNNER_TEMP/vmp.txt"
+          grep -q 'Signature is valid: streaming' "$RUNNER_TEMP/vmp.txt" || { echo "::error::the VMP signature is not a valid production (streaming) one"; exit 1; }
+          echo "castLabs Electron VMP: $(grep 'Signature is valid' "$RUNNER_TEMP/vmp.txt")" >> "$GITHUB_STEP_SUMMARY"
+
+      # The bridge alone, as the app starts it: Electron, the Widevine component, Apple's web
+      # player, a key system for the page, a catalog search. Signed out, muted, scratch profile.
+      - name: The playback engine answers
+        shell: bash
+        run: |
+          for try in 1 2; do
+            node packaging/windows/bridge-smoke.mjs bridge && exit 0
+            echo "::warning::the bridge smoke test failed (try $try)"; sleep 15
+          done
+          exit 1
+
+      # The programs and the playback engine as they will ship (the installer comes with a later stage).
       - name: Stage the programs
         shell: bash
         run: |
           d=target/windows-dist/Uzumaki
-          mkdir -p "$d/bridge"
+          mkdir -p "$d/bridge/node_modules/electron"
           cp target/release/uzumaki.exe target/release/uzu.exe "$d/"
-          cp bridge/main.js bridge/preload.js bridge/signin.js bridge/airplay.js bridge/package.json "$d/bridge/"
+          cp bridge/main.js bridge/preload.js bridge/signin.js bridge/airplay.js bridge/package.json packaging/windows/uzumaki.ico "$d/bridge/"
+          cp -r bridge/node_modules/electron/dist "$d/bridge/node_modules/electron/dist"
           cp LICENSE "$d/LICENSE.txt"
           cp THIRD_PARTY_NOTICES.md "$d/THIRD_PARTY_NOTICES.txt"
           ls -l "$d" "$d/bridge"
 
+      # The unpacked folder: download it, unpack, run Uzumaki\uzumaki.exe.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Uzumaki-windows-x64
           path: target/windows-dist
           if-no-files-found: error
+          retention-days: 14
