@@ -47,9 +47,9 @@ Discord needs an *Application* to attach the card to; its name is what people re
 4. Open **Rich Presence → Art Assets** and upload the Uzumaki icon (at least 512×512, ideally 1024×1024) with the
    asset key **`uzumaki`** (exactly). It is the small picture on every card and the big one for local files and
    when artwork is off. Discord can take a few minutes before a new asset shows.
-5. Put the Application ID in `app/src/discord/mod.rs`, the `CLIENT_ID` constant (it is a placeholder, all zeros,
-   until then: the switch does nothing and Settings says so), or, to try it without a build, set
-   `"client_id": "<the id>"` inside `discord` in `settings.json`.
+5. The Application ID is in `app/src/discord/mod.rs`, the `CLIENT_ID` constant (Uzumaki's real id, the same on
+   every platform). To try another app without a build, set `"client_id": "<the id>"` inside `discord` in
+   `settings.json`.
 
 No OAuth, redirect URL, bot, token or secret is needed or used; the Application ID is public. Don't add any.
 
