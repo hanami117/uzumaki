@@ -5,6 +5,15 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-18
+
+A small update for Discord. You need an Apple Music subscription.
+
+### Added
+- **Discord: choose what the status line shows** (Settings → General → Show in status): App name, Song title
+  (the default), Artist, or Title – Artist. With Title – Artist the album moves to the second line of your
+  activity. The change applies right away.
+
 ## [0.3.0] - 2026-11-18
 
 Uzumaki now runs on Windows. You need an Apple Music subscription.
