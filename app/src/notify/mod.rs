@@ -25,16 +25,21 @@ use std::thread;
 use crate::bridge::PlayState;
 use crate::models::{Artwork, Song};
 
-// The D-Bus message is built (and tested) everywhere; only Linux sends it.
+// The D-Bus message is built (and tested) on Linux and macOS; only Linux sends it.
+#[cfg(unix)]
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(windows)]
+mod windows;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 use linux::Sys;
 #[cfg(target_os = "macos")]
 use mac::Sys;
+#[cfg(windows)]
+use windows::Sys;
 
 /// How long a song must stay current before it is announced.
 const DEBOUNCE: Duration = Duration::from_millis(1500);

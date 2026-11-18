@@ -672,6 +672,7 @@ mod tests {
     /// (`scripts/airplay/fake-cliairplay.py`, measures what reaches its stdin) and a fake
     /// sound card pulled at real time. No device is opened, nothing is sent on the network.
     #[test]
+    #[cfg(unix)]
     #[ignore = "dry run with python3, ~6 s: cargo test -p uzumaki airplay_dry_run -- --ignored --nocapture"]
     fn airplay_dry_run_local_file_reaches_the_helper_and_this_computer_stays_silent() {
         use std::os::unix::fs::PermissionsExt;

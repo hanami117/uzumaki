@@ -184,9 +184,14 @@ impl Prefs {
 
 /// `$XDG_STATE_HOME/uzumaki/uzu.json`, else `~/.local/state/uzumaki/uzu.json`.
 pub fn state_path() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return Some(uzumaki_ctl::paths::state_dir().join("uzu.json"));
+    #[cfg(not(windows))]
+    {
     let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
     let base = var("XDG_STATE_HOME").or_else(|| var("HOME").map(|h| h.join(".local/state")))?;
     Some(base.join("uzumaki").join("uzu.json"))
+    }
 }
 
 /// The remembered choices; none when the file is missing or unreadable.

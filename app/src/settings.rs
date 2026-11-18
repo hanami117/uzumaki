@@ -344,12 +344,17 @@ pub struct Settings {
 /// `$XDG_DATA_HOME/uzumaki/playlist-art`, else `~/.local/share/uzumaki/playlist-art`: kept
 /// apart from the caches, which Settings can clear.
 pub fn playlist_art_dir() -> PathBuf {
+    #[cfg(windows)]
+    return uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Data).join("playlist-art");
+    #[cfg(not(windows))]
+    {
     let base = std::env::var_os("XDG_DATA_HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
         .unwrap_or_else(std::env::temp_dir);
     base.join("uzumaki").join("playlist-art")
+    }
 }
 
 impl Default for Settings {
@@ -402,11 +407,16 @@ static NEXT_GEN: AtomicU64 = AtomicU64::new(1);
 
 /// `$XDG_CONFIG_HOME/uzumaki` (else `~/.config/uzumaki`), on macOS too: settings and hooks live here.
 pub(crate) fn config_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return Some(uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Config));
+    #[cfg(not(windows))]
+    {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
     Some(base.join("uzumaki"))
+    }
 }
 
 fn path() -> Option<PathBuf> {

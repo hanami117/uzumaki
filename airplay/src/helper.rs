@@ -219,6 +219,10 @@ pub fn parse_credentials(line: &str) -> Option<&str> {
 /// `<prefix>/lib/uzumaki/cliairplay` for packages); the source tree's `target/cliairplay/`
 /// (scripts/airplay/build-cliairplay.sh); else `cliairplay` on the PATH.
 pub fn find(env_path: Option<PathBuf>) -> Option<PathBuf> {
+    // No AirPlay where the helper can't run (Windows): the app then shows no AirPlay button.
+    if !cfg!(unix) {
+        return None;
+    }
     if let Some(p) = env_path {
         return p.is_file().then_some(p);
     }

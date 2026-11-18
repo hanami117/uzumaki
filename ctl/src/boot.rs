@@ -2,6 +2,7 @@
 //! decision, tested), spawning the app hidden, and waiting for its socket and bridge.
 
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, Stdio};
@@ -60,12 +61,15 @@ pub fn app_binary() -> PathBuf {
     if let Some(p) = std::env::var_os("UZUMAKI_BIN").filter(|v| !v.is_empty()) {
         return PathBuf::from(p);
     }
-    let beside = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(|d| d.join("uzumaki")));
+    let beside = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(|d| d.join(APP)));
     match beside {
         Some(p) if p.exists() => p,
-        _ => PathBuf::from("uzumaki"),
+        _ => PathBuf::from(APP),
     }
 }
+
+/// The app's program name.
+const APP: &str = if cfg!(windows) { "uzumaki.exe" } else { "uzumaki" };
 
 /// Starts the app detached (its own session, no stdio), windowless.
 pub fn spawn_app() -> Result<(), Fail> {
@@ -73,6 +77,7 @@ pub fn spawn_app() -> Result<(), Fail> {
 }
 
 /// Environment that a test instance overrides and the user manager wouldn't know about.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn passes_through(name: &str) -> bool {
     name.starts_with("UZUMAKI_") || name.starts_with("CADENCE_") || matches!(name, "XDG_CONFIG_HOME" | "XDG_CACHE_HOME" | "XDG_STATE_HOME" | "TMPDIR")
 }
@@ -80,6 +85,7 @@ fn passes_through(name: &str) -> bool {
 /// The `systemd-run` command line (without the program name) that starts `bin` hidden as a
 /// transient user unit. `env` is the caller's environment; only the overrides that matter pass.
 /// Pure, so it is tested without running anything.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn systemd_run_args(env: &BTreeMap<String, String>, bin: &Path, unit_stamp: u64) -> Vec<String> {
     let mut args = vec!["--user".to_string(), "--collect".into(), "--quiet".into(), format!("--unit=uzumaki-{unit_stamp}")];
     args.extend(env.iter().filter(|(k, _)| passes_through(k)).map(|(k, v)| format!("--setenv={k}={v}")));
@@ -89,7 +95,8 @@ pub fn systemd_run_args(env: &BTreeMap<String, String>, bin: &Path, unit_stamp: 
 }
 
 fn on_path(name: &str) -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file())
+    let found = |name: &str| std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file());
+    found(name).or_else(|| if cfg!(windows) && !name.to_ascii_lowercase().ends_with(".exe") { found(&format!("{name}.exe")) } else { None })
 }
 
 fn spawn_binary(bin: &Path) -> Result<(), Fail> {
@@ -97,6 +104,7 @@ fn spawn_binary(bin: &Path) -> Result<(), Fail> {
     if !found {
         return Err(Fail::err(format!("can't start {}: No such file or directory (os error 2)", bin.display())));
     }
+    #[cfg(unix)]
     if on_path("systemd-run").is_some() && spawn_unit(bin) {
         return Ok(());
     }
@@ -105,6 +113,7 @@ fn spawn_binary(bin: &Path) -> Result<(), Fail> {
 
 /// Starts the app as a transient user service, which has the desktop session's environment
 /// (display variables) even when `uzu` runs over ssh. False if `systemd-run` didn't succeed.
+#[cfg(unix)]
 fn spawn_unit(bin: &Path) -> bool {
     let env: BTreeMap<String, String> = std::env::vars_os().filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))).collect();
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
@@ -117,6 +126,7 @@ fn spawn_unit(bin: &Path) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+#[cfg(unix)]
 fn spawn_direct(bin: &Path) -> Result<(), Fail> {
     Process::new(bin)
         .arg("--hidden")
@@ -125,6 +135,23 @@ fn spawn_direct(bin: &Path) -> Result<(), Fail> {
         .stderr(Stdio::null())
         .process_group(0)
         .spawn()
+        .map(|_| ())
+        .map_err(|e| Fail::err(format!("can't start {}: {e}", bin.display())))
+}
+
+/// Windows: no console of its own and its own process group, so closing the terminal or Ctrl+C
+/// in it doesn't reach the app. It leaves the terminal's job when the job allows that (Windows
+/// Terminal's does); if not, the same start without that flag.
+#[cfg(windows)]
+fn spawn_direct(bin: &Path) -> Result<(), Fail> {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let start = |flags: u32| Process::new(bin).arg("--hidden").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(flags).spawn();
+    let base = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+    start(base | CREATE_BREAKAWAY_FROM_JOB)
+        .or_else(|_| start(base))
         .map(|_| ())
         .map_err(|e| Fail::err(format!("can't start {}: {e}", bin.display())))
 }

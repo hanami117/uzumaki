@@ -53,21 +53,31 @@ struct Song {
 
 /// `$XDG_CACHE_HOME/uzumaki/library`, else `~/.cache/uzumaki/library`.
 pub fn default_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return Some(uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Cache).join("library"));
+    #[cfg(not(windows))]
+    {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
     Some(base.join("uzumaki").join("library"))
+    }
 }
 
 /// The app's settings file, `$XDG_CONFIG_HOME/uzumaki/settings.json`, else
 /// `~/.config/uzumaki/settings.json` (as `app/src/settings.rs` finds it).
 pub fn default_settings() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return Some(uzumaki_ctl::paths::dir(uzumaki_ctl::paths::Kind::Config).join("settings.json"));
+    #[cfg(not(windows))]
+    {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
     Some(base.join("uzumaki").join("settings.json"))
+    }
 }
 
 #[derive(Deserialize)]

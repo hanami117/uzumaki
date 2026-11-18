@@ -1,0 +1,140 @@
+# Uzumaki for Windows (x64): build, tests, headless snaps and a test download on every push to
+# the `windows` branch. Nothing here publishes: no release, no tag, no site. The files are
+# workflow artifacts only (sign in to GitHub to download them from the run's page).
+#
+# UNSIGNED (no Authenticode): Windows SmartScreen asks once ("More info", "Run anyway").
+#
+# Pins: actions by commit SHA.
+name: windows
+
+on:
+  push:
+    branches: [windows]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Version
+        id: v
+        shell: bash
+        run: |
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          build=$(tr -d '[:space:]' < BUILD)
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::bad version in Cargo.toml: $version"; exit 1; }
+          [[ $build =~ ^[1-9][0-9]*$ ]] || { echo "::error::BUILD is not a number: $build"; exit 1; }
+          { echo "version=$version"; echo "build=$build"; } >> "$GITHUB_OUTPUT"
+          echo "Uzumaki $version (build $build) for Windows, $(git rev-parse --short HEAD): a test build, not a release" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: cargo test
+        run: cargo test --workspace --locked --no-fail-fast
+
+      - name: Bridge tests (node)
+        shell: bash
+        # (airplay.test.js plays the app's side on a Unix socket; AirPlay is not on Windows.)
+        run: node --test bridge/signin.test.js bridge/storefront.test.js
+
+      - name: Release build
+        run: cargo build --release --locked -p uzumaki -p uzumaki-ctl
+
+      # The icon, the version details and the manifest are in the programs (app/build.rs, ctl/build.rs).
+      - name: Program resources
+        shell: pwsh
+        env:
+          V: ${{ steps.v.outputs.version }}
+          B: ${{ steps.v.outputs.build }}
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          New-Item -ItemType Directory -Force out | Out-Null
+          foreach ($name in "uzumaki.exe", "uzu.exe") {
+            $exe = (Resolve-Path "target\release\$name").Path
+            $info = (Get-Item $exe).VersionInfo
+            "{0}: product '{1}', description '{2}', file version {3}, {4:N1} MB" -f $name, $info.ProductName, $info.FileDescription, $info.FileVersion, ((Get-Item $exe).Length / 1MB) | Out-Host
+            if ($info.ProductName -ne "Uzumaki") { throw "$name has no version details" }
+            $want = "$(($env:V -split '-')[0]).$env:B"
+            $have = "{0}.{1}.{2}.{3}" -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart
+            if ($have -ne $want) { throw "$name has file version $have, expected $want" }
+            $text = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($exe))
+            if ($text -notmatch "longPathAware") { throw "$name has no manifest" }
+            if ($name -eq "uzumaki.exe" -and $text -notmatch "PerMonitorV2") { throw "uzumaki.exe's manifest is not per-monitor DPI aware" }
+            # The icon, as Explorer would show it: kept with the snaps to look at.
+            $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe)
+            if ($null -eq $icon) { throw "$name has no icon" }
+            $icon.ToBitmap().Save("$PWD\out\icon-$name.png")
+          }
+
+      # Headless snaps with the program that ships. Uzumaki is a windowed program: the pipe makes
+      # PowerShell wait for it and show its output. No GPU here, so Windows' software adapter draws.
+      - name: Headless snaps
+        shell: pwsh
+        env:
+          RUNE_GPU_LOG: "1"
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          $exe = "target\release\uzumaki.exe"
+          & $exe --version | Out-Host
+          & $exe --list-scenes | Measure-Object -Line | Out-Host
+          foreach ($scene in "home", "album", "library-albums", "now-playing", "up-next", "search", "settings-about", "settings-login") {
+            & $exe --snap "out\$scene.png" --scene $scene --size 1360x860 --scale 1 2>&1 | Out-Host
+            if (-not (Test-Path "out\$scene.png")) { throw "no snap for $scene" }
+          }
+          Get-ChildItem out | Format-Table Name, Length | Out-Host
+
+      # uzu with no app running: `quit` must say so and start nothing; a status line stays empty.
+      - name: uzu without the app
+        shell: pwsh
+        run: |
+          & target\release\uzu.exe --version | Out-Host
+          $said = & target\release\uzu.exe quit 2>&1 | Out-String
+          $said
+          if ($LASTEXITCODE -ne 0 -or $said -notmatch "isn't running") { throw "unexpected answer to 'uzu quit'" }
+          $line = & target\release\uzu.exe status --line 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0 -or $line.Trim() -ne "") { throw "unexpected answer to 'uzu status --line': $line" }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: snaps
+          path: out
+          if-no-files-found: warn
+
+      # The programs and the bridge's own files, for a look. (Electron itself comes with the next stage.)
+      - name: Stage the programs
+        shell: bash
+        run: |
+          d=target/windows-dist/Uzumaki
+          mkdir -p "$d/bridge"
+          cp target/release/uzumaki.exe target/release/uzu.exe "$d/"
+          cp bridge/main.js bridge/preload.js bridge/signin.js bridge/airplay.js bridge/package.json "$d/bridge/"
+          cp LICENSE "$d/LICENSE.txt"
+          cp THIRD_PARTY_NOTICES.md "$d/THIRD_PARTY_NOTICES.txt"
+          ls -l "$d" "$d/bridge"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Uzumaki-windows-x64
+          path: target/windows-dist
+          if-no-files-found: error

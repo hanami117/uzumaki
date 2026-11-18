@@ -50,7 +50,7 @@ pub struct Frames {
 pub fn ffmpeg_path() -> Option<PathBuf> {
     let on_path = std::env::var_os("PATH").into_iter().flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>());
     let known = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].into_iter().map(PathBuf::from);
-    on_path.chain(known).map(|d| d.join("ffmpeg")).find(|p| p.is_file())
+    on_path.chain(known).map(|d| d.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" })).find(|p| p.is_file())
 }
 
 impl Frames {
@@ -112,6 +112,13 @@ fn run(clip: &Clip, px: &rune::Pixels, ctl: &Ctl, first: &dyn Fn()) -> Result<()
     }
     cmd.args(["-stream_loop", "-1", "-i"]).arg(&clip.path);
     cmd.args(["-an", "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"]);
+    // Windows: ffmpeg is a console program; without this a console window would flash up.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| format!("ffmpeg: {e}"))?;
     let mut out = child.stdout.take().ok_or("ffmpeg: no pipe")?;
     {
@@ -215,7 +222,10 @@ mod tests {
 
         drop(frames);
         // SAFETY: signal 0 only checks whether the process exists.
+        #[cfg(unix)]
         assert!(wait_for(|| unsafe { libc::kill(child_pid as i32, 0) } != 0), "ffmpeg is gone after drop");
+        #[cfg(not(unix))]
+        let _ = child_pid;
         assert_eq!(events.lock().unwrap().len(), 1, "no failure on a normal stop");
     }
 

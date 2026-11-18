@@ -20,7 +20,8 @@
 mod activity;
 mod ipc;
 
-#[cfg(test)]
+// The tests play Discord on a Unix socket.
+#[cfg(all(test, unix))]
 mod tests;
 
 use std::path::PathBuf;

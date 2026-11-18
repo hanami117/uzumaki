@@ -224,7 +224,7 @@ fn music_dir() -> Option<PathBuf> {
     if cfg!(test) {
         return None;
     }
-    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let home = PathBuf::from(std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?);
     let xdg = if cfg!(target_os = "linux") {
         let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"));
         std::fs::read_to_string(config.join("user-dirs.dirs")).ok().and_then(|t| xdg_music_dir(&t, &home))

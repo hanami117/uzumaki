@@ -71,8 +71,11 @@ impl Prefs {
         }
         let tmp = path.with_extension("json.tmp");
         if std::fs::write(&tmp, json).is_ok() {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+            }
             let _ = std::fs::rename(&tmp, &path);
         }
     }

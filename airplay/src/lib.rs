@@ -52,11 +52,16 @@
 
 pub mod discover;
 pub mod helper;
+#[cfg(not(unix))]
+mod nounix;
 
 use discover::{Browser, Device, Kind, Output, Service};
 use helper::Status;
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(not(unix))]
+use nounix::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
@@ -432,6 +437,7 @@ enum Cmd {
 
 enum Ev {
     Line(u64, Status),
+    #[cfg_attr(not(unix), allow(dead_code))]
     CmdReady(u64, std::fs::File),
     Closed(u64),
     Found(u64, Option<Box<(Output, Device)>>),
@@ -724,10 +730,7 @@ impl Controller {
         }
         // Whatever is left (a group that didn't end in time): no helper may outlive us.
         for pid in std::mem::take(&mut *inner.shared.pids.lock().unwrap()) {
-            // SAFETY: a plain signal to a child of ours.
-            unsafe {
-                libc::kill(pid as i32, libc::SIGKILL);
-            }
+            signal(pid as i32, true);
         }
         let _ = std::fs::remove_file(inner.cfg.socket());
         let _ = std::fs::remove_file(pid_file(&inner.cfg));
@@ -1309,6 +1312,7 @@ impl<'a> Group<'a> {
             log(format!("{}: {e}", cfg.dir.display()));
             return false;
         }
+        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&cfg.dir, std::fs::Permissions::from_mode(0o700));
@@ -2019,10 +2023,7 @@ fn end_stale_helpers(cfg: &Config) {
         let name = Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
         if name.is_some_and(|n| n.ends_with("cliairplay")) {
             log(format!("ending a helper left by an earlier run (pid {pid})"));
-            // SAFETY: a plain signal to a process id we just checked.
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
-            }
+            signal(pid, false);
         }
     }
 }
@@ -2071,10 +2072,7 @@ fn start_daemon(helper_path: &Path, cfg: &Config, shared: &Shared) -> Option<Chi
 
 fn stop_daemon(child: &mut Child, shared: &Shared) {
     let pid = child.id();
-    // SAFETY: a plain signal to our child.
-    unsafe {
-        libc::kill(pid as i32, libc::SIGTERM);
-    }
+    signal(pid as i32, false);
     let until = Instant::now() + Duration::from_millis(800);
     while child.try_wait().ok().flatten().is_none() && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(20));
@@ -2106,6 +2104,28 @@ fn spawn_helper(helper_path: &Path, args: &[String]) -> std::io::Result<Child> {
     cmd.spawn()
 }
 
+/// SIGTERM, or SIGKILL when `hard`, to a helper of ours.
+#[cfg(unix)]
+fn signal(pid: i32, hard: bool) {
+    // SAFETY: a plain signal to a process id.
+    unsafe {
+        libc::kill(pid, if hard { libc::SIGKILL } else { libc::SIGTERM });
+    }
+}
+
+/// No helper runs where there are no Unix signals (see `nounix`).
+#[cfg(not(unix))]
+fn signal(_pid: i32, _hard: bool) {}
+
+#[cfg(not(unix))]
+fn mkfifo(_path: &Path) -> std::io::Result<()> {
+    Err(nounix::unsupported())
+}
+
+#[cfg(not(unix))]
+fn open_cmd_pipe(_path: PathBuf, _tx: mpsc::Sender<Ev>, _alive: Arc<AtomicBool>, _attempt: u64) {}
+
+#[cfg(unix)]
 fn mkfifo(path: &Path) -> std::io::Result<()> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| std::io::Error::other("bad path"))?;
@@ -2115,6 +2135,7 @@ fn mkfifo(path: &Path) -> std::io::Result<()> {
 
 /// Opens the command pipe for writing once the helper reads it (it opens it after connecting).
 /// Non-blocking attempts, so a helper that dies first doesn't leave this thread stuck.
+#[cfg(unix)]
 fn open_cmd_pipe(path: PathBuf, tx: mpsc::Sender<Ev>, alive: Arc<AtomicBool>, attempt: u64) {
     std::thread::spawn(move || {
         use std::os::unix::fs::OpenOptionsExt;
@@ -2304,7 +2325,7 @@ fn local_pump(rx: mpsc::Receiver<Vec<i16>>, shared: Arc<Shared>, alive: Arc<Atom
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

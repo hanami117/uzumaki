@@ -2,6 +2,8 @@
 //! network, no speaker, no audio device. The tests play the bridge (they connect to the PCM
 //! socket and write PCM) and the local player (a `LocalFeed`).
 
+#![cfg(unix)]
+
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;

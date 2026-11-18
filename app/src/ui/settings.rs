@@ -1326,6 +1326,7 @@ fn block(title: &str, desc: &str, content: El) -> El {
 
 /// A path for display, with the home folder as `~`.
 pub fn tilde(path: &std::path::Path) -> String {
+    #[cfg(not(windows))]
     if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
         if let Ok(rest) = path.strip_prefix(&home) {
             return if rest.as_os_str().is_empty() { "~".into() } else { format!("~/{}", rest.display()) };

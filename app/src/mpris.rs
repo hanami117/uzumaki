@@ -56,29 +56,7 @@ fn find_running(raise: bool) -> Option<Running> {
     }
 }
 
-/// Which copy already runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Running {
-    Current,
-    /// A build from before the rename (still called Cadence). Its data must not be moved
-    /// while it runs.
-    Legacy,
-}
-
-/// What the desktop asked for. `main.rs` routes these to the bridge / app handle.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Command {
-    Play,
-    Pause,
-    Next,
-    Previous,
-    /// Absolute position, seconds.
-    SeekTo(f64),
-    /// 0..1
-    Volume(f64),
-    Raise,
-    Quit,
-}
+pub use crate::media::{Command, Running};
 
 
 type Callback = Arc<dyn Fn(Command) + Send + Sync>;

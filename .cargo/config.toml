@@ -1,0 +1,4 @@
+# Windows: link the C runtime into the programs, so they run on a PC without the Visual C++
+# redistributable. No effect on Linux or macOS.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

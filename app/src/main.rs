@@ -7,6 +7,9 @@
 //! `cargo run -p uzumaki -- --snap /tmp/x.png --scene album --size 1360x860 --scale 1`
 //! (`--list-scenes` lists them).
 
+// Windows: a windowed program (no console window); `win::attach_output` gives its text a place.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod airplay;
 mod appearance;
 mod artist;
@@ -34,9 +37,12 @@ mod login;
 #[cfg(target_os = "macos")]
 mod menu_bar_mac;
 mod lyrics;
+mod media;
 mod models;
 mod motion;
-// On macOS only the single-instance check and `Command` are used; the D-Bus service is not.
+// On macOS only the single-instance check is used; the D-Bus service is not. Windows has no
+// session bus at all: its media keys are `smtc.rs`.
+#[cfg(unix)]
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 mod mpris;
 mod notify;
@@ -46,6 +52,8 @@ mod nowplaying;
 mod raster_mac;
 mod scenes;
 mod settings;
+#[cfg(windows)]
+mod smtc;
 mod share;
 #[cfg(target_os = "macos")]
 mod share_mac;
@@ -56,6 +64,8 @@ mod tray;
 mod ui;
 mod resume;
 mod update;
+#[cfg(windows)]
+mod win;
 
 /// Wayland app_id, desktop entry and icon name.
 pub const APP_ID: &str = "io.github.hanami117.uzumaki";
@@ -139,7 +149,25 @@ pub(crate) fn sync_window_bg() {
         }
     });
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+thread_local! {
+    /// Windows: the native window, kept to make its title bar follow the palette (`win::sync_caption`).
+    static WINDOW: std::cell::RefCell<Option<rune::WindowHandle>> = const { std::cell::RefCell::new(None) };
+}
+#[cfg(windows)]
+fn on_window(handle: &rune::WindowHandle) {
+    WINDOW.with(|w| *w.borrow_mut() = Some(handle.clone()));
+    win::on_window(handle);
+}
+#[cfg(windows)]
+pub(crate) fn sync_window_bg() {
+    WINDOW.with(|w| {
+        if let Some(h) = w.borrow().as_ref() {
+            win::sync_caption(h);
+        }
+    });
+}
+#[cfg(not(any(target_os = "macos", windows)))]
 pub(crate) fn sync_window_bg() {}
 
 /// The window's native content view (UI thread only): where Share's services anchor their sheets.
@@ -184,6 +212,8 @@ fn paint_window_bg(handle: &rune::WindowHandle) {
 }
 
 fn main() {
+    #[cfg(windows)]
+    win::attach_output();
     if std::env::args().skip(1).any(|a| a == "--version" || a == "-V") {
         println!("uzumaki {}", uzumaki_ctl::version_line());
         return;
@@ -224,6 +254,7 @@ fn main() {
     // with a scratch UZUMAKI_PROFILE_DIR, XDG_CONFIG_HOME, XDG_CACHE_HOME, TMPDIR and
     // UZUMAKI_CTL_SOCKET).
     let test_instance = std::env::var_os("UZUMAKI_TEST_INSTANCE").is_some_and(|v| !v.is_empty());
+    #[cfg(unix)]
     let running = if test_instance {
         None
     } else if hidden {
@@ -231,16 +262,26 @@ fn main() {
     } else {
         mpris::raise_running()
     };
-    // macOS has no session bus for MPRIS to find another copy: ask the control socket instead.
+    #[cfg(not(unix))]
+    let running: Option<media::Running> = None;
+    // Windows: this copy may bring the running one's window to the front, and the taskbar, the
+    // media overlay and the notifications know the app by its id.
+    #[cfg(windows)]
+    {
+        win::allow_focus();
+        win::set_app_id();
+    }
+    // macOS and Windows have no session bus for MPRIS to find another copy: ask the control
+    // socket (on Windows a named pipe) instead.
     let running = running.or_else(|| {
-        (cfg!(target_os = "macos") && !test_instance && ctl::other_copy_running(!hidden)).then_some(mpris::Running::Current)
+        (cfg!(any(target_os = "macos", windows)) && !test_instance && ctl::other_copy_running(!hidden)).then_some(media::Running::Current)
     });
     match running {
-        Some(mpris::Running::Current) => {
+        Some(media::Running::Current) => {
             eprintln!("uzumaki: already running{}", if hidden { "" } else { "; showed its window" });
             return;
         }
-        Some(mpris::Running::Legacy) => {
+        Some(media::Running::Legacy) => {
             eprintln!("uzumaki: the old Cadence is still running. Quit it (Ctrl+Q) and start Uzumaki again.");
             return;
         }
@@ -271,6 +312,14 @@ fn main() {
     let app = app.on_frame_encoded(move |f| state::motion::frame_outcome(&frames_handle, f.outcome()));
     #[cfg(target_os = "macos")]
     let app = app.on_reopen(on_reopen).on_window(on_window);
+    #[cfg(windows)]
+    let app = app.on_window(on_window);
+    // Windows: the name and icon behind the app id, for notifications and the media overlay of a
+    // copy that was only unpacked (the installer's shortcut carries the same id).
+    #[cfg(windows)]
+    if !test_instance {
+        std::thread::spawn(win::register_app_id);
+    }
 
     // Bridge events and replies arrive on its reader thread. MPRIS hears playback events there
     // too (so media keys and panel widgets stay current while the window isn't drawing), then
@@ -287,10 +336,12 @@ fn main() {
             });
         });
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(all(unix, not(target_os = "macos")))]
     let mpris_slot: Arc<OnceLock<mpris::Mpris>> = Arc::new(OnceLock::new());
     #[cfg(target_os = "macos")]
     let mpris_slot: Arc<OnceLock<nowplaying::NowPlaying>> = Arc::new(OnceLock::new());
+    #[cfg(windows)]
+    let mpris_slot: Arc<OnceLock<smtc::Smtc>> = Arc::new(OnceLock::new());
     // True while the local-files player is in charge: MPRIS then follows its playback events
     // and ignores the (paused) bridge's.
     let local_active = Arc::new(AtomicBool::new(false));
@@ -330,40 +381,51 @@ fn main() {
     // Every bridge reports through the same sink, so the media keys follow a late one too.
     let engine = {
         let sink = sink.clone();
-        let log_path = std::env::temp_dir().join("uzumaki-bridge.log");
+        let log_path = bridge::log_path();
         Engine::<Msg>::new(log_path.clone(), move |show| Bridge::spawn(show, &log_path, sink.clone()))
     };
     {
         // Media keys go through the app state, which knows which player is in charge.
         let h = handle.clone();
-        let on_command = move |cmd: mpris::Command| match cmd {
-            mpris::Command::Play => h.update(|s: &mut State, _| s.play()),
-            mpris::Command::Pause => h.update(|s: &mut State, _| s.pause()),
-            mpris::Command::Next => h.update(|s: &mut State, _| s.next()),
-            mpris::Command::Previous => h.update(|s: &mut State, _| s.previous()),
-            mpris::Command::SeekTo(t) => h.update(move |s: &mut State, _| s.seek_seconds(t)),
-            mpris::Command::Volume(v) => h.update(move |s: &mut State, _| s.set_volume(v)),
-            mpris::Command::Raise => tray::show_window(&h),
-            mpris::Command::Quit => h.quit(),
+        let on_command = move |cmd: media::Command| match cmd {
+            media::Command::Play => h.update(|s: &mut State, _| s.play()),
+            media::Command::Pause => h.update(|s: &mut State, _| s.pause()),
+            media::Command::Next => h.update(|s: &mut State, _| s.next()),
+            media::Command::Previous => h.update(|s: &mut State, _| s.previous()),
+            media::Command::SeekTo(t) => h.update(move |s: &mut State, _| s.seek_seconds(t)),
+            media::Command::Volume(v) => h.update(move |s: &mut State, _| s.set_volume(v)),
+            media::Command::Raise => tray::show_window(&h),
+            media::Command::Quit => h.quit(),
         };
         // macOS has no D-Bus: media keys and Control Center go through MediaPlayer.framework.
-        #[cfg(not(target_os = "macos"))]
+        // Windows: the System Media Transport Controls (`smtc.rs`).
+        #[cfg(all(unix, not(target_os = "macos")))]
         let started = if test_instance { Err("off in test instances".to_string()) } else { mpris::Mpris::start(on_command) };
         #[cfg(target_os = "macos")]
         let started = if test_instance { Err("off in test instances".to_string()) } else { nowplaying::NowPlaying::start(on_command) };
+        #[cfg(windows)]
+        let started = if test_instance { Err("off in test instances".to_string()) } else { smtc::Smtc::start(on_command) };
         match started {
             Ok(m) => {
                 let _ = mpris_slot.set(m);
             }
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(all(unix, not(target_os = "macos")))]
             Err(e) => eprintln!("uzumaki: MPRIS unavailable (media keys won't work): {e}"),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             Err(e) => eprintln!("uzumaki: media keys unavailable: {e}"),
         }
     }
 
     // `uzu` talks to this socket; it goes away with `_ctl` when the app ends.
     let _ctl = ctl::start(handle.clone());
+    // Windows: the pipe's name is also the lock against a second copy. Two copies started in the
+    // same moment both pass the check above; the one that didn't get the pipe leaves here, before
+    // it starts a second Electron on the same sign-in profile.
+    #[cfg(windows)]
+    if _ctl.is_none() && !test_instance && ctl::other_copy_running(!hidden) {
+        eprintln!("uzumaki: already running{}", if hidden { "" } else { "; showed its window" });
+        return;
+    }
 
     // No library on disk (first start, or the library cache was cleared): the intro waits for it.
     let needs_sync = cache::Cache::default_location().needs_sync();

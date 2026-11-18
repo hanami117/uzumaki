@@ -18,8 +18,15 @@
 //!
 //! Idea from rmpc's `on_song_change` (BSD-3); no code taken.
 
+// Windows: no script hooks yet (the checks and the process group below are Unix's). The song
+// change detector at the end still runs there: the notifications use it.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
+#[cfg(unix)]
 use std::os::fd::AsFd;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -126,6 +133,7 @@ enum Check {
 /// A hook runs only if it is a regular, executable file, owned by `uid` and not writable by
 /// group or others (otherwise anyone who can write it gets to run code as the user). Follows
 /// symlinks, so the target is what is judged.
+#[cfg(unix)]
 fn check(path: &Path, uid: u32) -> Check {
     let meta = match fs::metadata(path) {
         Ok(m) => m,
@@ -182,6 +190,10 @@ impl Runner {
         }
     }
 
+    #[cfg(not(unix))]
+    fn run_one(&self, _ev: Event) {}
+
+    #[cfg(unix)]
     fn run_one(&self, ev: Event) {
         // SAFETY: geteuid has no preconditions.
         let uid = unsafe { libc::geteuid() };
@@ -225,6 +237,7 @@ impl Runner {
         }
     }
 
+    #[cfg(unix)]
     fn execute(&self, vars: &[(&'static str, String)]) {
         let name = self.name();
         // stdout and stderr both go to our stderr, which is the log file when opened from the Finder.
@@ -366,7 +379,7 @@ fn stable_state(s: PlayState) -> Option<&'static str> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
