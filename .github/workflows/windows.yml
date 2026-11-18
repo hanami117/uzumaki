@@ -41,7 +41,7 @@ env:
   # "true": a step that fails is reported by the Verdict step and the run goes on and stays green,
   # so one run shows everything that is wrong (for work on the workflow itself: it saved a mail
   # per broken step while the Windows checks were being built).
-  PROBE: "true"
+  PROBE: "false"
 
 jobs:
   build:

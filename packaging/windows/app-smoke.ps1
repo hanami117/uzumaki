@@ -55,7 +55,7 @@ try {
     Check ($LASTEXITCODE -eq 0) "uzu reaches the running app over the named pipe"
     Check ($said -notmatch "connecting to Apple Music") "the playback engine started and found Apple's web player"
     Check ($said -match "not signed in") "signed out, as a scratch profile is"
-    Check ((Engines).Count -gt 0) "castLabs Electron runs from the staged folder ($((Engines).Count) processes)"
+    Check (@(Engines).Count -gt 0) "castLabs Electron runs from the staged folder ($(@(Engines).Count) processes)"
     # Chromium fills its profile folder as it goes (some files only when it quits): anything in it will do.
     Check (@(Get-ChildItem $env:UZUMAKI_PROFILE_DIR -Force -ErrorAction SilentlyContinue).Count -gt 0) "the engine's profile is the scratch one"
     Check (Test-Path (Join-Path $scratch "state\uzumaki\Logs\bridge.log")) "the app keeps its files in the scratch folders (the engine's log)"
@@ -67,8 +67,8 @@ try {
     Check ($LASTEXITCODE -eq 0 -and $said -match "quit") "uzu quit: $($said.Trim())"
     foreach ($i in 1..40) { if ($app.HasExited) { break }; Start-Sleep -Milliseconds 500 }
     Check ($app.HasExited) "the app ended"
-    foreach ($i in 1..40) { if ((Engines).Count -eq 0) { break }; Start-Sleep -Milliseconds 500 }
-    Check ((Engines).Count -eq 0) "the playback engine ended with it"
+    foreach ($i in 1..40) { if (@(Engines).Count -eq 0) { break }; Start-Sleep -Milliseconds 500 }
+    Check (@(Engines).Count -eq 0) "the playback engine ended with it"
     Write-Host "The app on this machine: all checks passed."
     $ok = $true
 }
