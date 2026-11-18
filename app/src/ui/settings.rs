@@ -1009,7 +1009,7 @@ fn cache_row(s: &State, narrow: bool, kind: CacheKind, title: &str, key: &'stati
 }
 
 fn general(r: &Rx) -> Vec<El> {
-    let mut v = rows(r, &[Row::OpenOn, Row::StartAtLogin, Row::StartHidden, Row::Tray, Row::CloseToTray, Row::Notify, Row::Discord, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle, Row::DiscordStatus, Row::CheckUpdates, Row::CheckNow, Row::Tour]);
+    let mut v = rows(r, &[Row::OpenOn, Row::StartAtLogin, Row::StartHidden, Row::Tray, Row::CloseToTray, Row::Notify, Row::Discord, Row::DiscordStatus, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle, Row::CheckUpdates, Row::CheckNow, Row::Tour]);
     v.push(divider());
     v.push(text("Caches").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
     v.extend(rows(r, &[Row::ArtCache, Row::LibraryCache]));
@@ -1537,27 +1537,34 @@ mod tests {
         rt.update(|s, _| set_query(s, "discord"));
         settle(&mut rt, 10);
         let found: Vec<Row> = results(&rt.state).iter().map(|(_, r)| *r).collect();
-        for r in [Row::Discord, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle, Row::DiscordStatus] {
+        for r in [Row::Discord, Row::DiscordStatus, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle] {
             assert!(found.contains(&r), "{r:?} in {found:?}");
         }
         assert!(!rt.state.settings.discord.enabled, "off by default");
-        click(&mut rt, "settings/discord-hide-title");
-        assert!(!rt.state.settings.discord.hide_title, "dimmed while the switch is off");
+        assert_eq!(rt.state.settings.discord.status, crate::discord::StatusDisplay::TitleArtist, "the default");
+        // "Show in status" is the row right below the switch.
+        let order: Vec<Row> = results(&rt.state).iter().map(|(_, r)| *r).collect();
+        let at = |r: Row| order.iter().position(|x| *x == r).unwrap();
+        assert_eq!(at(Row::DiscordStatus), at(Row::Discord) + 1, "{order:?}");
+        click(&mut rt, "settings/discord-artwork");
+        assert!(rt.state.settings.discord.artwork, "dimmed while the switch is off");
+        click(&mut rt, "settings/discord-show/artist");
+        assert_eq!(rt.state.settings.discord.status, crate::discord::StatusDisplay::TitleArtist, "the status choice is dimmed too");
         click(&mut rt, "settings/discord");
         assert!(rt.state.settings.discord.enabled);
-        click(&mut rt, "settings/discord-hide-title");
-        click(&mut rt, "settings/discord-artwork");
-        click(&mut rt, "settings/discord-hide-paused");
-        click(&mut rt, "settings/discord-buttons");
-        // The last row sits below the fold: scroll the results up first.
-        let r = rt.presented("settings/discord-hide-title").unwrap().0;
-        rt.wheel_event(rune::WheelEvent::new(0.0, -4000.0).at(r[0], r[1]));
-        settle(&mut rt, 30);
         click(&mut rt, "settings/discord-show/artist");
         assert_eq!(rt.state.settings.discord.status, crate::discord::StatusDisplay::Artist);
+        click(&mut rt, "settings/discord-artwork");
+        // The last rows sit under the player bar: scroll the results up first.
+        let r = rt.presented("settings/discord-buttons").unwrap().0;
+        rt.wheel_event(rune::WheelEvent::new(0.0, -4000.0).at(r[0], r[1]));
+        settle(&mut rt, 30);
+        click(&mut rt, "settings/discord-buttons");
+        click(&mut rt, "settings/discord-hide-paused");
+        click(&mut rt, "settings/discord-hide-title");
         let d = &rt.state.settings.discord;
         assert!(d.hide_title && !d.artwork && !d.hide_when_paused && !d.buttons, "{d:?}");
-        let r = rt.presented("settings/discord-hide-title").unwrap().0;
+        let r = rt.presented("settings/discord-buttons").unwrap().0;
         rt.wheel_event(rune::WheelEvent::new(0.0, 4000.0).at(r[0], r[1]));
         settle(&mut rt, 30);
         click(&mut rt, "settings/discord");

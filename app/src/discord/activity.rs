@@ -207,7 +207,7 @@ mod tests {
     }
 
     fn on() -> Prefs {
-        Prefs { enabled: true, ..Prefs::default() }
+        Prefs { enabled: true, status: StatusDisplay::Title, ..Prefs::default() }
     }
 
     #[test]
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn the_status_line_shows_the_song_the_artist_or_the_app_name() {
         let ty = |status, s: &Snapshot| build(Some(s), &Prefs { status, ..on() }, 1000).unwrap().to_json()["status_display_type"].clone();
-        assert_eq!(Prefs::default().status, StatusDisplay::Title, "the song by default");
+        assert_eq!(Prefs::default().status, StatusDisplay::TitleArtist, "Title \u{2013} Artist by default");
         assert_eq!(ty(StatusDisplay::Name, &song()), 0);
         assert_eq!(ty(StatusDisplay::Title, &song()), 2);
         assert_eq!(ty(StatusDisplay::Artist, &song()), 1);

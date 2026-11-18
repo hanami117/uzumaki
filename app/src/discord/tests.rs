@@ -144,7 +144,7 @@ fn env(dir: &Path) -> Env {
 }
 
 fn on() -> Prefs {
-    Prefs { enabled: true, client_id: Some(ID.into()), ..Prefs::default() }
+    Prefs { enabled: true, client_id: Some(ID.into()), status: crate::discord::StatusDisplay::Title, ..Prefs::default() }
 }
 
 fn song() -> Snapshot {

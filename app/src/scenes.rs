@@ -164,7 +164,7 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("settings-general", settings_general),
     ("settings-discord", |s| { settings_discord(s); s.settings.discord.enabled = true; s.settings.discord.hide_title = true }),
     ("settings-discord-off", settings_discord),
-    ("settings-discord-status", |s| { settings_discord(s); s.settings.discord.enabled = true; s.settings.discord.status = crate::discord::StatusDisplay::TitleArtist; crate::ui::settings::set_query(s, "show in status") }),
+    ("settings-discord-status", |s| { settings_discord(s); s.settings.discord.enabled = true; crate::ui::settings::set_query(s, "show in status") }),
     ("settings-login", settings_login),
     ("settings-login-approval", |s| { settings_login(s); s.login.needs_approval = true }),
     ("settings-login-unavailable", |s| { settings_general(s); s.login = crate::login::Login::unavailable("Only in the app (Uzumaki.app). This copy runs from a build folder.") }),

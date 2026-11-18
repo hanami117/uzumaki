@@ -59,10 +59,10 @@ const QUIT_WAIT: Duration = Duration::from_millis(1000);
 pub enum StatusDisplay {
     /// "Uzumaki" (Discord's own default: the activity name).
     Name,
-    #[default]
     Title,
     Artist,
-    /// "Title – Artist" (the album on the card's second line).
+    /// "Title – Artist" (the album on the card's second line). The default.
+    #[default]
     TitleArtist,
 }
 
@@ -101,7 +101,7 @@ pub struct Prefs {
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { enabled: false, artwork: true, buttons: true, hide_when_paused: true, hide_title: false, status: StatusDisplay::Title, client_id: None }
+        Self { enabled: false, artwork: true, buttons: true, hide_when_paused: true, hide_title: false, status: StatusDisplay::default(), client_id: None }
     }
 }
 
