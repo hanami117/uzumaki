@@ -280,6 +280,32 @@ fn a_device_that_never_fetches_is_a_firewall() {
 }
 
 #[test]
+fn the_address_to_use_is_chosen_from_all_the_device_advertises() {
+    let fake = Arc::new(Fake::default());
+    let port = fake_device(fake.clone());
+    // A device with global IPv6 addresses and an IPv4 one: the session talks IPv4 (here the
+    // loopback, as "this computer's subnet"), serves IPv4, and the stream plays.
+    let mut cfg = config(port);
+    let mut dev = CastDevice::at("2001:db8:1:2::8fd8".parse().unwrap(), port, "Fake TV");
+    dev.addrs = vec!["2001:db8:1:2::8fd8".parse().unwrap(), "2001:db8:1:2:4129::758f".parse().unwrap(), "127.0.0.1".parse().unwrap()];
+    cfg.fake = Some(dev.clone());
+    let (c, events) = controller(cfg.clone());
+    c.connect(dev.clone(), Meta::default());
+    wait("playing over IPv4", 15, || matches!(c.state(), State::Playing { .. }));
+    assert!(c.status_lines().join(" ").contains("fetched by 127.0.0.1"), "{:?}", c.status_lines());
+    c.stop();
+    wait("off", 5, || c.idle());
+    assert!(!events.lock().unwrap().iter().any(|e| matches!(e, Event::Failed { .. })));
+    c.shutdown();
+    // Forced IPv4 on a device without one: a clear failure, nothing sent.
+    cfg.family = Family::V4;
+    let v6only = CastDevice::at("2001:db8:1:2::8fd8".parse().unwrap(), port, "Fake TV");
+    let (c, events) = controller(cfg);
+    c.connect(v6only, Meta::default());
+    wait("no IPv4", 5, || events.lock().unwrap().iter().any(|e| matches!(e, Event::Failed { why: Why::Unreachable, detail, .. } if detail.contains("V4"))));
+}
+
+#[test]
 fn nobody_there_is_unreachable() {
     let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); // closed again
     let (c, events) = controller(config(port));

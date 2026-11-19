@@ -101,6 +101,66 @@ pub fn allowed(peer: IpAddr, allow: &[IpAddr]) -> bool {
     allow.iter().any(|a| plain(*a) == plain(peer))
 }
 
+/// Who may fetch the stream (the token in the path is needed as well).
+#[derive(Clone, Debug, Default)]
+pub struct Allow {
+    /// Every address the device advertises.
+    device: Vec<IpAddr>,
+    /// The /64 prefixes of the device's global IPv6 addresses (served over IPv6 only): its
+    /// temporary privacy addresses come and go inside them.
+    nets64: Vec<u64>,
+    /// For a Cast Group: the Cast devices seen on the network.
+    others: Vec<IpAddr>,
+}
+
+fn prefix64(a: IpAddr) -> Option<u64> {
+    match plain(a) {
+        IpAddr::V6(v) if (v.segments()[0] & 0xffc0) != 0xfe80 => Some((u128::from(v) >> 64) as u64),
+        _ => None,
+    }
+}
+
+impl Allow {
+    /// The device's addresses; `v6_nets`: also any address in their /64s.
+    pub fn device(addrs: &[IpAddr], v6_nets: bool) -> Self {
+        let mut nets64: Vec<u64> = if v6_nets { addrs.iter().filter_map(|a| prefix64(*a)).collect() } else { Vec::new() };
+        nets64.dedup();
+        Allow { device: addrs.to_vec(), nets64, others: Vec::new() }
+    }
+
+    pub fn add_others(&mut self, more: &[IpAddr]) {
+        for ip in more {
+            if !self.others.contains(ip) && !self.device.contains(ip) {
+                self.others.push(*ip);
+            }
+        }
+    }
+
+    /// The rule that lets `peer` in, if any.
+    pub fn rule(&self, peer: IpAddr) -> Option<&'static str> {
+        if allowed(peer, &self.device) {
+            return Some("an address the device advertises");
+        }
+        if prefix64(peer).is_some_and(|p| self.nets64.contains(&p)) {
+            return Some("in the same /64 as the device");
+        }
+        if allowed(peer, &self.others) {
+            return Some("a Cast device seen on the network (group)");
+        }
+        None
+    }
+
+    pub fn describe(&self) -> String {
+        let mut parts: Vec<String> = self.device.iter().map(ToString::to_string).collect();
+        parts.extend(self.nets64.iter().map(|p| {
+            let s = std::net::Ipv6Addr::from(u128::from(*p) << 64);
+            format!("{s}/64")
+        }));
+        parts.extend(self.others.iter().map(|o| format!("{o} (group)")));
+        parts.join(", ")
+    }
+}
+
 /// One fetch by the device.
 pub struct Fetch {
     pub peer: IpAddr,
@@ -119,7 +179,7 @@ impl Fetch {
 struct State {
     token: String,
     generation: u64,
-    allow: Vec<IpAddr>,
+    allow: Allow,
     newest: Option<Arc<Fetch>>,
 }
 
@@ -136,7 +196,7 @@ pub struct Server {
 
 impl Server {
     /// Listens on `bind:port` (0: any free port).
-    pub fn start(bind: IpAddr, port: u16, format: Format, hub: Arc<Hub>, allow: Vec<IpAddr>) -> std::io::Result<Server> {
+    pub fn start(bind: IpAddr, port: u16, format: Format, hub: Arc<Hub>, allow: Allow) -> std::io::Result<Server> {
         let listener = TcpListener::bind((bind, port))?;
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
@@ -191,12 +251,7 @@ impl Server {
     }
 
     pub fn allow(&self, more: &[IpAddr]) {
-        let mut s = self.state.lock().unwrap();
-        for ip in more {
-            if !s.allow.contains(ip) {
-                s.allow.push(*ip);
-            }
-        }
+        self.state.lock().unwrap().allow.add_others(more);
     }
 
     /// The device's newest fetch of the current URL.
@@ -240,16 +295,16 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, format: Format, st: &Mutex<State
     let ip = plain(peer.ip());
     let (token, my_gen, ok) = {
         let s = st.lock().unwrap();
-        (s.token.clone(), s.generation, allowed(ip, &s.allow))
+        (s.token.clone(), s.generation, s.allow.rule(ip))
     };
     // The head is read first even when refusing: closing with it unread would reset the
     // connection and lose the answer.
     let Some(head) = read_head(&mut conn) else { return };
-    if !ok {
+    let Some(rule) = ok else {
         refused.fetch_add(1, Ordering::SeqCst);
         log(format!("refused a request from {ip}: not the Cast device"));
         return respond(&mut conn, "403 Forbidden");
-    }
+    };
     let mut lines = head.lines();
     let request = lines.next().unwrap_or("");
     let mut parts = request.split_whitespace();
@@ -263,7 +318,7 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, format: Format, st: &Mutex<State
     }
     let ua = header("user-agent").unwrap_or_default();
     let range = header("range").map(|r| format!(", Range {r}")).unwrap_or_default();
-    log(format!("{method} from {ip} (User-Agent {ua:?}{range})"));
+    log(format!("{method} from {ip}, allowed: {rule} (User-Agent {ua:?}{range})"));
     let head_only = method == "HEAD";
     if !head_only && active.fetch_add(1, Ordering::SeqCst) >= MAX_CLIENTS {
         active.fetch_sub(1, Ordering::SeqCst);
@@ -353,7 +408,7 @@ mod tests {
     fn only_the_token_path_from_the_device_gets_audio() {
         let hub = Arc::new(Hub::default());
         let lo: IpAddr = "127.0.0.1".parse().unwrap();
-        let server = Server::start(lo, 0, Format::Wav, hub.clone(), vec![lo]).unwrap();
+        let server = Server::start(lo, 0, Format::Wav, hub.clone(), Allow::device(&[lo], false)).unwrap();
         let url = server.url();
         let path = url.split_once(&server.addr().to_string()).unwrap().1.to_string();
         assert!(path.starts_with("/cast/") && path.ends_with("/stream.wav") && path.len() == "/cast//stream.wav".len() + 32, "{path}");
@@ -391,7 +446,7 @@ mod tests {
     fn another_address_is_refused() {
         let hub = Arc::new(Hub::default());
         let lo: IpAddr = "127.0.0.1".parse().unwrap();
-        let server = Server::start(lo, 0, Format::Flac, hub, vec!["192.168.1.40".parse().unwrap()]).unwrap();
+        let server = Server::start(lo, 0, Format::Flac, hub, Allow::device(&["192.168.1.40".parse().unwrap()], false)).unwrap();
         let url = server.url();
         let path = url.split_once(&server.addr().to_string()).unwrap().1.to_string();
         let (h, _) = get(server.addr(), &path, "GET");
@@ -402,6 +457,28 @@ mod tests {
         let (h, body) = get(server.addr(), &path, "GET");
         assert!(h.starts_with("HTTP/1.1 200") && h.contains("audio/flac"), "{h}");
         assert_eq!(&body[..4], b"fLaC");
+    }
+
+    #[test]
+    fn a_tv_with_ipv6_privacy_addresses_is_let_in_by_its_64() {
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        // What the TV advertised, and the temporary address it fetched from in the live test.
+        let tv = [ip("2a01:e11:4039:c270:2b07:8567:abb:8fd8"), ip("fe80::aa:bb"), ip("192.168.1.173")];
+        let fetched = ip("2a01:e11:4039:c270:4129:c641:7f11:758f");
+        let v6 = Allow::device(&tv, true);
+        assert_eq!(v6.rule(ip("2a01:e11:4039:c270:2b07:8567:abb:8fd8")), Some("an address the device advertises"));
+        assert_eq!(v6.rule(ip("192.168.1.173")), Some("an address the device advertises"));
+        assert_eq!(v6.rule(fetched), Some("in the same /64 as the device"));
+        assert_eq!(v6.rule(ip("2a01:e11:4039:c271::1")), None, "another /64");
+        assert_eq!(v6.rule(ip("fe80::cc:dd")), None, "link-local is never a /64 rule");
+        assert_eq!(v6.rule(ip("192.168.1.174")), None);
+        assert!(v6.describe().contains("2a01:e11:4039:c270::/64"), "{}", v6.describe());
+        // Served over IPv4: no /64 rule, the advertised addresses only.
+        let v4 = Allow::device(&tv, false);
+        assert_eq!(v4.rule(fetched), None);
+        let mut group = v4.clone();
+        group.add_others(&[ip("192.168.1.50")]);
+        assert_eq!(group.rule(ip("192.168.1.50")), Some("a Cast device seen on the network (group)"));
     }
 
     #[test]

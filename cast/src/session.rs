@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::channel::{Channel, Incoming};
 use crate::discover::CastDevice;
 use crate::proto::{DEFAULT_MEDIA_RECEIVER, Message, NS_CONNECTION, NS_HEARTBEAT, NS_MEDIA, NS_RECEIVER, RECEIVER, SENDER};
-use crate::stream::{Fetch, Server, local_addr_for};
+use crate::stream::{Allow, Fetch, Server, local_addr_for};
 use crate::{Cmd, Event, Inner, Meta, State, Why, log, pcm};
 
 pub(crate) enum In {
@@ -66,8 +66,20 @@ enum End {
     Failed(Why, String),
 }
 
-pub(crate) fn run(inner: &Arc<Inner>, device: CastDevice, meta: Meta, rx: &mpsc::Receiver<In>, tx: mpsc::Sender<In>) {
+pub(crate) fn run(inner: &Arc<Inner>, mut device: CastDevice, meta: Meta, rx: &mpsc::Receiver<In>, tx: mpsc::Sender<In>) {
     let name = device.name.clone();
+    match crate::discover::choose(&device.addrs, inner.cfg.family, &crate::discover::local_v4()) {
+        Some((ip, why)) => {
+            log(format!("using {ip} ({why}); the device advertises {}", device.addrs.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
+            device.ip = ip;
+        }
+        None => {
+            let detail = format!("no {:?} address among {:?}", inner.cfg.family, device.addrs);
+            log(format!("can't connect: {detail}"));
+            inner.emit(Event::State(State::Off));
+            return inner.emit(Event::Failed { name, why: Why::Unreachable, detail });
+        }
+    }
     inner.emit(Event::State(State::Connecting { name: name.clone() }));
     {
         let mut r = inner.report.lock().unwrap();
@@ -372,14 +384,15 @@ impl Session<'_> {
         }
         let cfg = &self.inner.cfg;
         let bind = local_addr_for(self.device.ip).unwrap_or(self.device.ip);
-        let mut allow = vec![self.device.ip];
+        // Served over IPv6, the device may fetch from a temporary address of its own: its /64 too.
+        let mut allow = Allow::device(&self.device.addrs, bind.is_ipv6());
         if self.device.group {
             // A group's leader may let a member fetch: every Cast device seen may.
-            allow.extend(self.inner.known_ips());
+            allow.add_others(&self.inner.known_ips());
         }
         match Server::start(bind, cfg.port, cfg.format, self.inner.hub.clone(), allow.clone()) {
             Ok(s) => {
-                log(format!("serving to {}", allow.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
+                log(format!("serving to {}", allow.describe()));
                 let mut r = self.inner.report.lock().unwrap();
                 r.url_host = Some(s.addr().to_string());
                 r.format = Some(cfg.format);

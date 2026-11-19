@@ -62,5 +62,6 @@ session after 15 s with "A firewall may be blocking it".
 | `UZUMAKI_CAST_PORT` | fixed HTTP port (default: any free one) |
 | `UZUMAKI_CAST_STREAM_TYPE=LIVE\|BUFFERED` | what `LOAD` says (default LIVE) |
 | `UZUMAKI_CAST_RELOAD_ON_SEEK=1` | a seek does a new `LOAD` |
+| `UZUMAKI_CAST_IP=4\|6` (tool: `--ipv4`/`--ipv6`) | talk to the device over that family only; default: IPv4 when it has one on this computer's subnet, else IPv6 (then its whole /64 may fetch, since TVs fetch from temporary privacy addresses) |
 | `UZUMAKI_CAST_LOCAL=1` | keep this computer's output on while casting (A/B checks) |
 | `UZUMAKI_CAST_HOST` (+ `UZUMAKI_CAST_DEVICE_PORT`, `UZUMAKI_CAST_TARGET`) | a device at that address, no mDNS (tests) |

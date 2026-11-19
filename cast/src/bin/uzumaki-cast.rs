@@ -4,7 +4,7 @@
 //! ```text
 //! uzumaki-cast list [--seconds N]
 //! uzumaki-cast play <name> [--host IP[:PORT]] [--beeps | --tone | --file F.wav] [--flac]
-//!                          [--buffered] [--volume N] [--port P]
+//!                          [--buffered] [--volume N] [--port P] [--ipv4 | --ipv6]
 //! ```
 //! While playing, type a letter and Enter: `p` pause, `r` resume, `l` reload (a new LOAD, as a
 //! seek would), `v N` device volume 0-100, `s` status, `q` stop.
@@ -26,7 +26,7 @@ enum Signal {
 }
 
 fn usage() -> ! {
-    eprintln!("usage: uzumaki-cast list [--seconds N]\n       uzumaki-cast play <name> [--host IP[:PORT]] [--beeps|--tone|--file F.wav] [--flac] [--buffered] [--volume N] [--port P]");
+    eprintln!("usage: uzumaki-cast list [--seconds N]\n       uzumaki-cast play <name> [--host IP[:PORT]] [--beeps|--tone|--file F.wav] [--flac] [--buffered] [--volume N] [--port P] [--ipv4|--ipv6]");
     std::process::exit(2)
 }
 
@@ -113,7 +113,8 @@ fn main() {
                 Ok(list) if list.is_empty() => println!("no Cast devices found in {secs} s (mDNS _googlecast._tcp)"),
                 Ok(list) => {
                     for d in list {
-                        println!("{:<28} {:<24} {}:{}{}{}", d.name, d.model, d.ip, d.port, if d.group { "  [group]" } else { "" }, if d.playing.is_empty() { String::new() } else { format!("  (playing: {})", d.playing) });
+                        let more = if d.addrs.len() > 1 { format!(" (also {})", d.addrs.iter().filter(|a| **a != d.ip).map(ToString::to_string).collect::<Vec<_>>().join(", ")) } else { String::new() };
+                        println!("{:<28} {:<24} {}:{}{more}{}{}", d.name, d.model, d.ip, d.port, if d.group { "  [group]" } else { "" }, if d.playing.is_empty() { String::new() } else { format!("  (playing: {})", d.playing) });
                     }
                 }
                 Err(e) => {
@@ -126,6 +127,11 @@ fn main() {
             let Some(name) = args.get(1).filter(|a| !a.starts_with("--")).cloned() else { usage() };
             if flag("--flac") {
                 cfg.format = Format::Flac;
+            }
+            if flag("--ipv4") {
+                cfg.family = uzumaki_cast::Family::V4;
+            } else if flag("--ipv6") {
+                cfg.family = uzumaki_cast::Family::V6;
             }
             if flag("--buffered") {
                 cfg.stream_type = "BUFFERED".into();

@@ -15,7 +15,8 @@
 //! Environment (spike switches; see `Config::from_env`): `UZUMAKI_CAST_FORMAT=wav|flac`,
 //! `UZUMAKI_CAST_PORT` (fixed HTTP port), `UZUMAKI_CAST_STREAM_TYPE=LIVE|BUFFERED`,
 //! `UZUMAKI_CAST_HOST` (+ `UZUMAKI_CAST_DEVICE_PORT`, `UZUMAKI_CAST_TARGET`): one made-up device
-//! instead of mDNS, `UZUMAKI_CAST_LOCAL=1`: keep this computer's output on.
+//! instead of mDNS, `UZUMAKI_CAST_LOCAL=1`: keep this computer's output on, `UZUMAKI_CAST_IP=4|6`:
+//! talk to the device over that family only (default: IPv4 when it has one on our subnet).
 
 pub mod channel;
 pub mod discover;
@@ -31,7 +32,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-pub use discover::CastDevice;
+pub use discover::{CastDevice, Family};
 pub use pcm::LocalFeed;
 pub use stream::Format;
 
@@ -46,6 +47,8 @@ pub struct Config {
     /// The HTTP server's port (0: any free one).
     pub port: u16,
     pub format: Format,
+    /// IPv4 / IPv6 / automatic (`UZUMAKI_CAST_IP=4|6`).
+    pub family: Family,
     /// `LIVE` (default) or `BUFFERED`, as told to the receiver in `LOAD`.
     pub stream_type: String,
     /// A device to use instead of mDNS (tests).
@@ -75,6 +78,7 @@ impl Config {
             dir: std::env::temp_dir().join(format!("uzumaki-cast-{}", std::process::id())),
             port: var("UZUMAKI_CAST_PORT").and_then(|p| p.parse().ok()).unwrap_or(0),
             format: var("UZUMAKI_CAST_FORMAT").and_then(|f| Format::parse(&f)).unwrap_or(Format::Wav),
+            family: var("UZUMAKI_CAST_IP").and_then(|f| Family::parse(&f)).unwrap_or_default(),
             stream_type: var("UZUMAKI_CAST_STREAM_TYPE").map(|s| s.to_uppercase()).filter(|s| s == "LIVE" || s == "BUFFERED").unwrap_or_else(|| "LIVE".into()),
             fake,
             app_inputs: true,
@@ -258,7 +262,7 @@ impl Inner {
 
     /// Addresses of the Cast devices seen (a group's members may fetch for it).
     pub(crate) fn known_ips(&self) -> Vec<IpAddr> {
-        self.devices.lock().unwrap().iter().map(|d| d.ip).collect()
+        self.devices.lock().unwrap().iter().flat_map(|d| d.addrs.iter().copied()).collect()
     }
 }
 
