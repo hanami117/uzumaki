@@ -161,14 +161,22 @@ fn list(found: &BTreeMap<String, CastDevice>, own: &[IpAddr]) -> Vec<CastDevice>
     v
 }
 
-/// Browses for up to `timeout`; with `target`, stops as soon as that device is found.
+/// After the target is found without an IPv4 address, how long to wait for its A record.
+/// mDNS answers come in pieces: the live test's first answer had only the AAAA record (the
+/// device's IPv4 came a moment later, or in the next answer), and stopping at once made the
+/// session use IPv6.
+pub const IPV4_WAIT: Duration = Duration::from_millis(2000);
+
+/// Browses for up to `timeout`; with `target`, stops once that device is found with an IPv4
+/// address, or `IPV4_WAIT` after it was found without one.
 pub fn discover(timeout: Duration, target: Option<&str>) -> Result<Vec<CastDevice>, String> {
     let mdns = mdns_sd::ServiceDaemon::new().map_err(|e| format!("mDNS: {e}"))?;
     let rx = mdns.browse(GOOGLECAST).map_err(|e| format!("mDNS browse: {e}"))?;
     let own = uzumaki_airplay::discover::own_addresses();
     let mut found = BTreeMap::new();
     let start = Instant::now();
-    while start.elapsed() < timeout {
+    let mut seen: Option<Instant> = None;
+    while start.elapsed() < timeout + seen.map_or(Duration::ZERO, |_| IPV4_WAIT) {
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(e) => {
                 absorb(&mut found, e);
@@ -176,9 +184,12 @@ pub fn discover(timeout: Duration, target: Option<&str>) -> Result<Vec<CastDevic
             Err(_) => continue,
         }
         if let Some(t) = target
-            && pick(&list(&found, &own), t).is_some()
+            && let Some(d) = pick(&list(&found, &own), t)
         {
-            break;
+            let first = *seen.get_or_insert_with(Instant::now);
+            if d.addrs.iter().any(IpAddr::is_ipv4) || first.elapsed() >= IPV4_WAIT {
+                break;
+            }
         }
     }
     let _ = mdns.shutdown();

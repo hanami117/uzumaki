@@ -256,6 +256,9 @@ pub struct Playback {
     /// over `SLEW_SECS` by running the clock a little slower (or faster) instead of jumping, so
     /// the lyrics never step back on a late or coarse time event. See `apply_time`.
     pub slew: f64,
+    /// Seconds between the player and what the user hears (a Cast device's measured buffer; 0 on
+    /// this computer). Lyrics and the progress bar follow `heard_now`.
+    pub output_delay: f64,
     /// A seek we sent and when: until the player reports a time near it, reports from before
     /// it took are ignored (see `apply_time`).
     pub seek_target: Option<(f64, Instant)>,
@@ -305,6 +308,12 @@ impl Playback {
         }
     }
 
+    /// Where the music the user hears is: `position_now` minus the output's delay (a Cast
+    /// device plays seconds behind the player).
+    pub fn heard_now(&self) -> f64 {
+        (self.position_now() - self.output_delay).max(0.0)
+    }
+
     /// Changes the play state, restarting the clock from where it stands, so resuming after a
     /// pause doesn't count the paused time as played.
     pub fn set_state(&mut self, state: PlayState) {
@@ -328,6 +337,7 @@ impl Default for Playback {
             repeat: Repeat::Off,
             position_at: None,
             slew: 0.0,
+            output_delay: 0.0,
             seek_target: None,
             local: false,
         }

@@ -21,6 +21,7 @@
 pub mod channel;
 pub mod discover;
 pub mod flac;
+pub mod health;
 pub mod pcm;
 pub mod proto;
 mod session;
@@ -34,11 +35,15 @@ use std::time::Duration;
 
 pub use discover::{CastDevice, Family};
 pub use pcm::LocalFeed;
-pub use stream::Format;
+pub use stream::{Format, Http};
 
 fn log(msg: impl AsRef<str>) {
     eprintln!("cast: {}", msg.as_ref());
 }
+
+/// The default pre-roll: the Android TV receiver waited for ~5 s after draining at once with
+/// none (live test 2); 2 s at once lets it start and never drain.
+pub const DEFAULT_PREROLL_MS: u64 = 2000;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -47,6 +52,11 @@ pub struct Config {
     /// The HTTP server's port (0: any free one).
     pub port: u16,
     pub format: Format,
+    /// Audio sent at once at each fetch (see `stream::Opts`): the device starts with that much
+    /// buffered and plays that much behind (`UZUMAKI_CAST_PREROLL_MS`, default 2000).
+    pub preroll_ms: u64,
+    /// The body's framing (`UZUMAKI_CAST_HTTP=close|chunked|length`).
+    pub http: Http,
     /// IPv4 / IPv6 / automatic (`UZUMAKI_CAST_IP=4|6`).
     pub family: Family,
     /// `LIVE` (default) or `BUFFERED`, as told to the receiver in `LOAD`.
@@ -78,6 +88,8 @@ impl Config {
             dir: std::env::temp_dir().join(format!("uzumaki-cast-{}", std::process::id())),
             port: var("UZUMAKI_CAST_PORT").and_then(|p| p.parse().ok()).unwrap_or(0),
             format: var("UZUMAKI_CAST_FORMAT").and_then(|f| Format::parse(&f)).unwrap_or(Format::Wav),
+            preroll_ms: var("UZUMAKI_CAST_PREROLL_MS").and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_PREROLL_MS).min(10_000),
+            http: var("UZUMAKI_CAST_HTTP").and_then(|v| Http::parse(&v)).unwrap_or_default(),
             family: var("UZUMAKI_CAST_IP").and_then(|f| Family::parse(&f)).unwrap_or_default(),
             stream_type: var("UZUMAKI_CAST_STREAM_TYPE").map(|s| s.to_uppercase()).filter(|s| s == "LIVE" || s == "BUFFERED").unwrap_or_else(|| "LIVE".into()),
             fake,
@@ -198,6 +210,11 @@ pub struct Report {
     pub volume: Option<(f64, bool)>,
     pub player_state: String,
     pub loads: u32,
+    pub underruns: u32,
+    pub stalls: u32,
+    /// LOAD until the device's position first moved (the audio is heard).
+    pub load_to_audio_ms: Option<u64>,
+    pub setup: String,
 }
 
 impl Report {
@@ -213,7 +230,11 @@ impl Report {
             v.push(format!("fetched by {ip}"));
         }
         let ms = |o: Option<u64>| o.map_or("-".into(), |m| format!("{m} ms"));
-        v.push(format!("LOAD→fetch {}, fetch→PLAYING {}, LOAD→PLAYING {}", ms(self.load_to_fetch_ms), ms(self.fetch_to_playing_ms), ms(self.load_to_playing_ms)));
+        v.push(format!("LOAD→fetch {}, fetch→PLAYING {}, LOAD→PLAYING {}, LOAD→audio heard {}", ms(self.load_to_fetch_ms), ms(self.fetch_to_playing_ms), ms(self.load_to_playing_ms), ms(self.load_to_audio_ms)));
+        if !self.setup.is_empty() {
+            v.push(self.setup.clone());
+        }
+        v.push(format!("underruns {}, stalls {}", self.underruns, self.stalls));
         if !self.buffer_ms.is_empty() {
             let last: Vec<String> = self.buffer_ms.iter().rev().take(5).rev().map(|b| b.to_string()).collect();
             v.push(format!("served {:.2} s, device at {:.2} s ({}); buffer ms, last: {}", self.served_s, self.device_time_s, self.player_state, last.join(" ")));

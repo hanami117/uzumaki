@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use crate::channel::{Channel, Incoming};
 use crate::discover::CastDevice;
 use crate::proto::{DEFAULT_MEDIA_RECEIVER, Message, NS_CONNECTION, NS_HEARTBEAT, NS_MEDIA, NS_RECEIVER, RECEIVER, SENDER};
-use crate::stream::{Allow, Fetch, Server, local_addr_for};
+use crate::health::Health;
+use crate::stream::{Allow, Fetch, Opts, Server, local_addr_for};
 use crate::{Cmd, Event, Inner, Meta, State, Why, log, pcm};
 
 pub(crate) enum In {
@@ -50,6 +51,7 @@ struct Session<'a> {
     fetch: Option<Arc<Fetch>>,
     fetch_at: Option<Instant>,
     played: bool,
+    health: Health,
     buffers: Vec<i64>,
     last_heard: Instant,
     last_ping: Instant,
@@ -114,6 +116,7 @@ pub(crate) fn run(inner: &Arc<Inner>, mut device: CastDevice, meta: Meta, rx: &m
         fetch: None,
         fetch_at: None,
         played: false,
+        health: Health::new(now),
         buffers: Vec::new(),
         last_heard: now,
         last_ping: now,
@@ -390,12 +393,13 @@ impl Session<'_> {
             // A group's leader may let a member fetch: every Cast device seen may.
             allow.add_others(&self.inner.known_ips());
         }
-        match Server::start(bind, cfg.port, cfg.format, self.inner.hub.clone(), allow.clone()) {
+        match Server::start(bind, cfg.port, Opts { format: cfg.format, http: cfg.http, preroll_ms: cfg.preroll_ms }, self.inner.hub.clone(), allow.clone()) {
             Ok(s) => {
                 log(format!("serving to {}", allow.describe()));
                 let mut r = self.inner.report.lock().unwrap();
                 r.url_host = Some(s.addr().to_string());
                 r.format = Some(cfg.format);
+                r.setup = format!("setup: {}, HTTP {}, pre-roll {} ms, streamType {}, {}", cfg.format.ext(), cfg.http.name(), cfg.preroll_ms, cfg.stream_type, if bind.is_ipv6() { "IPv6" } else { "IPv4" });
                 drop(r);
                 self.server = Some(s);
             }
@@ -436,6 +440,7 @@ impl Session<'_> {
             }),
         );
         self.load_at = Some(Instant::now());
+        self.health = Health::new(Instant::now());
         self.fetch = None;
         self.fetch_at = None;
         self.played = false;
@@ -470,6 +475,15 @@ impl Session<'_> {
             r.served_s = served;
             r.device_time_s = device_time;
         }
+        for note in self.health.observe(now, state, device_time, served) {
+            log(note.line());
+        }
+        {
+            let mut r = self.inner.report.lock().unwrap();
+            r.underruns = self.health.underruns;
+            r.stalls = self.health.stalls;
+            r.load_to_audio_ms = self.health.load_to_audio_ms;
+        }
         match state {
             "PLAYING" => {
                 self.reloading = false;
@@ -482,7 +496,8 @@ impl Session<'_> {
                     r.load_to_playing_ms = l2p;
                     r.fetch_to_playing_ms = f2p;
                 }
-                if self.fetch.is_some() {
+                // Only once the position moves: PLAYING at 0 is the device still waiting.
+                if self.fetch.is_some() && self.health.audible() {
                     let buffer = ((served - device_time) * 1000.0).round() as i64;
                     self.buffers.push(buffer);
                     if self.buffers.len() > 50 {

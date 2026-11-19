@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use uzumaki_airplay::silence_due;
 
 pub const RATE: u64 = 44100;
 pub const FRAME_BYTES: usize = 4;
@@ -21,10 +20,51 @@ fn log(msg: impl AsRef<str>) {
     eprintln!("cast: {}", msg.as_ref());
 }
 
+/// How much recent audio the hub keeps for a new subscriber's pre-roll.
+pub const HISTORY_FRAMES: u64 = 10 * RATE;
+
+#[derive(Default)]
+struct Subs {
+    txs: Vec<mpsc::SyncSender<Arc<[u8]>>>,
+    /// The last chunks published (at most `HISTORY_FRAMES`), oldest first.
+    history: std::collections::VecDeque<Arc<[u8]>>,
+    history_frames: u64,
+}
+
+/// A subscription with its pre-roll: `pad_frames` of silence come first (the history was
+/// shorter than asked), then `backlog_frames` of recent audio already queued in `rx`, then live.
+pub struct Sub {
+    pub rx: mpsc::Receiver<Arc<[u8]>>,
+    pub pad_frames: u64,
+    pub backlog_frames: u64,
+}
+
+/// The newest chunks that add up to `want` frames (the oldest one cut to fit), oldest first.
+pub fn backlog(history: &std::collections::VecDeque<Arc<[u8]>>, want: u64) -> Vec<Arc<[u8]>> {
+    let mut out = Vec::new();
+    let mut have = 0u64;
+    for c in history.iter().rev() {
+        if have >= want {
+            break;
+        }
+        let frames = (c.len() / FRAME_BYTES) as u64;
+        if have + frames <= want {
+            out.push(c.clone());
+            have += frames;
+        } else {
+            let keep = ((want - have) as usize) * FRAME_BYTES;
+            out.push(Arc::from(&c[c.len() - keep..]));
+            have = want;
+        }
+    }
+    out.reverse();
+    out
+}
+
 /// The fan-out. Cheap to share (`Arc`).
 #[derive(Default)]
 pub struct Hub {
-    subs: Mutex<Vec<mpsc::SyncSender<Arc<[u8]>>>>,
+    subs: Mutex<Subs>,
     /// Frames published since the hub was made (audio and silence).
     published: AtomicU64,
 }
@@ -32,9 +72,21 @@ pub struct Hub {
 impl Hub {
     /// A new subscriber, from now on. `depth` chunks may wait for it before it loses some.
     pub fn subscribe(&self, depth: usize) -> mpsc::Receiver<Arc<[u8]>> {
-        let (tx, rx) = mpsc::sync_channel(depth);
-        self.subs.lock().unwrap().push(tx);
-        rx
+        self.subscribe_preroll(depth, 0).rx
+    }
+
+    /// A new subscriber that first gets `preroll` frames from just before now (the recent
+    /// history, padded with silence when there is less), so the device starts with a buffer.
+    pub fn subscribe_preroll(&self, depth: usize, preroll: u64) -> Sub {
+        let mut s = self.subs.lock().unwrap();
+        let back = backlog(&s.history, preroll.min(HISTORY_FRAMES));
+        let backlog_frames: u64 = back.iter().map(|c| (c.len() / FRAME_BYTES) as u64).sum();
+        let (tx, rx) = mpsc::sync_channel(depth + back.len());
+        for c in back {
+            let _ = tx.try_send(c);
+        }
+        s.txs.push(tx);
+        Sub { rx, pad_frames: preroll - backlog_frames.min(preroll), backlog_frames }
     }
 
     /// Whole frames to every subscriber.
@@ -44,7 +96,15 @@ impl Hub {
             return;
         }
         let data: Arc<[u8]> = Arc::from(&bytes[..n]);
-        self.subs.lock().unwrap().retain(|tx| !matches!(tx.try_send(data.clone()), Err(mpsc::TrySendError::Disconnected(_))));
+        let mut s = self.subs.lock().unwrap();
+        s.txs.retain(|tx| !matches!(tx.try_send(data.clone()), Err(mpsc::TrySendError::Disconnected(_))));
+        s.history.push_back(data);
+        s.history_frames += (n / FRAME_BYTES) as u64;
+        while s.history_frames > HISTORY_FRAMES {
+            let Some(old) = s.history.pop_front() else { break };
+            s.history_frames -= (old.len() / FRAME_BYTES) as u64;
+        }
+        drop(s);
         self.published.fetch_add((n / FRAME_BYTES) as u64, Ordering::Relaxed);
     }
 
@@ -223,6 +283,34 @@ impl Drop for Inputs {
     }
 }
 
+/// Nobody has sent audio for this long (paused, between songs): silence.
+const SILENCE_GRACE: Duration = Duration::from_millis(250);
+/// How far ahead of the clock silence is written.
+const SILENCE_LEAD: Duration = Duration::from_millis(100);
+/// A longer hole than this (the computer slept) is skipped, not filled.
+const MAX_CATCH_UP: Duration = Duration::from_secs(2);
+
+/// The silence to write now, and where the stream then ends. Unlike AirPlay's rule this catches
+/// up: silence starts where the last audio ended (not "now"), and a late wake-up fills what it
+/// missed. For Cast this matters: the device plays from its buffer, and every hole in the stream
+/// is taken from that buffer for good (a few pauses would drain it into an underrun).
+pub fn silence_after(now: Instant, last_audio: Instant, until: Instant) -> (usize, Instant) {
+    if now.saturating_duration_since(last_audio) < SILENCE_GRACE {
+        return (0, until);
+    }
+    let want = now + SILENCE_LEAD;
+    let mut from = until.max(last_audio);
+    if from >= want {
+        return (0, from);
+    }
+    if want.duration_since(from) > MAX_CATCH_UP {
+        from = now;
+    }
+    let gap = want.duration_since(from);
+    let frames = (gap.as_secs_f64() * RATE as f64).round() as usize;
+    (frames, from + Duration::from_secs_f64(frames as f64 / RATE as f64))
+}
+
 fn to_bytes(samples: &[i16]) -> Vec<u8> {
     samples.iter().flat_map(|s| s.to_le_bytes()).collect()
 }
@@ -231,6 +319,7 @@ fn to_bytes(samples: &[i16]) -> Vec<u8> {
 /// moment (as AirPlay's pump).
 fn pump(rx: mpsc::Receiver<Vec<i16>>, feed: &Feed, hub: &Hub, alive: &AtomicBool) {
     let epoch = *feed.epoch.lock().unwrap().get_or_insert_with(Instant::now);
+    feed.last_audio.store(0, Ordering::Relaxed); // a new session: nothing sent yet
     let mut until = Instant::now();
     while alive.load(Ordering::SeqCst) {
         let chunk = match rx.recv_timeout(Duration::from_millis(20)) {
@@ -248,10 +337,15 @@ fn pump(rx: mpsc::Receiver<Vec<i16>>, feed: &Feed, hub: &Hub, alive: &AtomicBool
             }
             Some(_) => {}
             None => {
-                let last = epoch + Duration::from_millis(feed.last_audio.load(Ordering::Relaxed));
-                let frames = silence_due(now, last.min(now), until);
+                // Nothing sent yet this session: silence at once (no grace), so the stream starts
+                // when the device fetches; a gap here would be lost from the device's lead for good.
+                let last = match feed.last_audio.load(Ordering::Relaxed) {
+                    0 => now.checked_sub(Duration::from_secs(1)).unwrap_or(epoch),
+                    ms => epoch + Duration::from_millis(ms),
+                };
+                let (frames, end) = silence_after(now, last.min(now), until);
+                until = end;
                 if frames > 0 {
-                    until = until.max(now) + Duration::from_secs_f64(frames as f64 / RATE as f64);
                     hub.publish(&vec![0u8; frames * FRAME_BYTES]);
                 }
             }
@@ -277,7 +371,60 @@ mod tests {
         assert_eq!(hub.published(), 2);
         drop(a);
         hub.publish(&[0; 4]);
-        assert_eq!(hub.subs.lock().unwrap().len(), 1, "a gone subscriber is forgotten");
+        assert_eq!(hub.subs.lock().unwrap().txs.len(), 1, "a gone subscriber is forgotten");
+    }
+
+    #[test]
+    fn a_new_subscriber_gets_its_preroll_from_the_history_then_silence_for_the_rest() {
+        let hub = Hub::default();
+        // 3 chunks of 1000 frames, values 1, 2, 3.
+        for v in 1..=3u8 {
+            hub.publish(&vec![v; 1000 * FRAME_BYTES]);
+        }
+        let s = hub.subscribe_preroll(8, 2500);
+        assert_eq!((s.pad_frames, s.backlog_frames), (0, 2500));
+        let got: Vec<Arc<[u8]>> = s.rx.try_iter().collect();
+        assert_eq!(got.iter().map(|c| c.len() / FRAME_BYTES).collect::<Vec<_>>(), vec![500, 1000, 1000], "the oldest cut to fit");
+        assert_eq!((got[0][0], got[1][0], got[2][0]), (1, 2, 3));
+        // More than the history holds: silence first for what is missing.
+        let s = hub.subscribe_preroll(8, 5000);
+        assert_eq!((s.pad_frames, s.backlog_frames), (2000, 3000));
+        // No pre-roll: from now on only.
+        let s = hub.subscribe_preroll(8, 0);
+        assert!(s.rx.try_recv().is_err());
+        hub.publish(&[4; FRAME_BYTES]);
+        assert_eq!(s.rx.try_recv().unwrap()[0], 4);
+    }
+
+    #[test]
+    fn silence_catches_up_from_where_the_audio_ended() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let frames = |ms: u64| (ms * RATE / 1000) as usize;
+        // Audio until 1000 ms, then the bridge stops (paused): nothing within the grace.
+        assert_eq!(silence_after(at(1200), at(1000), at(0)), (0, at(0)));
+        // After the grace: silence from 1000 ms on, up to the lead (no hole in the stream).
+        let (n, end) = silence_after(at(1300), at(1000), at(0));
+        assert_eq!((n, end), (frames(400), at(1400)));
+        // On time: 20 ms later, 20 ms more.
+        assert_eq!(silence_after(at(1320), at(1000), end).0, frames(20));
+        // Woken 300 ms late: the missed time is filled.
+        assert_eq!(silence_after(at(1620), at(1000), at(1420)).0, frames(300));
+        // Ahead already: nothing.
+        assert_eq!(silence_after(at(1320), at(1000), at(1500)), (0, at(1500)));
+        // After a sleep of 10 s: skipped, the lead only.
+        assert_eq!(silence_after(at(11_420), at(1000), at(1420)), (frames(100), at(11_520)));
+    }
+
+    #[test]
+    fn the_history_is_bounded() {
+        let hub = Hub::default();
+        let chunk = vec![0u8; 44100 * FRAME_BYTES]; // 1 s
+        for _ in 0..15 {
+            hub.publish(&chunk);
+        }
+        let s = hub.subs.lock().unwrap();
+        assert!(s.history_frames <= HISTORY_FRAMES && s.history_frames >= HISTORY_FRAMES - 44100, "{}", s.history_frames);
     }
 
     #[test]

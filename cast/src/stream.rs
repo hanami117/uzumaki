@@ -28,6 +28,46 @@ fn log(msg: impl AsRef<str>) {
     eprintln!("cast: {}", msg.as_ref());
 }
 
+/// How the endless body is framed (`UZUMAKI_CAST_HTTP`, the tool's `--http`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Http {
+    /// No length, the body ends when the connection closes (HTTP/1.0 style).
+    #[default]
+    Close,
+    /// `Transfer-Encoding: chunked`.
+    Chunked,
+    /// A huge `Content-Length` (what the WAV header's sizes say), as for a file.
+    Length,
+}
+
+impl Http {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "close" => Some(Http::Close),
+            "chunked" => Some(Http::Chunked),
+            "length" => Some(Http::Length),
+            _ => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Http::Close => "close",
+            Http::Chunked => "chunked",
+            Http::Length => "length",
+        }
+    }
+}
+
+/// What every fetch gets.
+#[derive(Clone, Copy, Debug)]
+pub struct Opts {
+    pub format: Format,
+    pub http: Http,
+    /// Audio sent at once when the device fetches (recent audio, else silence), so it starts
+    /// with a buffer instead of draining at once and stalling. Also the steady delay.
+    pub preroll_ms: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Wav,
@@ -196,7 +236,8 @@ pub struct Server {
 
 impl Server {
     /// Listens on `bind:port` (0: any free port).
-    pub fn start(bind: IpAddr, port: u16, format: Format, hub: Arc<Hub>, allow: Allow) -> std::io::Result<Server> {
+    pub fn start(bind: IpAddr, port: u16, opts: Opts, hub: Arc<Hub>, allow: Allow) -> std::io::Result<Server> {
+        let format = opts.format;
         let listener = TcpListener::bind((bind, port))?;
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
@@ -217,11 +258,11 @@ impl Server {
                 };
                 let (st, g, q, r, hub, active) = (st.clone(), g.clone(), q.clone(), r.clone(), hub.clone(), active.clone());
                 let _ = std::thread::Builder::new().name("cast-http-conn".into()).spawn(move || {
-                    serve(conn, peer, format, &st, &g, &q, &r, &hub, &active);
+                    serve(conn, peer, opts, &st, &g, &q, &r, &hub, &active);
                 });
             }
         })?;
-        log(format!("stream server on http://{addr}/ ({})", format.ext()));
+        log(format!("stream server on http://{addr}/ ({}, HTTP {}, pre-roll {} ms)", format.ext(), opts.http.name(), opts.preroll_ms));
         Ok(Server { addr, format, state, generation, quit, thread: Some(thread), refused })
     }
 
@@ -290,7 +331,7 @@ fn read_head(conn: &mut TcpStream) -> Option<String> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn serve(mut conn: TcpStream, peer: SocketAddr, format: Format, st: &Mutex<State>, generation: &AtomicU64, quit: &AtomicBool, refused: &AtomicUsize, hub: &Hub, active: &AtomicUsize) {
+fn serve(mut conn: TcpStream, peer: SocketAddr, opts: Opts, st: &Mutex<State>, generation: &AtomicU64, quit: &AtomicBool, refused: &AtomicUsize, hub: &Hub, active: &AtomicUsize) {
     let _ = conn.set_nonblocking(false);
     let ip = plain(peer.ip());
     let (token, my_gen, ok) = {
@@ -310,7 +351,7 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, format: Format, st: &Mutex<State
     let mut parts = request.split_whitespace();
     let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let header = |name: &str| head.lines().skip(1).find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()));
-    let want = format!("/cast/{token}/stream.{}", format.ext());
+    let want = format!("/cast/{token}/stream.{}", opts.format.ext());
     if path != want || !(method == "GET" || method == "HEAD") {
         refused.fetch_add(1, Ordering::SeqCst);
         log(format!("404 for {method} from {ip} (wrong path)"));
@@ -325,33 +366,108 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, format: Format, st: &Mutex<State
         log(format!("503 for {ip}: already {MAX_CLIENTS} connections"));
         return respond(&mut conn, "503 Service Unavailable");
     }
+    let format = opts.format;
+    let framing = match opts.http {
+        Http::Close => String::new(),
+        Http::Chunked => "Transfer-Encoding: chunked\r\n".into(),
+        Http::Length => format!("Content-Length: {}\r\n", u64::from(u32::MAX) + 8),
+    };
     let headers = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache, no-store\r\nAccept-Ranges: none\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\n{framing}Access-Control-Allow-Origin: *\r\nCache-Control: no-cache, no-store\r\nAccept-Ranges: none\r\nConnection: close\r\n\r\n",
         format.content_type()
     );
     let _ = conn.set_write_timeout(Some(WRITE_TIMEOUT));
     let _ = conn.set_nodelay(true);
     if conn.write_all(headers.as_bytes()).is_err() || head_only {
+        if !head_only {
+            active.fetch_sub(1, Ordering::SeqCst);
+        }
         return;
     }
-    let rx = hub.subscribe(DEPTH);
+    let sub = hub.subscribe_preroll(DEPTH, opts.preroll_ms * RATE / 1000);
+    log(format!("pre-roll to {ip}: {} ms of recent audio + {} ms of silence", sub.backlog_frames * 1000 / RATE, sub.pad_frames * 1000 / RATE));
     let fetch = Arc::new(Fetch { peer: ip, started: Instant::now(), frames: AtomicU64::new(0), token_gen: my_gen });
     st.lock().unwrap().newest = Some(fetch.clone());
-    let why = stream(&mut conn, format, &rx, &fetch, generation, quit);
+    let mut body = Body { conn: &mut conn, chunked: opts.http == Http::Chunked };
+    let why = stream(&mut body, format, &sub, &fetch, generation, quit);
     active.fetch_sub(1, Ordering::SeqCst);
     log(format!("the stream to {ip} ended after {:.1} s of audio ({why})", fetch.served_secs()));
 }
 
-fn stream(conn: &mut TcpStream, format: Format, rx: &mpsc::Receiver<Arc<[u8]>>, fetch: &Fetch, generation: &AtomicU64, quit: &AtomicBool) -> &'static str {
-    let mut enc = flac::Encoder::default();
+/// Writes the body: HTTP chunk framing when asked, and counts what was written.
+struct Body<'a> {
+    conn: &'a mut TcpStream,
+    chunked: bool,
+}
+
+impl Body<'_> {
+    fn write(&mut self, bytes: &[u8]) -> bool {
+        if bytes.is_empty() {
+            return true;
+        }
+        if self.chunked {
+            let mut framed = format!("{:x}\r\n", bytes.len()).into_bytes();
+            framed.extend_from_slice(bytes);
+            framed.extend_from_slice(b"\r\n");
+            return self.conn.write_all(&framed).is_ok();
+        }
+        self.conn.write_all(bytes).is_ok()
+    }
+}
+
+/// HTTP chunk framing of one piece (tests).
+pub fn chunk_frame(bytes: &[u8]) -> Vec<u8> {
+    let mut framed = format!("{:x}\r\n", bytes.len()).into_bytes();
+    framed.extend_from_slice(bytes);
+    framed.extend_from_slice(b"\r\n");
+    framed
+}
+
+struct Encode {
+    format: Format,
+    enc: flac::Encoder,
+    /// FLAC: frames waiting for a whole block.
+    pending: u64,
+}
+
+impl Encode {
+    /// The bytes for `pcm`, and how many frames they complete.
+    fn push(&mut self, pcm: &[u8]) -> (Vec<u8>, u64) {
+        let frames = (pcm.len() / FRAME_BYTES) as u64;
+        match self.format {
+            Format::Wav => (pcm.to_vec(), frames),
+            Format::Flac => {
+                let samples: Vec<i16> = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
+                let out = self.enc.push(&samples);
+                self.pending += frames;
+                let whole = self.pending - self.pending % flac::BLOCK as u64;
+                self.pending -= whole;
+                (out, whole)
+            }
+        }
+    }
+}
+
+fn stream(body: &mut Body, format: Format, sub: &crate::pcm::Sub, fetch: &Fetch, generation: &AtomicU64, quit: &AtomicBool) -> &'static str {
     let start = match format {
         Format::Wav => wav_header(),
         Format::Flac => flac::header(),
     };
-    if conn.write_all(&start).is_err() {
+    if !body.write(&start) {
         return "closed by the device";
     }
-    let mut pending = 0u64; // FLAC: frames waiting for a whole block
+    let mut enc = Encode { format, enc: flac::Encoder::default(), pending: 0 };
+    // The pre-roll's silence part, at once (the history part is queued in `sub.rx`).
+    let mut pad = sub.pad_frames;
+    while pad > 0 {
+        let n = pad.min(4096);
+        let (bytes, done) = enc.push(&vec![0u8; n as usize * FRAME_BYTES]);
+        if !body.write(&bytes) {
+            return "closed by the device";
+        }
+        fetch.frames.fetch_add(done, Ordering::Relaxed);
+        pad -= n;
+    }
     loop {
         if quit.load(Ordering::SeqCst) {
             return "server stopped";
@@ -359,24 +475,13 @@ fn stream(conn: &mut TcpStream, format: Format, rx: &mpsc::Receiver<Arc<[u8]>>, 
         if generation.load(Ordering::SeqCst) != fetch.token_gen {
             return "a newer URL was loaded";
         }
-        let chunk = match rx.recv_timeout(Duration::from_millis(500)) {
+        let chunk = match sub.rx.recv_timeout(Duration::from_millis(500)) {
             Ok(c) => c,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => return "no more audio",
         };
-        let frames = (chunk.len() / FRAME_BYTES) as u64;
-        let (bytes, done) = match format {
-            Format::Wav => (chunk.to_vec(), frames),
-            Format::Flac => {
-                let samples: Vec<i16> = chunk.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
-                let out = enc.push(&samples);
-                pending += frames;
-                let whole = pending - pending % flac::BLOCK as u64;
-                pending -= whole;
-                (out, whole)
-            }
-        };
-        if !bytes.is_empty() && conn.write_all(&bytes).is_err() {
+        let (bytes, done) = enc.push(&chunk);
+        if !body.write(&bytes) {
             return "closed by the device";
         }
         fetch.frames.fetch_add(done, Ordering::Relaxed);
@@ -408,7 +513,7 @@ mod tests {
     fn only_the_token_path_from_the_device_gets_audio() {
         let hub = Arc::new(Hub::default());
         let lo: IpAddr = "127.0.0.1".parse().unwrap();
-        let server = Server::start(lo, 0, Format::Wav, hub.clone(), Allow::device(&[lo], false)).unwrap();
+        let server = Server::start(lo, 0, Opts { format: Format::Wav, http: Http::Close, preroll_ms: 0 }, hub.clone(), Allow::device(&[lo], false)).unwrap();
         let url = server.url();
         let path = url.split_once(&server.addr().to_string()).unwrap().1.to_string();
         assert!(path.starts_with("/cast/") && path.ends_with("/stream.wav") && path.len() == "/cast//stream.wav".len() + 32, "{path}");
@@ -446,7 +551,7 @@ mod tests {
     fn another_address_is_refused() {
         let hub = Arc::new(Hub::default());
         let lo: IpAddr = "127.0.0.1".parse().unwrap();
-        let server = Server::start(lo, 0, Format::Flac, hub, Allow::device(&["192.168.1.40".parse().unwrap()], false)).unwrap();
+        let server = Server::start(lo, 0, Opts { format: Format::Flac, http: Http::Close, preroll_ms: 0 }, hub, Allow::device(&["192.168.1.40".parse().unwrap()], false)).unwrap();
         let url = server.url();
         let path = url.split_once(&server.addr().to_string()).unwrap().1.to_string();
         let (h, _) = get(server.addr(), &path, "GET");
@@ -479,6 +584,37 @@ mod tests {
         let mut group = v4.clone();
         group.add_others(&[ip("192.168.1.50")]);
         assert_eq!(group.rule(ip("192.168.1.50")), Some("a Cast device seen on the network (group)"));
+    }
+
+    #[test]
+    fn the_preroll_comes_at_once_and_chunked_framing_is_valid() {
+        let hub = Arc::new(Hub::default());
+        hub.publish(&[7u8; 4 * 2205]); // 50 ms of history
+        let lo: IpAddr = "127.0.0.1".parse().unwrap();
+        let server = Server::start(lo, 0, Opts { format: Format::Wav, http: Http::Chunked, preroll_ms: 500 }, hub, Allow::device(&[lo], false)).unwrap();
+        let url = server.url();
+        let path = url.split_once(&server.addr().to_string()).unwrap().1.to_string();
+        // Nobody publishes: all of it is the pre-roll.
+        let (h, body) = get(server.addr(), &path, "GET");
+        assert!(h.contains("Transfer-Encoding: chunked") && !h.contains("Content-Length"), "{h}");
+        // De-chunk.
+        let mut data = Vec::new();
+        let mut rest = &body[..];
+        while let Some(p) = rest.windows(2).position(|w| w == b"\r\n") {
+            let len = usize::from_str_radix(std::str::from_utf8(&rest[..p]).unwrap(), 16).unwrap();
+            data.extend_from_slice(&rest[p + 2..p + 2 + len]);
+            assert_eq!(&rest[p + 2 + len..p + 4 + len], b"\r\n");
+            rest = &rest[p + 4 + len..];
+        }
+        assert!(rest.is_empty());
+        assert_eq!(&data[..44], &wav_header()[..]);
+        let pcm = &data[44..];
+        assert_eq!(pcm.len(), 22050 * 4, "500 ms at once");
+        assert!(pcm[..pcm.len() - 2205 * 4].iter().all(|&b| b == 0), "silence first");
+        assert!(pcm[pcm.len() - 2205 * 4..].iter().all(|&b| b == 7), "then the history");
+        assert_eq!(server.newest().unwrap().frames.load(Ordering::Relaxed), 22050, "the pre-roll counts as served");
+        assert_eq!(chunk_frame(b"abc"), b"3\r\nabc\r\n");
+        assert_eq!(Http::parse("Length"), Some(Http::Length));
     }
 
     #[test]

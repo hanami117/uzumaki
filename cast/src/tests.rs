@@ -28,6 +28,16 @@ struct Fake {
     loads: AtomicU64,
     /// Send a RECEIVER_STATUS with another app (someone cast to it).
     take_over: AtomicBool,
+    /// When it started playing (it holds `FAKE_BUFFER` of audio): from then on its position
+    /// moves in real time, as a real receiver's, never past what it fetched.
+    play_start: Mutex<Option<Instant>>,
+}
+
+impl Fake {
+    fn playhead(&self) -> f64 {
+        let fetched = self.fetched.load(Ordering::SeqCst) as f64 / 44100.0;
+        self.play_start.lock().unwrap().map_or(0.0, |t| t.elapsed().as_secs_f64().min(fetched))
+    }
 }
 
 impl Fake {
@@ -80,7 +90,7 @@ fn device_conn(tcp: TcpStream, fake: &Arc<Fake>) {
     let mut state = "IDLE";
     let mut sender = String::new();
     let mut took = false;
-    let playhead = || (fake.fetched.load(Ordering::SeqCst) as f64 / 44100.0 - FAKE_BUFFER).max(0.0);
+    let playhead = || fake.playhead();
     let apps = |launched: bool| if launched { json!([{"appId": DEFAULT_MEDIA_RECEIVER, "sessionId": "s-1", "transportId": "web-1", "displayName": "Default Media Receiver"}]) } else { json!([]) };
     loop {
         if fake.take_over.load(Ordering::SeqCst) && !took && !sender.is_empty() {
@@ -120,6 +130,7 @@ fn device_conn(tcp: TcpStream, fake: &Arc<Fake>) {
                     let url = v["media"]["contentId"].as_str().unwrap_or("").to_string();
                     let n = fake.loads.fetch_add(1, Ordering::SeqCst) + 1;
                     fake.fetched.store(0, Ordering::SeqCst);
+                    *fake.play_start.lock().unwrap() = None;
                     state = "BUFFERING";
                     if !fake.no_fetch.load(Ordering::SeqCst) {
                         let f = fake.clone();
@@ -172,7 +183,11 @@ fn fetch(url: &str, fake: &Fake, load: u64) {
             continue;
         }
         body += n;
-        fake.fetched.store((body.saturating_sub(44) / 4) as u64, Ordering::SeqCst);
+        let frames = (body.saturating_sub(44) / 4) as u64;
+        fake.fetched.store(frames, Ordering::SeqCst);
+        if frames as f64 >= FAKE_BUFFER * 44100.0 {
+            fake.play_start.lock().unwrap().get_or_insert_with(Instant::now);
+        }
     }
 }
 
@@ -184,6 +199,8 @@ fn config(port: u16) -> Config {
     cfg.fake = Some(CastDevice::at("127.0.0.1".parse().unwrap(), port, "Fake TV"));
     cfg.keep_local = false;
     cfg.fetch_timeout = Duration::from_secs(2);
+    cfg.preroll_ms = 0;
+    cfg.http = Http::Close;
     cfg
 }
 
@@ -247,6 +264,29 @@ fn a_whole_session_with_the_fake_device() {
     #[cfg(unix)]
     assert!(!c.socket().exists(), "the socket is gone");
     assert!(!events.lock().unwrap().iter().any(|e| matches!(e, Event::Failed { .. })), "{:?}", events.lock().unwrap());
+    c.shutdown();
+}
+
+/// The device holds what the pre-roll gave it: the steady delay follows the setting, and it
+/// starts at once instead of waiting for the live audio to fill its buffer.
+#[test]
+fn the_preroll_sets_the_steady_delay() {
+    let fake = Arc::new(Fake::default());
+    let port = fake_device(fake.clone());
+    let mut cfg = config(port);
+    cfg.preroll_ms = 1500;
+    let (c, _events) = controller(cfg);
+    c.connect_named("Fake TV", Meta::default());
+    wait("a measured latency", 15, || playing_latency(&c).is_some());
+    // A second status, so the median is not only the first.
+    let first = c.status_lines().join(" ");
+    wait("two measurements", 10, || c.status_lines().join(" ") != first && playing_latency(&c).is_some());
+    let lat = playing_latency(&c).unwrap();
+    assert!((1200..=1900).contains(&lat), "latency {lat} ms with a 1.5 s pre-roll");
+    let lines = c.status_lines().join("\n");
+    assert!(lines.contains("pre-roll 1500 ms") && lines.contains("underruns 0"), "{lines}");
+    c.stop();
+    wait("off", 5, || c.idle());
     c.shutdown();
 }
 

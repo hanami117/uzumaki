@@ -510,7 +510,7 @@ fn lyrics_poll(s: &mut State, landed: bool, tx: &mut Tx) -> bool {
     }
     let Some(lyr) = lyrics_of(s) else { return false };
     let song_id = s.playback.song.as_ref().map(|x| x.id.as_str()).unwrap_or("");
-    let t = s.playback.position_now();
+    let t = s.playback.heard_now();
     let changed = follow::step(song_id, lyr, t, playing, landed, tx);
     if playing {
         tx.wake_after(std::time::Duration::ZERO);

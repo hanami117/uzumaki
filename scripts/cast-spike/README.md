@@ -46,6 +46,13 @@ Pausing in the app sends silence (the device keeps playing it). A seek plays out
 first; with `UZUMAKI_CAST_RELOAD_ON_SEEK=1` a seek does a new `LOAD` instead. Picking an AirPlay
 speaker ends the Cast session and the other way round.
 
+## Reading the log
+
+`cast: audio heard … ms after LOAD` is when the TV's position first moved (a `PLAYING` at 0 is still
+waiting). `cast: buffer N ms` is the delay, measured from then on. `UNDERRUN` (buffering again after it
+played) and `STALL` (`PLAYING` but the position stands still) mark trouble; `s` / `uzu cast status`
+counts them, with the setup (format, framing, pre-roll, streamType, IPv4/IPv6).
+
 ## Firewall
 
 The device fetches from this computer, so an incoming TCP connection must be allowed: macOS asks once
@@ -63,5 +70,7 @@ session after 15 s with "A firewall may be blocking it".
 | `UZUMAKI_CAST_STREAM_TYPE=LIVE\|BUFFERED` | what `LOAD` says (default LIVE) |
 | `UZUMAKI_CAST_RELOAD_ON_SEEK=1` | a seek does a new `LOAD` |
 | `UZUMAKI_CAST_IP=4\|6` (tool: `--ipv4`/`--ipv6`) | talk to the device over that family only; default: IPv4 when it has one on this computer's subnet, else IPv6 (then its whole /64 may fetch, since TVs fetch from temporary privacy addresses) |
+| `UZUMAKI_CAST_PREROLL_MS` (tool: `--preroll MS`) | audio sent at once at each fetch, default 2000: the last N ms of the capture (silence for what isn't there yet), so the receiver starts with a buffer and never drains. It is also the steady delay; lyrics and the progress bar follow the measured one |
+| `UZUMAKI_CAST_HTTP=close\|chunked\|length` (tool: `--http`) | body framing: none (default), chunked, or a 4 GB Content-Length |
 | `UZUMAKI_CAST_LOCAL=1` | keep this computer's output on while casting (A/B checks) |
 | `UZUMAKI_CAST_HOST` (+ `UZUMAKI_CAST_DEVICE_PORT`, `UZUMAKI_CAST_TARGET`) | a device at that address, no mDNS (tests) |

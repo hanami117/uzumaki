@@ -5,6 +5,7 @@
 //! uzumaki-cast list [--seconds N]
 //! uzumaki-cast play <name> [--host IP[:PORT]] [--beeps | --tone | --file F.wav] [--flac]
 //!                          [--buffered] [--volume N] [--port P] [--ipv4 | --ipv6]
+//!                          [--preroll MS] [--http close|chunked|length]
 //! ```
 //! While playing, type a letter and Enter: `p` pause, `r` resume, `l` reload (a new LOAD, as a
 //! seek would), `v N` device volume 0-100, `s` status, `q` stop.
@@ -26,7 +27,7 @@ enum Signal {
 }
 
 fn usage() -> ! {
-    eprintln!("usage: uzumaki-cast list [--seconds N]\n       uzumaki-cast play <name> [--host IP[:PORT]] [--beeps|--tone|--file F.wav] [--flac] [--buffered] [--volume N] [--port P] [--ipv4|--ipv6]");
+    eprintln!("usage: uzumaki-cast list [--seconds N]\n       uzumaki-cast play <name> [--host IP[:PORT]] [--beeps|--tone|--file F.wav] [--flac] [--buffered] [--volume N] [--port P] [--ipv4|--ipv6] [--preroll MS] [--http close|chunked|length]");
     std::process::exit(2)
 }
 
@@ -132,6 +133,15 @@ fn main() {
                 cfg.family = uzumaki_cast::Family::V4;
             } else if flag("--ipv6") {
                 cfg.family = uzumaki_cast::Family::V6;
+            }
+            if let Some(ms) = value("--preroll").and_then(|v| v.parse::<u64>().ok()) {
+                cfg.preroll_ms = ms.min(10_000);
+            }
+            if let Some(h) = value("--http") {
+                match uzumaki_cast::Http::parse(&h) {
+                    Some(h) => cfg.http = h,
+                    None => usage(),
+                }
             }
             if flag("--buffered") {
                 cfg.stream_type = "BUFFERED".into();

@@ -18,8 +18,16 @@ impl State {
     pub(super) fn cast_event(&mut self, e: Event) -> bool {
         match e {
             Event::State(s) => {
+                // Lyrics and the progress bar follow what the device plays (its measured buffer).
+                let delay = match &s {
+                    CastState::Playing { latency_ms: Some(ms), .. } => f64::from(*ms) / 1000.0,
+                    CastState::Playing { .. } | CastState::Buffering { .. } | CastState::Paused { .. } => self.playback.output_delay,
+                    _ => 0.0,
+                };
+                let changed = (delay - self.playback.output_delay).abs() > 0.01;
+                self.playback.output_delay = delay;
                 self.cast.state = s;
-                false
+                changed
             }
             Event::Capture(on) => {
                 self.cast.capture = on;
@@ -122,5 +130,12 @@ mod tests {
         assert!(s.toast.as_deref().is_some_and(|t| t.contains("firewall")));
         assert!(!s.cast_event(Event::State(CastState::Connecting { name: "TV".into() })));
         assert_eq!(s.cast.state.name(), Some("TV"));
+        // The measured delay shifts what lyrics and the progress bar show; back to 0 when off.
+        s.playback.position = 10.0;
+        assert!(s.cast_event(Event::State(CastState::Playing { name: "TV".into(), latency_ms: Some(2100) })));
+        assert!((s.playback.heard_now() - 7.9).abs() < 1e-9);
+        assert!(!s.cast_event(Event::State(CastState::Buffering { name: "TV".into() })), "kept while it rebuffers");
+        assert!(s.cast_event(Event::State(CastState::Off)));
+        assert_eq!(s.playback.heard_now(), 10.0);
     }
 }
