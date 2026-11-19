@@ -4540,6 +4540,7 @@ dependencies = [
  "serde_json",
  "ureq",
  "uzumaki-airplay",
+ "uzumaki-cast",
  "uzumaki-ctl",
  "uzumaki-fx",
  "windows 0.62.2",
@@ -4555,6 +4556,19 @@ dependencies = [
  "if-addrs",
  "libc",
  "mdns-sd",
+]
+
+[[package]]
+name = "uzumaki-cast"
+version = "0.3.1"
+dependencies = [
+ "if-addrs",
+ "mdns-sd",
+ "ring",
+ "rustls",
+ "serde_json",
+ "symphonia",
+ "uzumaki-airplay",
 ]
 
 [[package]]

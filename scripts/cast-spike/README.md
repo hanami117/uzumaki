@@ -1,0 +1,66 @@
+# Chromecast spike
+
+Plays Uzumaki's output on a Cast device (Chromecast, Google TV, Nest speaker, Cast Group) through
+Google's Default Media Receiver. Off unless the app is started with `UZUMAKI_CAST_SPIKE=1`; driven by
+`uzu cast`, no picker row yet. Code: `cast/` (crate `uzumaki-cast`).
+
+How it works: the app speaks CASTV2 to the device (TLS, port 8009), launches the Default Media Receiver
+and `LOAD`s a URL served by Uzumaki itself: `http://<this computer>:<port>/cast/<random token>/stream.wav`
+(or `.flac`). The stream is the player's own decoded output (the same capture as AirPlay), live, in
+memory only. Only the device's address may fetch it (for a Cast Group: the Cast devices seen on the
+network), the token changes with every `LOAD`, and the server ends with the session.
+
+## 1. The test tool first (no app)
+
+```sh
+cargo build -p uzumaki-cast --release
+./target/release/uzumaki-cast list
+./target/release/uzumaki-cast play "<device name>" --volume 20          # a beep every second
+./target/release/uzumaki-cast play "<device name>" --flac --volume 20   # the same as FLAC
+./target/release/uzumaki-cast play "<device name>" --file some.wav      # 16-bit 44.1 kHz WAV
+```
+
+While it plays, type a letter and Enter: `p` pause, `r` resume, `l` reload (a new `LOAD`, what a seek
+would do), `v 30` device volume, `s` status, `q` stop. The tool prints `beep` when it sends one: the
+time until you hear it is the latency. The log lines `cast: buffer N ms` are the same number measured
+from the device's own position reports.
+
+`--volume N` sets the device's volume (0-100) once connected; without it the device keeps its own.
+`--buffered` tells the receiver `streamType: BUFFERED` instead of `LIVE`. `--port P` fixes the HTTP port
+(for a firewall rule).
+
+## 2. In the app
+
+```sh
+UZUMAKI_CAST_SPIKE=1 <the uzumaki binary>        # optional: UZUMAKI_CAST_FORMAT=flac
+uzu cast list
+uzu cast "<device name>"
+uzu cast status          # state, who fetched, LOAD→fetch→PLAYING times, the buffer
+uzu cast volume 25       # the device's volume
+uzu cast pause | resume  # the receiver's own pause (the stream keeps going)
+uzu cast reload          # a new LOAD
+uzu cast off             # back to this computer
+```
+
+Pausing in the app sends silence (the device keeps playing it). A seek plays out the device's buffer
+first; with `UZUMAKI_CAST_RELOAD_ON_SEEK=1` a seek does a new `LOAD` instead. Picking an AirPlay
+speaker ends the Cast session and the other way round.
+
+## Firewall
+
+The device fetches from this computer, so an incoming TCP connection must be allowed: macOS asks once
+when the app firewall is on; on Linux open the port (`UZUMAKI_CAST_PORT=8090`, then e.g.
+`sudo ufw allow from <device ip> to any port 8090 proto tcp`). A device that never fetches ends the
+session after 15 s with "A firewall may be blocking it".
+
+## Switches
+
+| Variable | |
+|---|---|
+| `UZUMAKI_CAST_SPIKE=1` | the app creates the Cast controller (else nothing exists) |
+| `UZUMAKI_CAST_FORMAT=wav\|flac` | stream format (default wav) |
+| `UZUMAKI_CAST_PORT` | fixed HTTP port (default: any free one) |
+| `UZUMAKI_CAST_STREAM_TYPE=LIVE\|BUFFERED` | what `LOAD` says (default LIVE) |
+| `UZUMAKI_CAST_RELOAD_ON_SEEK=1` | a seek does a new `LOAD` |
+| `UZUMAKI_CAST_LOCAL=1` | keep this computer's output on while casting (A/B checks) |
+| `UZUMAKI_CAST_HOST` (+ `UZUMAKI_CAST_DEVICE_PORT`, `UZUMAKI_CAST_TARGET`) | a device at that address, no mDNS (tests) |
