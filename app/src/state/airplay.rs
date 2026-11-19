@@ -237,6 +237,7 @@ impl State {
             }
             return;
         };
+        self.cast_yield(); // one output at a time
         if self.airplay.ids() == [id] {
             return; // already there (or on its way)
         }

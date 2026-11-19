@@ -880,6 +880,7 @@ impl State {
         self.playback.slew = 0.0;
         self.playback.seek_target = Some((target, crate::clock::now()));
         self.airplay_flush(); // the seek is heard at once
+        self.cast_seeked();
         if self.playback.local {
             #[cfg(test)]
             self.local_sent.borrow_mut().push(format!("seek {target}"));

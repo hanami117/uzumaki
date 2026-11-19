@@ -24,6 +24,7 @@ mod discord;
 pub mod airplay;
 mod artist;
 pub mod autoplay;
+pub mod cast;
 pub use artist::More;
 pub mod ctl;
 mod edits;
@@ -339,6 +340,8 @@ pub enum Msg {
     Bridge(Event),
     /// AirPlay: speakers found, the output changed, a question or a failure (`state/airplay.rs`).
     AirPlay(uzumaki_airplay::Event),
+    /// Chromecast spike (`state/cast.rs`).
+    Cast(uzumaki_cast::Event),
     /// A reply about the signed-in account (a `/v1/me` read, any write), stamped with the
     /// `Session::account` it was asked under: one from before a sign-out (or a sign-in) is
     /// dropped, so a page landing late can't bring the old library back.
@@ -612,6 +615,8 @@ pub struct State {
     pub motion: motion::MotionState,
     /// Where the audio goes: this computer or an AirPlay speaker (`airplay.rs`).
     pub airplay: airplay::AirPlay,
+    /// Chromecast spike: where the Cast session is (`cast.rs`).
+    pub cast: cast::Cast,
     /// View-only state owned by the UI module (text field contents, scroll, …).
     pub ui: crate::ui::UiState,
 }
@@ -704,6 +709,7 @@ impl State {
             new_playlist_picture: None,
             motion: motion::MotionState::default(),
             airplay: airplay::AirPlay::new(persist),
+            cast: cast::Cast::default(),
             ui,
             browse_new: Load::Idle,
             made_for_you: Load::Idle,
@@ -787,6 +793,7 @@ impl State {
         match msg {
             Msg::Bridge(event) => return self.apply_event(event),
             Msg::AirPlay(event) => return self.airplay_event(event),
+            Msg::Cast(event) => return self.cast_event(event),
             Msg::Account { generation, msg } => {
                 if generation != self.session.account {
                     return false; // asked before a sign-out or sign-in
@@ -1101,6 +1108,9 @@ impl State {
                 if self.airplay.capture {
                     self.airplay_capture();
                 }
+                if self.cast.capture {
+                    self.cast_capture();
+                }
             }
             Event::Auth { authorized, storefront } => {
                 self.set_authorized(authorized);
@@ -1234,6 +1244,7 @@ impl State {
             Event::Stopped => return false,
             Event::AirPlayCapture { ready, error } => {
                 self.airplay_capture_ready(ready, error.as_deref());
+                self.cast_capture_ready(ready, error.as_deref());
                 return false;
             }
             Event::Exited => {

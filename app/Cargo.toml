@@ -18,6 +18,8 @@ uzumaki-fx = { path = "../fx" }
 uzumaki-ctl = { path = "../ctl" }
 # AirPlay: finds speakers (mDNS), PCM socket for the bridge, cliairplay for the chosen speaker.
 uzumaki-airplay = { path = "../airplay" }
+# Chromecast spike (only with UZUMAKI_CAST_SPIKE=1): mDNS, CASTV2, the HTTP stream.
+uzumaki-cast = { path = "../cast" }
 roxmltree = "0.20"
 # Local files: in-process playback and tags. rodio drives cpal (ALSA → PipeWire via
 # pipewire-alsa) and decodes with symphonia; lofty reads tags and embedded covers.

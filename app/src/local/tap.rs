@@ -50,6 +50,48 @@ impl CastSink for uzumaki_airplay::LocalFeed {
     }
 }
 
+impl CastSink for uzumaki_cast::LocalFeed {
+    fn casting(&self) -> bool {
+        uzumaki_cast::LocalFeed::casting(self)
+    }
+    fn mute_local(&self) -> bool {
+        uzumaki_cast::LocalFeed::mute_local(self)
+    }
+    fn push(&self, chunk: Vec<i16>) {
+        uzumaki_cast::LocalFeed::push(self, chunk)
+    }
+    fn set_active(&self, on: bool) {
+        uzumaki_cast::LocalFeed::set_active(self, on)
+    }
+}
+
+/// AirPlay and Chromecast (spike) both listening: whichever casts gets the copy.
+pub struct Both<A, B>(pub A, pub B);
+
+impl<A: CastSink, B: CastSink> CastSink for Both<A, B> {
+    fn casting(&self) -> bool {
+        self.0.casting() || self.1.casting()
+    }
+    fn mute_local(&self) -> bool {
+        self.0.mute_local() || self.1.mute_local()
+    }
+    fn push(&self, chunk: Vec<i16>) {
+        match (self.0.casting(), self.1.casting()) {
+            (true, true) => {
+                self.0.push(chunk.clone());
+                self.1.push(chunk);
+            }
+            (true, false) => self.0.push(chunk),
+            (false, true) => self.1.push(chunk),
+            (false, false) => {}
+        }
+    }
+    fn set_active(&self, on: bool) {
+        self.0.set_active(on);
+        self.1.set_active(on);
+    }
+}
+
 /// A linear gain shared with the player thread (f32 bits), the app's volume.
 #[derive(Clone)]
 pub struct Gain(Arc<AtomicU32>);

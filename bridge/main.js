@@ -448,9 +448,14 @@ function captureReady(ready, error) {
   send({ event: 'airplayCapture', ready: !!ready, ...(error ? { error: String(error).slice(0, 200) } : {}) });
 }
 
-function airplaySet(on) {
+let captureSocket = null; // the socket named by the app (the Chromecast session's), else the env's
+
+function airplaySet(on, socket) {
   on = !!on;
-  if (on === capturing) return;
+  socket = on && typeof socket === 'string' && socket ? socket : null;
+  if (on === capturing && socket === captureSocket) return;
+  if (on && capturing) airplaySet(false); // another socket: start over on the new one
+  captureSocket = socket;
   capturing = on;
   readySent = null;
   if (!on) {
@@ -463,7 +468,7 @@ function airplaySet(on) {
     return airplayToPage();
   }
   airplay ??= require('./airplay.js');
-  const path = airplay.socketPath();
+  const path = captureSocket || airplay.socketPath();
   log(`airplay: capture on (${airplay.SAMPLE_RATE} Hz s16le stereo, ${airplay.CHUNK_FRAMES}-frame chunks); ` +
     (path ? `PCM socket ${path}` : 'no PCM socket (UZUMAKI_AIRPLAY_PCM_SOCKET unset): level log only'));
   if (path) {
@@ -644,7 +649,7 @@ function handle(msg) {
       win.webContents.reload();
       return reply(true, { result: null });
     case 'airplay':
-      airplaySet(msg.on);
+      airplaySet(msg.on, msg.socket);
       return reply(true, { result: null });
     case 'quit':
       reply(true, { result: null });
