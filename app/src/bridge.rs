@@ -241,7 +241,7 @@ mod appimage_tests {
 
 #[cfg(test)]
 mod install_tests {
-    use super::{bridge_beside, bridge_in_bundle, bridge_in_libdir};
+    use super::{bridge_beside, bridge_in_bundle, bridge_in_libdir, from_source_tree, missing_electron_message};
 
     #[test]
     fn finds_a_packaged_bridge_in_the_programs_own_folder() {
@@ -280,6 +280,55 @@ mod install_tests {
         assert_eq!(bridge_beside(&exe), Some(bridge));
         std::fs::remove_dir_all(&prefix).unwrap();
     }
+
+    #[test]
+    fn the_missing_electron_message_hides_the_build_machine_from_users() {
+        let exe = std::path::Path::new(r"D:\a\uzumaki\uzumaki\app\..\bridge\node_modules\electron\dist\electron.exe");
+        let dir = std::path::Path::new(r"D:\a\uzumaki\uzumaki\app\..\bridge");
+        for os in ["windows", "macos", "linux"] {
+            let m = missing_electron_message(exe, dir, false, os);
+            assert!(!m.contains("D:") && !m.contains("npm") && m.contains("Reinstall"), "{os}: {m}");
+        }
+        let w = missing_electron_message(exe, dir, false, "windows");
+        assert!(w.contains("installer") && w.contains("extract the whole zip"));
+        let d = missing_electron_message(exe, dir, true, "windows");
+        assert!(d.contains("npm ci") && d.contains("D:"));
+    }
+
+    #[test]
+    fn a_folder_that_is_not_the_source_tree_is_not_a_dev_run() {
+        if std::env::var_os("UZUMAKI_BRIDGE_DIR").is_none() && std::env::var_os("CADENCE_BRIDGE_DIR").is_none() {
+            assert!(!from_source_tree(std::path::Path::new("/nonexistent/bridge")));
+            assert!(from_source_tree(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bridge")));
+        }
+    }
+}
+
+/// True when `dir` is the bridge of a source-tree run (`../bridge` next to this crate, which
+/// exists on the machine that built it) or one named by the environment: only then do the
+/// developer's setup steps make sense. A release build run elsewhere has neither.
+fn from_source_tree(dir: &std::path::Path) -> bool {
+    let env_set = ["UZUMAKI_BRIDGE_DIR", "CADENCE_BRIDGE_DIR"].iter().any(|k| std::env::var_os(k).is_some());
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bridge");
+    let same = matches!((source.canonicalize(), dir.canonicalize()), (Ok(a), Ok(b)) if a == b);
+    env_set || same
+}
+
+/// What to tell when Electron is missing. Developers get the npm steps; users never see the build
+/// machine's paths: their copy of Uzumaki is incomplete, and the fix is to reinstall it.
+fn missing_electron_message(electron: &std::path::Path, dir: &std::path::Path, dev: bool, os: &str) -> String {
+    if dev {
+        return format!(
+            "castLabs Electron not found at {} (run `npm ci` and then `node node_modules/electron/install.js` in {})",
+            electron.display(),
+            dir.display()
+        );
+    }
+    match os {
+        "windows" => "Uzumaki's files are incomplete (its playback component is missing). Reinstall with the installer from getuzumaki.app, or extract the whole zip into a folder and run uzumaki.exe from there.".into(),
+        "macos" => "Uzumaki's files are incomplete (its playback component is missing). Reinstall Uzumaki from getuzumaki.app.".into(),
+        _ => "Uzumaki's files are incomplete (its playback component is missing). Reinstall Uzumaki from your package manager or getuzumaki.app.".into(),
+    }
 }
 
 impl<M: From<Event> + Send + 'static> Bridge<M> {
@@ -295,11 +344,7 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
         if !electron.exists() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!(
-                    "castLabs Electron not found at {} (run `npm ci` and then `node node_modules/electron/install.js` in {})",
-                    electron.display(),
-                    dir.display()
-                ),
+                missing_electron_message(&electron, &dir, from_source_tree(&dir), std::env::consts::OS),
             ));
         }
         let mut cmd = Command::new(&electron);
