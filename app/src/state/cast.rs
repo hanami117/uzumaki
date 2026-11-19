@@ -72,6 +72,21 @@ impl State {
         }
     }
 
+    /// The user paused (true) or played on: the TV does the same at once. Its buffer holds the
+    /// next seconds and the stream sends nothing meanwhile, so it resumes in step with the player.
+    pub(super) fn cast_pause(&self, on: bool) {
+        if !matches!(self.cast.state, CastState::Playing { .. } | CastState::Buffering { .. } | CastState::Paused { .. }) {
+            return;
+        }
+        if let Some(c) = crate::cast::controller() {
+            if on {
+                c.pause();
+            } else {
+                c.resume();
+            }
+        }
+    }
+
     /// A seek or another song picked: with `UZUMAKI_CAST_RELOAD_ON_SEEK=1`, a new LOAD, so the
     /// device's buffer starts at the new place (else the old buffer plays out first).
     pub(super) fn cast_seeked(&self) {

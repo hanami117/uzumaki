@@ -66,7 +66,14 @@ pub struct Opts {
     /// Audio sent at once when the device fetches (recent audio, else silence), so it starts
     /// with a buffer instead of draining at once and stalling. Also the steady delay.
     pub preroll_ms: u64,
+    /// What a WAV stream carries (FLAC stays 44.1/16).
+    pub wav: crate::wav::Spec,
 }
+
+/// `Http::Length`'s Content-Length: what the WAV header's sizes say (0xFFFFFFFF + 8). The body
+/// stops there (2 h at 96/24, 6.8 h at 44.1/16); the receiver then goes IDLE FINISHED and the
+/// session loads a new URL.
+pub const LENGTH: u64 = u32::MAX as u64 + 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -96,23 +103,11 @@ impl Format {
     }
 }
 
-/// A WAV header for a stream of unknown length (sizes 0xFFFFFFFF).
+/// The 44.1/16 WAV header (tests).
 pub fn wav_header() -> Vec<u8> {
-    let mut h = Vec::with_capacity(44);
-    h.extend_from_slice(b"RIFF");
-    h.extend_from_slice(&u32::MAX.to_le_bytes());
-    h.extend_from_slice(b"WAVEfmt ");
-    h.extend_from_slice(&16u32.to_le_bytes());
-    h.extend_from_slice(&1u16.to_le_bytes()); // PCM
-    h.extend_from_slice(&2u16.to_le_bytes());
-    h.extend_from_slice(&(RATE as u32).to_le_bytes());
-    h.extend_from_slice(&(RATE as u32 * 4).to_le_bytes());
-    h.extend_from_slice(&4u16.to_le_bytes());
-    h.extend_from_slice(&16u16.to_le_bytes());
-    h.extend_from_slice(b"data");
-    h.extend_from_slice(&u32::MAX.to_le_bytes());
-    h
+    crate::wav::Spec::CAPTURE.header()
 }
+
 
 /// The local address the system uses to reach `device` (no packet is sent).
 pub fn local_addr_for(device: IpAddr) -> Option<IpAddr> {
@@ -262,7 +257,8 @@ impl Server {
                 });
             }
         })?;
-        log(format!("stream server on http://{addr}/ ({}, HTTP {}, pre-roll {} ms)", format.ext(), opts.http.name(), opts.preroll_ms));
+        let what = if format == Format::Wav { format!("wav {}", opts.wav.label()) } else { "flac 44.1k/16".into() };
+        log(format!("stream server on http://{addr}/ ({what}, HTTP {}, pre-roll {} ms)", opts.http.name(), opts.preroll_ms));
         Ok(Server { addr, format, state, generation, quit, thread: Some(thread), refused })
     }
 
@@ -370,7 +366,7 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, opts: Opts, st: &Mutex<State>, g
     let framing = match opts.http {
         Http::Close => String::new(),
         Http::Chunked => "Transfer-Encoding: chunked\r\n".into(),
-        Http::Length => format!("Content-Length: {}\r\n", u64::from(u32::MAX) + 8),
+        Http::Length => format!("Content-Length: {LENGTH}\r\n"),
     };
     let headers = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {}\r\n{framing}Access-Control-Allow-Origin: *\r\nCache-Control: no-cache, no-store\r\nAccept-Ranges: none\r\nConnection: close\r\n\r\n",
@@ -388,8 +384,8 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, opts: Opts, st: &Mutex<State>, g
     log(format!("pre-roll to {ip}: {} ms of recent audio + {} ms of silence", sub.backlog_frames * 1000 / RATE, sub.pad_frames * 1000 / RATE));
     let fetch = Arc::new(Fetch { peer: ip, started: Instant::now(), frames: AtomicU64::new(0), token_gen: my_gen });
     st.lock().unwrap().newest = Some(fetch.clone());
-    let mut body = Body { conn: &mut conn, chunked: opts.http == Http::Chunked };
-    let why = stream(&mut body, format, &sub, &fetch, generation, quit);
+    let mut body = Body { conn: &mut conn, chunked: opts.http == Http::Chunked, left: (opts.http == Http::Length).then_some(LENGTH) };
+    let why = stream(&mut body, opts, &sub, &fetch, generation, quit);
     active.fetch_sub(1, Ordering::SeqCst);
     log(format!("the stream to {ip} ended after {:.1} s of audio ({why})", fetch.served_secs()));
 }
@@ -398,12 +394,22 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, opts: Opts, st: &Mutex<State>, g
 struct Body<'a> {
     conn: &'a mut TcpStream,
     chunked: bool,
+    /// `Http::Length`: bytes the Content-Length still allows.
+    left: Option<u64>,
 }
 
 impl Body<'_> {
     fn write(&mut self, bytes: &[u8]) -> bool {
         if bytes.is_empty() {
             return true;
+        }
+        if let Some(left) = self.left.as_mut() {
+            if *left == 0 {
+                return false;
+            }
+            let n = (bytes.len() as u64).min(*left) as usize;
+            *left -= n as u64;
+            return self.conn.write_all(&bytes[..n]).is_ok() && n == bytes.len();
         }
         if self.chunked {
             let mut framed = format!("{:x}\r\n", bytes.len()).into_bytes();
@@ -425,6 +431,7 @@ pub fn chunk_frame(bytes: &[u8]) -> Vec<u8> {
 
 struct Encode {
     format: Format,
+    wav: crate::wav::Converter,
     enc: flac::Encoder,
     /// FLAC: frames waiting for a whole block.
     pending: u64,
@@ -435,7 +442,7 @@ impl Encode {
     fn push(&mut self, pcm: &[u8]) -> (Vec<u8>, u64) {
         let frames = (pcm.len() / FRAME_BYTES) as u64;
         match self.format {
-            Format::Wav => (pcm.to_vec(), frames),
+            Format::Wav => (self.wav.push(pcm), frames),
             Format::Flac => {
                 let samples: Vec<i16> = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();
                 let out = self.enc.push(&samples);
@@ -448,15 +455,16 @@ impl Encode {
     }
 }
 
-fn stream(body: &mut Body, format: Format, sub: &crate::pcm::Sub, fetch: &Fetch, generation: &AtomicU64, quit: &AtomicBool) -> &'static str {
+fn stream(body: &mut Body, opts: Opts, sub: &crate::pcm::Sub, fetch: &Fetch, generation: &AtomicU64, quit: &AtomicBool) -> &'static str {
+    let format = opts.format;
     let start = match format {
-        Format::Wav => wav_header(),
+        Format::Wav => opts.wav.header(),
         Format::Flac => flac::header(),
     };
     if !body.write(&start) {
         return "closed by the device";
     }
-    let mut enc = Encode { format, enc: flac::Encoder::default(), pending: 0 };
+    let mut enc = Encode { format, wav: crate::wav::Converter::new(opts.wav), enc: flac::Encoder::default(), pending: 0 };
     // The pre-roll's silence part, at once (the history part is queued in `sub.rx`).
     let mut pad = sub.pad_frames;
     while pad > 0 {
@@ -482,7 +490,7 @@ fn stream(body: &mut Body, format: Format, sub: &crate::pcm::Sub, fetch: &Fetch,
         };
         let (bytes, done) = enc.push(&chunk);
         if !body.write(&bytes) {
-            return "closed by the device";
+            return if body.left == Some(0) { "the Content-Length is reached" } else { "closed by the device" };
         }
         fetch.frames.fetch_add(done, Ordering::Relaxed);
     }
@@ -513,7 +521,7 @@ mod tests {
     fn only_the_token_path_from_the_device_gets_audio() {
         let hub = Arc::new(Hub::default());
         let lo: IpAddr = "127.0.0.1".parse().unwrap();
-        let server = Server::start(lo, 0, Opts { format: Format::Wav, http: Http::Close, preroll_ms: 0 }, hub.clone(), Allow::device(&[lo], false)).unwrap();
+        let server = Server::start(lo, 0, Opts { format: Format::Wav, http: Http::Close, preroll_ms: 0, wav: crate::wav::Spec::CAPTURE }, hub.clone(), Allow::device(&[lo], false)).unwrap();
         let url = server.url();
         let path = url.split_once(&server.addr().to_string()).unwrap().1.to_string();
         assert!(path.starts_with("/cast/") && path.ends_with("/stream.wav") && path.len() == "/cast//stream.wav".len() + 32, "{path}");
@@ -551,7 +559,7 @@ mod tests {
     fn another_address_is_refused() {
         let hub = Arc::new(Hub::default());
         let lo: IpAddr = "127.0.0.1".parse().unwrap();
-        let server = Server::start(lo, 0, Opts { format: Format::Flac, http: Http::Close, preroll_ms: 0 }, hub, Allow::device(&["192.168.1.40".parse().unwrap()], false)).unwrap();
+        let server = Server::start(lo, 0, Opts { format: Format::Flac, http: Http::Close, preroll_ms: 0, wav: crate::wav::Spec::CAPTURE }, hub, Allow::device(&["192.168.1.40".parse().unwrap()], false)).unwrap();
         let url = server.url();
         let path = url.split_once(&server.addr().to_string()).unwrap().1.to_string();
         let (h, _) = get(server.addr(), &path, "GET");
@@ -591,7 +599,7 @@ mod tests {
         let hub = Arc::new(Hub::default());
         hub.publish(&[7u8; 4 * 2205]); // 50 ms of history
         let lo: IpAddr = "127.0.0.1".parse().unwrap();
-        let server = Server::start(lo, 0, Opts { format: Format::Wav, http: Http::Chunked, preroll_ms: 500 }, hub, Allow::device(&[lo], false)).unwrap();
+        let server = Server::start(lo, 0, Opts { format: Format::Wav, http: Http::Chunked, preroll_ms: 500, wav: crate::wav::Spec::CAPTURE }, hub, Allow::device(&[lo], false)).unwrap();
         let url = server.url();
         let path = url.split_once(&server.addr().to_string()).unwrap().1.to_string();
         // Nobody publishes: all of it is the pre-roll.

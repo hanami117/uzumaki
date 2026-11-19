@@ -26,6 +26,7 @@ pub mod pcm;
 pub mod proto;
 mod session;
 pub mod stream;
+pub mod wav;
 
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -41,9 +42,11 @@ fn log(msg: impl AsRef<str>) {
     eprintln!("cast: {}", msg.as_ref());
 }
 
-/// The default pre-roll: the Android TV receiver waited for ~5 s after draining at once with
-/// none (live test 2); 2 s at once lets it start and never drain.
-pub const DEFAULT_PREROLL_MS: u64 = 2000;
+/// What the Android TV receiver (CrKey 1.56) wants buffered before it plays a progressive
+/// stream, in bytes (live tests 3-4: ~1.36 MB without a length, less with a Content-Length).
+/// The automatic pre-roll sends this much at once, so it starts at once
+/// (`UZUMAKI_CAST_BURST_BYTES`, tool `--burst`).
+pub const DEFAULT_BURST_BYTES: u64 = 1_400_000;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -53,9 +56,14 @@ pub struct Config {
     pub port: u16,
     pub format: Format,
     /// Audio sent at once at each fetch (see `stream::Opts`): the device starts with that much
-    /// buffered and plays that much behind (`UZUMAKI_CAST_PREROLL_MS`, default 2000).
-    pub preroll_ms: u64,
-    /// The body's framing (`UZUMAKI_CAST_HTTP=close|chunked|length`).
+    /// buffered and plays that much behind (`UZUMAKI_CAST_PREROLL_MS`). None: `burst_bytes` worth
+    /// of the stream's format.
+    pub preroll_ms: Option<u64>,
+    pub burst_bytes: u64,
+    /// What a WAV stream carries (`UZUMAKI_CAST_RATE`, `UZUMAKI_CAST_BITS`; default 96k/24).
+    pub wav: wav::Spec,
+    /// The body's framing (`UZUMAKI_CAST_HTTP=close|chunked|length`, default length: best in
+    /// live test 4).
     pub http: Http,
     /// IPv4 / IPv6 / automatic (`UZUMAKI_CAST_IP=4|6`).
     pub family: Family,
@@ -88,8 +96,14 @@ impl Config {
             dir: std::env::temp_dir().join(format!("uzumaki-cast-{}", std::process::id())),
             port: var("UZUMAKI_CAST_PORT").and_then(|p| p.parse().ok()).unwrap_or(0),
             format: var("UZUMAKI_CAST_FORMAT").and_then(|f| Format::parse(&f)).unwrap_or(Format::Wav),
-            preroll_ms: var("UZUMAKI_CAST_PREROLL_MS").and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_PREROLL_MS).min(10_000),
-            http: var("UZUMAKI_CAST_HTTP").and_then(|v| Http::parse(&v)).unwrap_or_default(),
+            preroll_ms: var("UZUMAKI_CAST_PREROLL_MS").and_then(|v| v.parse::<u64>().ok()).map(|v| v.min(10_000)),
+            burst_bytes: var("UZUMAKI_CAST_BURST_BYTES").and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_BURST_BYTES),
+            wav: wav::Spec::new(
+                var("UZUMAKI_CAST_RATE").and_then(|v| wav::Spec::parse_rate(&v)).unwrap_or(wav::Spec::default().rate),
+                var("UZUMAKI_CAST_BITS").and_then(|v| v.parse().ok()).unwrap_or(wav::Spec::default().bits),
+            )
+            .unwrap_or_default(),
+            http: var("UZUMAKI_CAST_HTTP").and_then(|v| Http::parse(&v)).unwrap_or(Http::Length),
             family: var("UZUMAKI_CAST_IP").and_then(|f| Family::parse(&f)).unwrap_or_default(),
             stream_type: var("UZUMAKI_CAST_STREAM_TYPE").map(|s| s.to_uppercase()).filter(|s| s == "LIVE" || s == "BUFFERED").unwrap_or_else(|| "LIVE".into()),
             fake,
@@ -105,6 +119,18 @@ impl Config {
 
     pub fn socket(&self) -> PathBuf {
         self.dir.join("pcm.sock")
+    }
+
+    /// The pre-roll in ms: the one set, else `burst_bytes` of the stream (FLAC: as 44.1/16 WAV
+    /// at 60%), at most 10 s.
+    pub fn preroll(&self) -> u64 {
+        self.preroll_ms.unwrap_or_else(|| {
+            let bps = match self.format {
+                Format::Wav => self.wav.bytes_per_sec(),
+                Format::Flac => wav::Spec::CAPTURE.bytes_per_sec() * 6 / 10,
+            };
+            (self.burst_bytes * 1000 / bps.max(1)).min(10_000)
+        })
     }
 }
 
@@ -437,12 +463,22 @@ impl Controller {
         self.inner.session.lock().unwrap().as_ref().is_some_and(|h| h.tx.send(session::In::Cmd(c)).is_ok())
     }
 
-    /// The receiver's own pause / play (the stream itself keeps going).
+    /// Instant pause: the receiver pauses at once (its buffer keeps the next seconds) and the
+    /// stream sends nothing meanwhile (no silence fill), so `resume` plays on in step.
     pub fn pause(&self) -> bool {
-        self.send(Cmd::Pause)
+        let sent = self.send(Cmd::Pause);
+        if sent {
+            self.inner.feed.set_hold(true);
+        }
+        sent
     }
     pub fn resume(&self) -> bool {
+        self.inner.feed.set_hold(false);
         self.send(Cmd::Resume)
+    }
+    /// Paused by `pause` (the tool's signal waits too).
+    pub fn holding(&self) -> bool {
+        self.inner.feed.holding()
     }
     /// The device's volume, 0-100.
     pub fn set_volume(&self, v: u8) -> bool {

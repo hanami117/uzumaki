@@ -5,7 +5,9 @@
 //! uzumaki-cast list [--seconds N]
 //! uzumaki-cast play <name> [--host IP[:PORT]] [--beeps | --tone | --file F.wav] [--flac]
 //!                          [--buffered] [--volume N] [--port P] [--ipv4 | --ipv6]
-//!                          [--preroll MS] [--http close|chunked|length]
+//!                          [--preroll MS | --burst BYTES] [--http close|chunked|length]
+//!                          [--rate 44.1k|48k|88.2k|96k] [--bits 16|24]
+//! Defaults: WAV 96k/24, HTTP length, pre-roll = 1.4 MB of the stream (starts at once).
 //! ```
 //! While playing, type a letter and Enter: `p` pause, `r` resume, `l` reload (a new LOAD, as a
 //! seek would), `v N` device volume 0-100, `s` status, `q` stop.
@@ -27,7 +29,7 @@ enum Signal {
 }
 
 fn usage() -> ! {
-    eprintln!("usage: uzumaki-cast list [--seconds N]\n       uzumaki-cast play <name> [--host IP[:PORT]] [--beeps|--tone|--file F.wav] [--flac] [--buffered] [--volume N] [--port P] [--ipv4|--ipv6] [--preroll MS] [--http close|chunked|length]");
+    eprintln!("usage: uzumaki-cast list [--seconds N]\n       uzumaki-cast play <name> [--host IP[:PORT]] [--beeps|--tone|--file F.wav] [--flac] [--buffered] [--volume N] [--port P] [--ipv4|--ipv6] [--preroll MS|--burst BYTES] [--http close|chunked|length] [--rate R] [--bits B]");
     std::process::exit(2)
 }
 
@@ -57,11 +59,18 @@ fn read_wav(path: &str) -> Result<Vec<i16>, String> {
 }
 
 /// Publishes the signal in real time (a little ahead of the clock), as the bridge's capture would.
-fn feed(hub: Arc<Hub>, signal: Signal, alive: Arc<AtomicBool>) {
+/// While the controller holds (paused on the TV), the signal waits too: its clock moves on by
+/// the pause, so after `r` it continues where the TV stopped, without a burst.
+fn feed(hub: Arc<Hub>, signal: Signal, alive: Arc<AtomicBool>, ctl: Controller) {
     const CHUNK: usize = 4096;
-    let start = Instant::now();
+    let mut start = Instant::now();
     let mut frame = 0u64;
     while alive.load(Ordering::SeqCst) {
+        if ctl.holding() {
+            std::thread::sleep(Duration::from_millis(20));
+            start += Duration::from_millis(20);
+            continue;
+        }
         let due = start + Duration::from_secs_f64(frame as f64 / 44100.0);
         let now = Instant::now();
         if due > now + Duration::from_millis(100) {
@@ -135,7 +144,21 @@ fn main() {
                 cfg.family = uzumaki_cast::Family::V6;
             }
             if let Some(ms) = value("--preroll").and_then(|v| v.parse::<u64>().ok()) {
-                cfg.preroll_ms = ms.min(10_000);
+                cfg.preroll_ms = Some(ms.min(10_000));
+            }
+            if let Some(b) = value("--burst").and_then(|v| v.parse::<u64>().ok()) {
+                cfg.burst_bytes = b;
+            }
+            if value("--rate").is_some() || value("--bits").is_some() {
+                let rate = value("--rate").and_then(|r| uzumaki_cast::wav::Spec::parse_rate(&r)).unwrap_or(cfg.wav.rate);
+                let bits = value("--bits").and_then(|b| b.parse().ok()).unwrap_or(cfg.wav.bits);
+                match uzumaki_cast::wav::Spec::new(rate, bits) {
+                    Some(s) => cfg.wav = s,
+                    None => {
+                        eprintln!("--rate takes 44.1k, 48k, 88.2k or 96k; --bits 16 or 24");
+                        std::process::exit(2);
+                    }
+                }
             }
             if let Some(h) = value("--http") {
                 match uzumaki_cast::Http::parse(&h) {
@@ -184,7 +207,8 @@ fn main() {
             let alive = Arc::new(AtomicBool::new(true));
             {
                 let (hub, alive) = (c.hub(), alive.clone());
-                std::thread::spawn(move || feed(hub, signal, alive));
+                let ctl = c.clone();
+                std::thread::spawn(move || feed(hub, signal, alive, ctl));
             }
             c.connect_named(&name, Meta { title: "Uzumaki Cast test".into(), artist: "Uzumaki".into(), ..Meta::default() });
             if let Some(v) = volume {

@@ -21,6 +21,8 @@ pub(crate) enum In {
 }
 
 const PING_EVERY: Duration = Duration::from_secs(5);
+/// How long a STOP waits for the TV to confirm it.
+const STOP_WAIT: Duration = Duration::from_millis(2000);
 const STATUS_EVERY: Duration = Duration::from_secs(2);
 /// How many buffer measurements the reported latency is the median of.
 const LATENCY_OF: usize = 5;
@@ -44,6 +46,8 @@ struct Session<'a> {
     /// Our receiver app: its session and transport ids.
     app: Option<(String, String)>,
     media_session: Option<i64>,
+    /// The requestId of our last LOAD: its MEDIA_STATUS names our media session.
+    load_req: Option<u64>,
     server: Option<Server>,
     inputs: Option<pcm::Inputs>,
     meta: Meta,
@@ -109,6 +113,7 @@ pub(crate) fn run(inner: &Arc<Inner>, mut device: CastDevice, meta: Meta, rx: &m
         next_id: 1,
         app: None,
         media_session: None,
+        load_req: None,
         server: None,
         inputs: None,
         meta,
@@ -130,7 +135,7 @@ pub(crate) fn run(inner: &Arc<Inner>, mut device: CastDevice, meta: Meta, rx: &m
     let id = s.id();
     s.send(RECEIVER, NS_RECEIVER, json!({"type": "GET_STATUS", "requestId": id}));
     let end = s.run(rx);
-    s.finish(end);
+    s.finish(end, rx);
 }
 
 impl Session<'_> {
@@ -315,7 +320,7 @@ impl Session<'_> {
             }
             (NS_RECEIVER, "RECEIVER_STATUS") => return self.on_receiver_status(&v["status"]),
             (NS_RECEIVER, "LAUNCH_ERROR") => return Some(End::Failed(Why::LoadFailed, format!("LAUNCH_ERROR {}", v["reason"]))),
-            (NS_MEDIA, "MEDIA_STATUS") => return self.on_media_status(&v["status"]),
+            (NS_MEDIA, "MEDIA_STATUS") => return self.on_media_status(&v["status"], v["requestId"].as_u64()),
             (NS_MEDIA, "LOAD_FAILED" | "LOAD_CANCELLED" | "INVALID_REQUEST" | "INVALID_PLAYER_STATE") => {
                 if kind == "LOAD_CANCELLED" && self.reloading {
                     return None;
@@ -393,13 +398,13 @@ impl Session<'_> {
             // A group's leader may let a member fetch: every Cast device seen may.
             allow.add_others(&self.inner.known_ips());
         }
-        match Server::start(bind, cfg.port, Opts { format: cfg.format, http: cfg.http, preroll_ms: cfg.preroll_ms }, self.inner.hub.clone(), allow.clone()) {
+        match Server::start(bind, cfg.port, Opts { format: cfg.format, http: cfg.http, preroll_ms: cfg.preroll(), wav: cfg.wav }, self.inner.hub.clone(), allow.clone()) {
             Ok(s) => {
                 log(format!("serving to {}", allow.describe()));
                 let mut r = self.inner.report.lock().unwrap();
                 r.url_host = Some(s.addr().to_string());
                 r.format = Some(cfg.format);
-                r.setup = format!("setup: {}, HTTP {}, pre-roll {} ms, streamType {}, {}", cfg.format.ext(), cfg.http.name(), cfg.preroll_ms, cfg.stream_type, if bind.is_ipv6() { "IPv6" } else { "IPv4" });
+                r.setup = format!("setup: {}, HTTP {}, pre-roll {} ms{}, streamType {}, {}", if cfg.format == crate::Format::Wav { format!("wav {}", cfg.wav.label()) } else { "flac 44.1k/16".into() }, cfg.http.name(), cfg.preroll(), if cfg.preroll_ms.is_none() { format!(" (auto: {} KB)", cfg.burst_bytes / 1000) } else { String::new() }, cfg.stream_type, if bind.is_ipv6() { "IPv6" } else { "IPv4" });
                 drop(r);
                 self.server = Some(s);
             }
@@ -446,6 +451,7 @@ impl Session<'_> {
         self.played = false;
         self.buffers.clear();
         self.media_session = None;
+        self.load_req = Some(id);
         {
             let mut r = self.inner.report.lock().unwrap();
             r.loads += 1;
@@ -458,10 +464,25 @@ impl Session<'_> {
         self.set_phase(Phase::Loading);
     }
 
-    fn on_media_status(&mut self, st: &Value) -> Option<End> {
+    fn on_media_status(&mut self, st: &Value, request: Option<u64>) -> Option<End> {
         let s = st.as_array().and_then(|a| a.first())?;
-        if let Some(ms) = s["mediaSessionId"].as_i64() {
-            self.media_session = Some(ms);
+        let ms = s["mediaSessionId"].as_i64();
+        let reply_to_load = self.load_req.is_some() && request == self.load_req;
+        match (self.media_session, ms) {
+            // The answer to our LOAD names our media session.
+            (_, Some(m)) if reply_to_load => self.media_session = Some(m),
+            (None, Some(m)) if self.load_req.is_some() && s["playerState"].as_str() != Some("IDLE") => self.media_session = Some(m),
+            (Some(ours), Some(m)) if m != ours => {
+                log(format!("a status of another media session ({m}, not ours {ours}): {} {}, ignored", s["playerState"].as_str().unwrap_or(""), s["idleReason"].as_str().unwrap_or("")));
+                return None;
+            }
+            (None, Some(m)) => {
+                // Before ours is known: an older session (a run that ended without STOP) ending
+                // because of our LOAD. Not someone else taking the device.
+                log(format!("a status of an older media session ({m}): {} {}, ignored", s["playerState"].as_str().unwrap_or(""), s["idleReason"].as_str().unwrap_or("")));
+                return None;
+            }
+            _ => {}
         }
         let state = s["playerState"].as_str().unwrap_or("");
         let device_time = s["currentTime"].as_f64().unwrap_or(0.0);
@@ -525,7 +546,13 @@ impl Session<'_> {
                 match why {
                     "INTERRUPTED" | "CANCELLED" if self.reloading => {}
                     "ERROR" => return Some(End::Failed(Why::LoadFailed, "the receiver reported an error".into())),
-                    "FINISHED" => return Some(End::Failed(Why::Lost, "the receiver thinks the stream ended".into())),
+                    "FINISHED" if !self.reloading => {
+                        // The Content-Length is used up (or the receiver dropped the stream): a new URL.
+                        log("the receiver reached the end of the stream: loading a new URL");
+                        self.reloading = true;
+                        self.load(true);
+                    }
+                    "FINISHED" => {}
                     "INTERRUPTED" | "CANCELLED" => return Some(End::Failed(Why::Taken, format!("IDLE {why}"))),
                     _ => {}
                 }
@@ -535,14 +562,47 @@ impl Session<'_> {
         None
     }
 
-    fn finish(mut self, end: End) {
+    fn finish(mut self, end: End, rx: &mpsc::Receiver<In>) {
         let name = self.name();
-        // Our receiver goes away with the session (the TV goes back to its idle screen).
-        if let Some((sid, _)) = self.app.clone()
+        self.inner.feed.set_hold(false);
+        // Our media stops first (else the TV plays out its buffer: ~8 beeps after `q` in live
+        // test 3), then our receiver goes away; we wait for the TV to say so.
+        if let Some((sid, transport)) = self.app.clone()
             && !matches!(end, End::Failed(Why::Taken | Why::Ended | Why::Lost, _))
         {
+            if let Some(ms) = self.media_session {
+                let id = self.id();
+                self.send(&transport, NS_MEDIA, json!({"type": "STOP", "mediaSessionId": ms, "requestId": id}));
+            }
             let id = self.id();
             self.send(RECEIVER, NS_RECEIVER, json!({"type": "STOP", "sessionId": sid, "requestId": id}));
+            let t = Instant::now();
+            let deadline = t + STOP_WAIT;
+            let mut media_idle = self.media_session.is_none();
+            let mut gone = false;
+            while !gone && Instant::now() < deadline {
+                let Ok(In::Net(Incoming::Msg(m))) = rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) else { continue };
+                let v = m.json().unwrap_or(Value::Null);
+                match v["type"].as_str() {
+                    Some("MEDIA_STATUS") => {
+                        let idle = v["status"].as_array().is_some_and(|a| a.is_empty() || a.iter().any(|x| x["playerState"].as_str() == Some("IDLE")));
+                        if idle && !media_idle {
+                            media_idle = true;
+                            log(format!("the TV stopped the media after {} ms", t.elapsed().as_millis()));
+                        }
+                    }
+                    Some("RECEIVER_STATUS") => {
+                        let apps = v["status"]["applications"].as_array().cloned().unwrap_or_default();
+                        gone = !apps.iter().any(|a| a["sessionId"].as_str() == Some(sid.as_str()));
+                    }
+                    _ => {}
+                }
+            }
+            if gone {
+                log(format!("the TV confirmed the stop after {} ms", t.elapsed().as_millis()));
+            } else {
+                log(format!("no stop confirmation from the TV within {} ms", STOP_WAIT.as_millis()));
+            }
         }
         if !matches!(end, End::Failed(Why::Lost, _)) {
             self.send(RECEIVER, NS_CONNECTION, json!({"type": "CLOSE"}));

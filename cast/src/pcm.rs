@@ -130,6 +130,10 @@ pub struct Feed {
     local_tx: Mutex<Option<mpsc::SyncSender<Vec<i16>>>>,
     /// Milliseconds since `epoch` of the last audio (not silence) published.
     last_audio: AtomicU64,
+    /// Paused on the receiver: nothing goes out (the device's buffer holds what comes next).
+    hold: AtomicBool,
+    /// Counts the ends of holds: the pump starts its clock afresh (no catch-up for the pause).
+    resumes: AtomicU64,
     epoch: Mutex<Option<Instant>>,
 }
 
@@ -140,6 +144,17 @@ impl Feed {
 
     pub(crate) fn set_casting(&self, on: bool) {
         self.casting.store(on, Ordering::SeqCst);
+    }
+
+    pub(crate) fn set_hold(&self, on: bool) {
+        if self.hold.swap(on, Ordering::SeqCst) && !on {
+            self.resumes.fetch_add(1, Ordering::SeqCst);
+            self.last_audio.store(self.now_ms().max(1), Ordering::Relaxed);
+        }
+    }
+
+    pub fn holding(&self) -> bool {
+        self.hold.load(Ordering::SeqCst)
     }
 
     pub(crate) fn set_keep_local(&self, on: bool) {
@@ -243,7 +258,7 @@ fn bridge_socket(path: &Path, feed: &Arc<Feed>, hub: &Arc<Hub>, alive: &Arc<Atom
                     Ok(0) => break,
                     Ok(n) => {
                         let whole = frames.whole(&buf[..n]);
-                        if !whole.is_empty() && !f.local_active.load(Ordering::SeqCst) {
+                        if !whole.is_empty() && !f.local_active.load(Ordering::SeqCst) && !f.holding() {
                             h.publish(whole);
                             total += whole.len() as u64;
                             f.last_audio.store(f.now_ms(), Ordering::Relaxed);
@@ -321,6 +336,7 @@ fn pump(rx: mpsc::Receiver<Vec<i16>>, feed: &Feed, hub: &Hub, alive: &AtomicBool
     let epoch = *feed.epoch.lock().unwrap().get_or_insert_with(Instant::now);
     feed.last_audio.store(0, Ordering::Relaxed); // a new session: nothing sent yet
     let mut until = Instant::now();
+    let mut resumes = feed.resumes.load(Ordering::SeqCst);
     while alive.load(Ordering::SeqCst) {
         let chunk = match rx.recv_timeout(Duration::from_millis(20)) {
             Ok(c) => Some(c),
@@ -328,6 +344,14 @@ fn pump(rx: mpsc::Receiver<Vec<i16>>, feed: &Feed, hub: &Hub, alive: &AtomicBool
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
         let now = Instant::now();
+        if feed.holding() {
+            continue; // paused on the receiver: nothing, not even silence
+        }
+        let r = feed.resumes.load(Ordering::SeqCst);
+        if r != resumes {
+            resumes = r;
+            until = now; // the pause is not a hole to fill
+        }
         match chunk {
             Some(c) if c.len() >= 2 && feed.local_active.load(Ordering::SeqCst) => {
                 let c = &c[..c.len() - c.len() % 2];
@@ -417,6 +441,34 @@ mod tests {
     }
 
     #[test]
+    fn a_hold_sends_nothing_and_its_end_is_no_hole_to_fill() {
+        let feed = Arc::new(Feed::default());
+        let hub = Arc::new(Hub::default());
+        let rx = hub.subscribe(1024);
+        let dir = std::env::temp_dir().join(format!("uzumaki-cast-test-h-{}", std::process::id()));
+        let inputs = Inputs::start(&dir.join("pcm.sock"), feed.clone(), hub.clone());
+        let local = LocalFeed { feed: feed.clone() };
+        std::thread::sleep(Duration::from_millis(300));
+        let _ = rx.try_iter().count();
+        feed.set_hold(true);
+        std::thread::sleep(Duration::from_millis(60));
+        let _ = rx.try_iter().count(); // what was on its way
+        local.set_active(true);
+        local.push(vec![100i16; 2 * 4096]); // the local player while paused: dropped
+        std::thread::sleep(Duration::from_millis(600));
+        assert_eq!(rx.try_iter().map(|c| c.len()).sum::<usize>(), 0, "nothing while held");
+        local.set_active(false);
+        feed.set_hold(false);
+        std::thread::sleep(Duration::from_millis(500));
+        // After the hold: back to real time, not 600 ms of catch-up silence at once.
+        let after: usize = rx.try_iter().map(|c| c.len()).sum();
+        // 500 ms + the 100 ms lead in real time; a catch-up of the 600 ms hold would be ~1.2 s.
+        assert!(after > 0 && after < 44100 * 4 * 900 / 1000, "{after} bytes in 500 ms after the hold");
+        drop(inputs);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn the_history_is_bounded() {
         let hub = Hub::default();
         let chunk = vec![0u8; 44100 * FRAME_BYTES]; // 1 s
@@ -470,7 +522,9 @@ mod tests {
         }
         std::thread::sleep(Duration::from_millis(150));
         let bytes: Vec<u8> = rx.try_iter().flat_map(|c| c.to_vec()).collect();
-        assert!(bytes.starts_with(&[9, 9, 9, 9, 1, 1, 1, 1]), "{bytes:?}");
+        // Silence may come first (it starts with the session); then the bridge's whole frames.
+        let at = bytes.windows(8).position(|w| w == [9, 9, 9, 9, 1, 1, 1, 1]);
+        assert!(at.is_some_and(|i| i % FRAME_BYTES == 0), "the bridge's frames, whole and aligned: {:?}", &bytes[bytes.len().saturating_sub(16)..]);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -477,6 +477,7 @@ impl State {
         if self.resume.is_some() {
             return self.play_resumed();
         }
+        self.cast_pause(false); // the TV plays on from its buffer at once
         if self.playback.local {
             if self.playback.state == PlayState::Paused {
                 #[cfg(test)]
@@ -497,6 +498,7 @@ impl State {
             return; // a resumed song is paused until Play
         }
         self.airplay_flush(); // the speaker goes quiet now, not after what it had queued
+        self.cast_pause(true); // the TV pauses now and keeps what comes next
         if self.playback.local {
             #[cfg(test)]
             self.local_sent.borrow_mut().push("pause".into());

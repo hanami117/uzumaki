@@ -20,7 +20,7 @@ cargo build -p uzumaki-cast --release
 ./target/release/uzumaki-cast play "<device name>" --file some.wav      # 16-bit 44.1 kHz WAV
 ```
 
-While it plays, type a letter and Enter: `p` pause, `r` resume, `l` reload (a new `LOAD`, what a seek
+While it plays, type a letter and Enter: `p` pause and `r` resume (instant: the TV pauses at once and keeps its buffer, the stream waits), `l` reload (a new `LOAD`, what a seek
 would do), `v 30` device volume, `s` status, `q` stop. The tool prints `beep` when it sends one: the
 time until you hear it is the latency. The log lines `cast: buffer N ms` are the same number measured
 from the device's own position reports.
@@ -70,7 +70,9 @@ session after 15 s with "A firewall may be blocking it".
 | `UZUMAKI_CAST_STREAM_TYPE=LIVE\|BUFFERED` | what `LOAD` says (default LIVE) |
 | `UZUMAKI_CAST_RELOAD_ON_SEEK=1` | a seek does a new `LOAD` |
 | `UZUMAKI_CAST_IP=4\|6` (tool: `--ipv4`/`--ipv6`) | talk to the device over that family only; default: IPv4 when it has one on this computer's subnet, else IPv6 (then its whole /64 may fetch, since TVs fetch from temporary privacy addresses) |
-| `UZUMAKI_CAST_PREROLL_MS` (tool: `--preroll MS`) | audio sent at once at each fetch, default 2000: the last N ms of the capture (silence for what isn't there yet), so the receiver starts with a buffer and never drains. It is also the steady delay; lyrics and the progress bar follow the measured one |
-| `UZUMAKI_CAST_HTTP=close\|chunked\|length` (tool: `--http`) | body framing: none (default), chunked, or a 4 GB Content-Length |
+| `UZUMAKI_CAST_RATE` / `UZUMAKI_CAST_BITS` (tool: `--rate 44.1k\|48k\|88.2k\|96k`, `--bits 16\|24`) | WAV format, default 96k/24. The Android TV receiver waits for a fixed number of **bytes** before it plays, so more bytes per second = less delay (live test 4: FLAC took twice as long as WAV 44.1/16) |
+| `UZUMAKI_CAST_BURST_BYTES` (tool: `--burst`) | the automatic pre-roll: this many bytes of the stream at once (default 1 400 000 ≈ 2.4 s at 96k/24), so it starts at once |
+| `UZUMAKI_CAST_PREROLL_MS` (tool: `--preroll MS`) | a fixed pre-roll instead (the last N ms of audio, silence for what isn't there yet). It is also the steady delay; lyrics and the progress bar follow the measured one |
+| `UZUMAKI_CAST_HTTP=length\|close\|chunked` (tool: `--http`) | body framing, default `length` (a 4 GB Content-Length; best in live test 4). The stream then ends after 2 h at 96k/24 and the session loads a new URL by itself |
 | `UZUMAKI_CAST_LOCAL=1` | keep this computer's output on while casting (A/B checks) |
 | `UZUMAKI_CAST_HOST` (+ `UZUMAKI_CAST_DEVICE_PORT`, `UZUMAKI_CAST_TARGET`) | a device at that address, no mDNS (tests) |

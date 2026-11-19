@@ -31,6 +31,8 @@ struct Fake {
     /// When it started playing (it holds `FAKE_BUFFER` of audio): from then on its position
     /// moves in real time, as a real receiver's, never past what it fetched.
     play_start: Mutex<Option<Instant>>,
+    /// A media session of an earlier sender is still there: our LOAD interrupts it first.
+    stale_session: AtomicBool,
 }
 
 impl Fake {
@@ -136,7 +138,16 @@ fn device_conn(tcp: TcpStream, fake: &Arc<Fake>) {
                         let f = fake.clone();
                         std::thread::spawn(move || fetch(&url, &f, n));
                     }
+                    if fake.stale_session.load(Ordering::SeqCst) {
+                        // What a TV sends when a run that ended without STOP left its media: the
+                        // old session ends because of our LOAD (live test 4, `--http chunked`).
+                        reply(&mut s, "web-1", "*", NS_MEDIA, json!({"type": "MEDIA_STATUS", "requestId": 0, "status": [{"mediaSessionId": 3, "playerState": "IDLE", "idleReason": "INTERRUPTED"}]}));
+                    }
                     reply(&mut s, "web-1", &m.source, NS_MEDIA, media_status(state, 0.0));
+                }
+                ("media", "STOP") => {
+                    state = "IDLE";
+                    reply(&mut s, "web-1", &m.source, NS_MEDIA, json!({"type": "MEDIA_STATUS", "requestId": rid, "status": [{"mediaSessionId": 7, "playerState": "IDLE", "idleReason": "CANCELLED"}]}));
                 }
                 ("media", "GET_STATUS") => {
                     if state == "BUFFERING" && playhead() > 0.0 {
@@ -199,7 +210,8 @@ fn config(port: u16) -> Config {
     cfg.fake = Some(CastDevice::at("127.0.0.1".parse().unwrap(), port, "Fake TV"));
     cfg.keep_local = false;
     cfg.fetch_timeout = Duration::from_secs(2);
-    cfg.preroll_ms = 0;
+    cfg.preroll_ms = Some(0);
+    cfg.wav = crate::wav::Spec::CAPTURE;
     cfg.http = Http::Close;
     cfg
 }
@@ -274,7 +286,7 @@ fn the_preroll_sets_the_steady_delay() {
     let fake = Arc::new(Fake::default());
     let port = fake_device(fake.clone());
     let mut cfg = config(port);
-    cfg.preroll_ms = 1500;
+    cfg.preroll_ms = Some(1500);
     let (c, _events) = controller(cfg);
     c.connect_named("Fake TV", Meta::default());
     wait("a measured latency", 15, || playing_latency(&c).is_some());
@@ -288,6 +300,42 @@ fn the_preroll_sets_the_steady_delay() {
     c.stop();
     wait("off", 5, || c.idle());
     c.shutdown();
+}
+
+#[test]
+fn an_older_media_session_ending_is_not_someone_taking_the_device() {
+    let fake = Arc::new(Fake::default());
+    fake.stale_session.store(true, Ordering::SeqCst);
+    let port = fake_device(fake.clone());
+    let (c, events) = controller(config(port));
+    c.connect_named("Fake TV", Meta::default());
+    wait("playing", 15, || matches!(c.state(), State::Playing { .. }));
+    assert!(!events.lock().unwrap().iter().any(|e| matches!(e, Event::Failed { .. })), "{:?}", events.lock().unwrap());
+    // Stop: the media first, then the receiver, and the TV's word is awaited.
+    c.stop();
+    wait("off", 5, || c.idle());
+    let j = fake.journal.lock().unwrap().clone();
+    let media = j.iter().position(|x| x == "media:STOP").expect("media STOP sent");
+    let receiver = j.iter().position(|x| x == "receiver:STOP").expect("receiver STOP sent");
+    assert!(media < receiver, "{j:?}");
+    c.shutdown();
+}
+
+#[test]
+fn the_defaults_are_the_live_tests_best() {
+    let cfg = Config::from_env();
+    if std::env::var_os("UZUMAKI_CAST_HTTP").is_none() && std::env::var_os("UZUMAKI_CAST_RATE").is_none() && std::env::var_os("UZUMAKI_CAST_PREROLL_MS").is_none() {
+        assert_eq!(cfg.http, Http::Length);
+        assert_eq!(cfg.wav, crate::wav::Spec { rate: 96_000, bits: 24 });
+        // 1.4 MB of 96k/24 (576 KB/s): about 2.4 s at once.
+        assert_eq!(cfg.preroll(), 2430);
+        let mut flac = cfg.clone();
+        flac.format = Format::Flac;
+        assert!(flac.preroll() > 10_000 - 1, "FLAC's bytes are few: the cap");
+        let mut set = cfg;
+        set.preroll_ms = Some(500);
+        assert_eq!(set.preroll(), 500);
+    }
 }
 
 #[test]
