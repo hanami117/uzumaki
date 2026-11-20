@@ -16,9 +16,10 @@ It is off by default: Settings → Notifications → **Show on Discord**.
   quit. It never waits for Discord on the window's thread.
 - Web Discord (in a browser) and Discord on another computer have no such socket: nothing shows.
 
-What the card holds: the song as the title line, the artist as the second line, the album cover (Apple's, as a
-link; for a local file the Uzumaki icon instead), the album name when you hover the cover, the Uzumaki icon as the
-small picture, the time elapsed and the song's length, and a button that opens the song on music.apple.com.
+What the card holds: with the default status text (Title – Artist), "Title – Artist" as the title line and the album
+as the second line; otherwise the song as the title line, the artist as the second line and the album name when you
+hover the cover. Then the album cover (Apple's, as a link; for a local file the Uzumaki icon instead), the Uzumaki
+icon as the small picture, the time elapsed and the song's length, and a button that opens the song on music.apple.com.
 Local files show title and artist only.
 
 | Setting | Default | |
