@@ -133,7 +133,7 @@ fn dots(k: usize, active: Option<(Vec<Live<f32>>, Live<f32>)>) -> El {
 }
 
 fn synced(s: &State, song: &Song, l: &Lyrics, cx: &Cx<State>, view: [f32; 2], narrow: bool) -> El {
-    let t = s.playback.position_now();
+    let t = s.playback.heard_now();
     // What `poll` shows (it may hold a line change back a frame), else the clock's.
     let (cur, gap) = follow::shown(&song.id).unwrap_or_else(|| {
         let cur = l.line_at(t);

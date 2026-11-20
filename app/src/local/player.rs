@@ -319,7 +319,12 @@ impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
 fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(u64, Event)) {
     let mute = ["UZUMAKI_MUTE", "CADENCE_MUTE"].iter().any(|k| std::env::var(k).is_ok_and(|v| v == "1"));
     // AirPlay: the way to the speaker (None in tests; it carries nothing until one is connected).
-    let tap = crate::airplay::local_feed().map(|f| Arc::new(f) as Arc<dyn CastSink>);
+    let tap: Option<Arc<dyn CastSink>> = match (crate::airplay::local_feed(), crate::cast::local_feed()) {
+        (Some(a), Some(c)) => Some(Arc::new(super::tap::Both(a, c))),
+        (Some(a), None) => Some(Arc::new(a)),
+        (None, Some(c)) => Some(Arc::new(c)),
+        (None, None) => None,
+    };
     Engine::new(DeviceOutput::default(), on_event, mute).with_tap(tap).run(rx);
 }
 

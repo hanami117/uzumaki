@@ -415,7 +415,7 @@ pub fn own_addresses() -> Vec<IpAddr> {
 
 /// IPv4 first (AirPlay devices answer on both, IPv4 is what Music Assistant uses), then IPv6
 /// that isn't link-local (a link-local address needs a scope id the helper can't take).
-fn best_ip(addrs: impl Iterator<Item = IpAddr>) -> Option<IpAddr> {
+pub fn best_ip(addrs: impl Iterator<Item = IpAddr>) -> Option<IpAddr> {
     let mut v6 = None;
     for a in addrs {
         match a {

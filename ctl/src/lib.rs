@@ -249,6 +249,9 @@ pub enum Request {
     /// speakers play. An app older than this answers "bad request" (`Names`: older than multi-room).
     #[serde(rename = "airplay")]
     AirPlay { to: AirPlayTo },
+    /// Chromecast (only while Settings → Playback → Chromecast is on): replies `Cast`
+    /// with lines of text. An app without it answers "Chromecast is off"; an older one "bad request".
+    Cast { to: CastTo },
     /// Shows the app's window. Replies `Status`.
     Show,
     /// Quits the app (as the tray's Quit does). Replies `Status`, then the app goes away.
@@ -276,6 +279,25 @@ pub enum AirPlayTo {
     Name(String),
     /// These speakers together, in step (multi-room). Send `Name` for one: older apps know only that.
     Names(Vec<String>),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CastTo {
+    /// Looks for Cast devices for a moment.
+    List,
+    Status,
+    /// This computer again.
+    Off,
+    /// The receiver's own pause / play.
+    Pause,
+    Resume,
+    /// A new LOAD of the stream (what a seek would do).
+    Reload,
+    /// The device's volume, 0-100.
+    Volume(u8),
+    /// The device of that name (any case).
+    Name(String),
 }
 
 /// The AirPlay speaker the sound goes to.
@@ -373,6 +395,8 @@ pub enum Reply {
         #[serde(default)]
         devices: Vec<AirPlayDevice>,
     },
+    /// Chromecast: what to print.
+    Cast { lines: Vec<String> },
     Error { message: String },
 }
 
@@ -865,6 +889,15 @@ mod tests {
 
     /// AirPlay is new: the wire names, an old status still reads (no speaker), and a status
     /// without a speaker is byte-for-byte what it was (old clients see nothing new).
+    #[test]
+    fn cast_requests_have_short_wire_names() {
+        assert_eq!(serde_json::to_string(&Request::Cast { to: CastTo::Name("Smart TV Pro".into()) }).unwrap(), r#"{"cmd":"cast","to":{"name":"Smart TV Pro"}}"#);
+        assert_eq!(serde_json::to_string(&Request::Cast { to: CastTo::Volume(30) }).unwrap(), r#"{"cmd":"cast","to":{"volume":30}}"#);
+        assert_eq!(serde_json::from_str::<Request>(r#"{"cmd":"cast","to":"off"}"#).unwrap(), Request::Cast { to: CastTo::Off });
+        let r = Reply::Cast { lines: vec!["state: off".into()] };
+        assert_eq!(serde_json::from_str::<Reply>(&serde_json::to_string(&r).unwrap()).unwrap(), r);
+    }
+
     #[test]
     fn airplay_reads_both_ways() {
         assert_eq!(serde_json::to_string(&Request::AirPlay { to: AirPlayTo::List }).unwrap(), r#"{"cmd":"airplay","to":"list"}"#);

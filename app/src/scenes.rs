@@ -29,6 +29,20 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
         s.settings.player_style = crate::settings::PlayerStyle::Floating;
         airplay(s, "on");
     }),
+    // Chromecast on: Cast devices in the same picker (`ui/airplay.rs` `scene_cast`).
+    ("cast-list", |s| airplay(s, "cast-list")),
+    ("cast-looking", |s| airplay(s, "cast-looking")),
+    ("cast-connecting", |s| airplay(s, "cast-connecting")),
+    ("cast-on", |s| airplay(s, "cast-on")),
+    ("cast-paused", |s| airplay(s, "cast-paused")),
+    ("cast-on-closed", |s| airplay(s, "cast-on-closed")),
+    ("cast-failed", |s| airplay(s, "cast-failed")),
+    ("cast-only-list", |s| airplay(s, "cast-only-list")),
+    ("cast-only-on", |s| airplay(s, "cast-only-on")),
+    ("cast-now-playing", |s| {
+        now_playing(s);
+        crate::ui::scene_airplay(s, "cast-on");
+    }),
     ("airplay-now-playing", |s| {
         now_playing(s);
         crate::ui::scene_airplay(s, "on");
@@ -161,6 +175,8 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("settings-signed-out", settings_signed_out),
     ("settings-sign-out-confirm", settings_sign_out_confirm),
     ("settings-playback", settings_playback),
+    ("settings-playback-chromecast", |s| { settings_playback(s); s.settings.chromecast = true }),
+    ("settings-search-chromecast", |s| { settings_playback(s); crate::ui::settings::set_query(s, "chromecast") }),
     ("settings-general", settings_general),
     ("settings-discord", |s| { settings_discord(s); s.settings.discord.enabled = true; s.settings.discord.hide_title = true }),
     ("settings-discord-off", settings_discord),

@@ -23,6 +23,8 @@ pub enum Row {
     AutoPlay,
     /// Reconnect to last AirPlay device (Settings → Playback; also in local only mode).
     AirPlay,
+    /// Chromecast on or off (Settings → Playback; Unix only).
+    Chromecast,
     Theme,
     AppIcon,
     Player,
@@ -86,6 +88,7 @@ impl Row {
             Row::Resume => "resume",
             Row::AutoPlay => "autoplay",
             Row::AirPlay => "airplay",
+            Row::Chromecast => "chromecast",
             Row::Theme => "theme",
             Row::AppIcon => "app-icon",
             Row::Player => "player",
@@ -187,6 +190,9 @@ const fn only(on: On, row: Row, tab: Tab, title: &'static str, note: &'static st
     Spec { row, tab, on, title, note, words }
 }
 
+/// The Chromecast row's note (the page and the search say the same).
+pub const CHROMECAST_NOTE: &str = "Chromecast devices and Google TVs on this network show up in the AirPlay picker. They play a couple of seconds behind. Off: Uzumaki doesn't look for them.";
+
 /// Every row of every page, in page order. Titles and notes follow the pages (`ui::settings`);
 /// notes that change with the state are left out or given in their usual form.
 const SPECS: &[Spec] = &[
@@ -198,6 +204,7 @@ const SPECS: &[Spec] = &[
     spec(Row::AutoPlay, Tab::Playback, "AutoPlay", "When the queue ends, similar music keeps playing. Also the \u{221e} button in Up Next.", "auto play infinite endless continue similar songs radio station suggestions queue end infinity"),
     spec(Row::Resume, Tab::Playback, "Resume where you left off", "At start, the last song comes back paused where you stopped, with its queue. Nothing plays until you press Play.", "restore continue last song position queue startup launch remember session"),
     spec(Row::AirPlay, Tab::Playback, "Reconnect to last AirPlay device", "At start, the sound goes back to the AirPlay speaker you used last, if it is on. Off: Uzumaki always starts on this computer.", "airplay speaker homepod apple tv output cast wireless reconnect startup launch remember"),
+    spec(Row::Chromecast, Tab::Playback, "Chromecast", CHROMECAST_NOTE, "chromecast google cast tv android tv google tv nest speaker output wireless stream network"),
     spec(Row::Theme, Tab::Appearance, "Theme", "System follows your computer's light or dark appearance.", "dark mode light mode colour color appearance night"),
     only(On::Linux, Row::AppIcon, Tab::Appearance, "App icon", "In the dock, taskbar and menu. The tray icon changes at the next start.", "icon logo dark light coral launcher"),
     only(On::Mac, Row::AppIcon, Tab::Appearance, "App icon", "In the Dock and the Finder.", "icon logo dark light coral launcher"),

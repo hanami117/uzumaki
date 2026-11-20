@@ -23,6 +23,8 @@ pub enum Command {
     Vol(Option<VolumeTo>),
     /// `airplay`, `airplay list`: the speakers; `airplay off`; `airplay <name>`; `airplay <name> + <name>`.
     AirPlay(uzumaki_ctl::AirPlayTo),
+    /// `cast [status|list|<name>|off|pause|resume|reload|volume N]` (Chromecast; Settings → Playback → Chromecast must be on).
+    Cast(uzumaki_ctl::CastTo),
     Shuffle(Option<bool>),
     Repeat(Option<RepeatMode>),
     /// `None` toggles.
@@ -196,6 +198,20 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 }
             }
         }),
+        "cast" => Command::Cast({
+            use uzumaki_ctl::CastTo;
+            match p {
+                [] => CastTo::Status,
+                [a] if a == "status" => CastTo::Status,
+                [a] if a == "list" => CastTo::List,
+                [a] if a == "off" || a == "stop" => CastTo::Off,
+                [a] if a == "pause" => CastTo::Pause,
+                [a] if a == "resume" || a == "play" => CastTo::Resume,
+                [a] if a == "reload" => CastTo::Reload,
+                [a, v] if a == "volume" || a == "vol" => CastTo::Volume(v.parse::<u8>().ok().filter(|v| *v <= 100).ok_or("'cast volume' takes 0-100")?),
+                words => CastTo::Name(words.join(" ")),
+            }
+        }),
         "shuffle" => Command::Shuffle(match p {
             [] => None,
             [a] if a == "on" => Some(true),
@@ -288,6 +304,8 @@ In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (
   vol [<level>]               60  +5  -5
   airplay [list|<name>|off]   the AirPlay speakers; send the sound to one, or back to this computer;
                               several together: airplay Bedroom + Living Room
+  cast [list|<name>|off]      Chromecast (Settings → Playback → Chromecast on); also
+                              cast pause|resume|reload|volume N|status
   shuffle [on|off]            no argument: turn it on/off (also: toggle shuffle)
   repeat [off|all|one]        no argument: off -> all -> one (also: toggle repeat)
   autoplay [on|off|toggle]    AutoPlay (∞): similar songs after the queue; prints the new state
@@ -348,6 +366,10 @@ mod tests {
         assert_eq!(p("airplay Bedroom+Kitchen +Office"), Ok(Command::AirPlay(uzumaki_ctl::AirPlayTo::Names(vec!["Bedroom".into(), "Kitchen".into(), "Office".into()]))));
         assert_eq!(p("airplay Bedroom +"), Ok(Command::AirPlay(uzumaki_ctl::AirPlayTo::Name("Bedroom".into()))));
         assert!(p("airplay +").is_err());
+        assert_eq!(p("cast"), Ok(Command::Cast(uzumaki_ctl::CastTo::Status)));
+        assert_eq!(p("cast smart tv pro"), Ok(Command::Cast(uzumaki_ctl::CastTo::Name("smart tv pro".into()))));
+        assert_eq!(p("cast volume 25"), Ok(Command::Cast(uzumaki_ctl::CastTo::Volume(25))));
+        assert!(p("cast volume 250").is_err());
         assert_eq!(p("toggle"), Ok(Command::Toggle));
         assert_eq!(p("toggle shuffle"), Ok(Command::Shuffle(None)));
         assert_eq!(p("autoplay"), Ok(Command::Autoplay(None)));

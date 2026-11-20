@@ -24,6 +24,7 @@ mod discord;
 pub mod airplay;
 mod artist;
 pub mod autoplay;
+pub mod cast;
 pub use artist::More;
 pub mod ctl;
 mod edits;
@@ -255,6 +256,9 @@ pub struct Playback {
     /// over `SLEW_SECS` by running the clock a little slower (or faster) instead of jumping, so
     /// the lyrics never step back on a late or coarse time event. See `apply_time`.
     pub slew: f64,
+    /// Seconds between the player and what the user hears (a Cast device's measured buffer; 0 on
+    /// this computer). Lyrics and the progress bar follow `heard_now`.
+    pub output_delay: f64,
     /// A seek we sent and when: until the player reports a time near it, reports from before
     /// it took are ignored (see `apply_time`).
     pub seek_target: Option<(f64, Instant)>,
@@ -304,6 +308,12 @@ impl Playback {
         }
     }
 
+    /// Where the music the user hears is: `position_now` minus the output's delay (a Cast
+    /// device plays seconds behind the player).
+    pub fn heard_now(&self) -> f64 {
+        (self.position_now() - self.output_delay).max(0.0)
+    }
+
     /// Changes the play state, restarting the clock from where it stands, so resuming after a
     /// pause doesn't count the paused time as played.
     pub fn set_state(&mut self, state: PlayState) {
@@ -327,6 +337,7 @@ impl Default for Playback {
             repeat: Repeat::Off,
             position_at: None,
             slew: 0.0,
+            output_delay: 0.0,
             seek_target: None,
             local: false,
         }
@@ -339,6 +350,8 @@ pub enum Msg {
     Bridge(Event),
     /// AirPlay: speakers found, the output changed, a question or a failure (`state/airplay.rs`).
     AirPlay(uzumaki_airplay::Event),
+    /// Chromecast (`state/cast.rs`).
+    Cast(uzumaki_cast::Event),
     /// A reply about the signed-in account (a `/v1/me` read, any write), stamped with the
     /// `Session::account` it was asked under: one from before a sign-out (or a sign-in) is
     /// dropped, so a page landing late can't bring the old library back.
@@ -612,6 +625,8 @@ pub struct State {
     pub motion: motion::MotionState,
     /// Where the audio goes: this computer or an AirPlay speaker (`airplay.rs`).
     pub airplay: airplay::AirPlay,
+    /// Chromecast: the Cast session and devices (`cast.rs`).
+    pub cast: cast::Cast,
     /// View-only state owned by the UI module (text field contents, scroll, …).
     pub ui: crate::ui::UiState,
 }
@@ -704,6 +719,7 @@ impl State {
             new_playlist_picture: None,
             motion: motion::MotionState::default(),
             airplay: airplay::AirPlay::new(persist),
+            cast: cast::Cast::default(),
             ui,
             browse_new: Load::Idle,
             made_for_you: Load::Idle,
@@ -787,6 +803,7 @@ impl State {
         match msg {
             Msg::Bridge(event) => return self.apply_event(event),
             Msg::AirPlay(event) => return self.airplay_event(event),
+            Msg::Cast(event) => return self.cast_event(event),
             Msg::Account { generation, msg } => {
                 if generation != self.session.account {
                     return false; // asked before a sign-out or sign-in
@@ -1101,6 +1118,9 @@ impl State {
                 if self.airplay.capture {
                     self.airplay_capture();
                 }
+                if self.cast.capture {
+                    self.cast_capture();
+                }
             }
             Event::Auth { authorized, storefront } => {
                 self.set_authorized(authorized);
@@ -1160,6 +1180,7 @@ impl State {
                         t.set_song(Some(&song));
                     }
                     self.playback.song = Some(song);
+                    self.cast_new_song(); // after a skip: the Cast device starts on it afresh
                 } else if let (Some(cur), Some(bg)) = (self.playback.song.as_mut(), song.artwork.and_then(|a| a.bg)) {
                     // Keep our artwork URL but take Apple's background colour (Now Playing tint).
                     if let Some(a) = cur.artwork.as_mut() {
@@ -1234,6 +1255,7 @@ impl State {
             Event::Stopped => return false,
             Event::AirPlayCapture { ready, error } => {
                 self.airplay_capture_ready(ready, error.as_deref());
+                self.cast_capture_ready(ready, error.as_deref());
                 return false;
             }
             Event::Exited => {

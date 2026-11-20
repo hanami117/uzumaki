@@ -574,6 +574,10 @@ pub fn run(inv: &Invocation, be: &mut dyn Backend, env: &Env, out: &mut dyn Writ
         Command::Vol(Some(to)) => act(be, env, out, Request::Volume { to: *to }, false, q),
         Command::Vol(None) => volume(be, env, out),
         Command::AirPlay(to) => airplay(be, env, out, to.clone(), q),
+        Command::Cast(to) => {
+            let Reply::Cast { lines } = call(be, Request::Cast { to: to.clone() })? else { return Err(unexpected()) };
+            lines.iter().try_for_each(|l| put(out, l))
+        }
         Command::Shuffle(on) => act(be, env, out, Request::Shuffle { on: *on }, false, q),
         Command::Repeat(mode) => act(be, env, out, Request::Repeat { mode: *mode }, false, q),
         Command::Autoplay(on) => autoplay(be, out, *on, q),

@@ -19,7 +19,9 @@ test('nothing of AirPlay runs in the bridge until the app asks', () => {
   // airplay.js is loaded lazily, at the first `airplay` command, and nowhere else.
   assert.equal(main.match(/require\('\.\/airplay\.js'\)/g).length, 1);
   assert.match(main, /airplay \?\?= require\('\.\/airplay\.js'\)/);
-  assert.match(main, /case 'airplay':\s+airplaySet\(msg\.on\)/);
+  assert.match(main, /case 'airplay':\s+airplaySet\(msg\.on, msg\.socket\)/);
+  // The app may name the socket (the Chromecast session's); otherwise the env's.
+  assert.match(main, /const path = captureSocket \|\| airplay\.socketPath\(\);/);
   // The page gets its graph only on a capture request.
   const preload = fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8');
   assert.match(preload, /if \(!capture\) return report\(\); \/\/ never cast in this document/);

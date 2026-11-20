@@ -106,7 +106,7 @@ fn synced_lyrics(s: &State) -> Option<&Lyrics> {
 /// for the next frame (at most `HOLD_MAX`), or its glide and fade would land as a jump.
 pub fn poll(s: &mut State, landed: bool, tx: &mut Tx) -> bool {
     let showing = visible(s) && s.settings.right_tab == RightTab::Lyrics;
-    let t = s.playback.position_now();
+    let t = s.playback.heard_now();
     let cur = if showing { synced_lyrics(s).map(|l| l.line_at(t)) } else { None };
     let playing = matches!(s.playback.state, crate::bridge::PlayState::Playing);
     s.set_panel_fine_time(cur.is_some() && playing);
@@ -246,7 +246,7 @@ fn plain(l: &Lyrics) -> El {
 }
 
 fn synced(s: &State, l: &Lyrics, cx: &Cx<State>) -> El {
-    let t = s.playback.position_now();
+    let t = s.playback.heard_now();
     // What `poll` shows (it may hold a line change back a frame), else the clock's.
     let song_id = s.playback.song.as_ref().map(|x| x.id.as_str());
     let cur = match &s.ui.right.seen {

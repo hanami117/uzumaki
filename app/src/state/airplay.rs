@@ -237,6 +237,7 @@ impl State {
             }
             return;
         };
+        self.cast_yield(); // one output at a time
         if self.airplay.ids() == [id] {
             return; // already there (or on its way)
         }
@@ -394,12 +395,16 @@ impl State {
     /// A song is about to start in place of the playing one. Flushes unless the playing one
     /// reached its end by itself: then its last second is still on its way to the speaker.
     pub(super) fn airplay_song_change(&self) {
-        let pb = &self.playback;
-        let dur = if pb.duration > 0.0 { pb.duration } else { pb.song.as_ref().map_or(0.0, |s| s.duration) };
-        let ended = matches!(pb.state, crate::bridge::PlayState::Ended | crate::bridge::PlayState::Completed) || (dur > 0.0 && pb.position_now() >= dur - 1.5);
-        if !ended {
+        if !self.song_ended() {
             self.airplay_flush();
         }
+    }
+
+    /// The playing song reached its end by itself (or is within its last 1.5 s).
+    pub(super) fn song_ended(&self) -> bool {
+        let pb = &self.playback;
+        let dur = if pb.duration > 0.0 { pb.duration } else { pb.song.as_ref().map_or(0.0, |s| s.duration) };
+        matches!(pb.state, crate::bridge::PlayState::Ended | crate::bridge::PlayState::Completed) || (dur > 0.0 && pb.position_now() >= dur - 1.5)
     }
 
     pub fn set_airplay_reconnect(&mut self, on: bool) {

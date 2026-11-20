@@ -254,7 +254,7 @@ fn now_lines(s: &State, song: &crate::models::Song, sub: bool, still: bool) -> E
 pub fn progress(s: &State) -> (f32, f64, f64) {
     let pb = &s.playback;
     let dur = if pb.duration > 0.0 { pb.duration } else { pb.song.as_ref().map_or(0.0, |x| x.duration) };
-    let pos = pb.position_now();
+    let pos = pb.heard_now();
     let frac = pb.seek_preview.unwrap_or(if dur > 0.0 { pos / dur } else { 0.0 });
     let elapsed = if pb.seek_preview.is_some() { frac * dur } else { pos };
     (frac as f32, elapsed, dur)

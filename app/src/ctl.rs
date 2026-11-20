@@ -175,6 +175,22 @@ impl Ctl {
             }),
             R::AirPlay { to: uzumaki_ctl::AirPlayTo::Name(name) } => self.try_act(move |s| s.airplay_pick_named(&name)),
             R::AirPlay { to: uzumaki_ctl::AirPlayTo::Names(names) } => self.try_act(move |s| s.airplay_pick_names(&names)),
+            R::Cast { to: uzumaki_ctl::CastTo::List } => {
+                if !self.on_ui(false, |s| s.cast_enabled())? {
+                    return Err(crate::cast::OFF.into());
+                }
+                let c = crate::cast::controller().ok_or("Chromecast isn't running")?;
+                let list = c.look(AIRPLAY_LOOK)?;
+                let mut lines: Vec<String> = list
+                    .iter()
+                    .map(|d| format!("{}  ({}, {}:{}{})", d.name, d.model, d.ip, d.port, if d.group { ", Cast Group" } else { "" }))
+                    .collect();
+                if lines.is_empty() {
+                    lines.push("No Cast devices found on this network.".into());
+                }
+                Ok(Reply::Cast { lines })
+            }
+            R::Cast { to } => self.on_ui(false, move |s| s.ctl_cast(to).map(|lines| Reply::Cast { lines }))?,
             R::Quit => {
                 let reply = self.read(|s| Reply::Status(s.ctl_status()));
                 // Quit a moment after answering, so the reply is written before the socket goes.

@@ -21,6 +21,7 @@ mod art;
 mod clock;
 mod backdrop;
 mod bridge;
+mod cast;
 mod cache;
 mod ctl;
 mod desktop;
@@ -379,6 +380,11 @@ fn main() {
     {
         let sink = sink.clone();
         airplay::init(move |e| sink(Msg::AirPlay(e)));
+    }
+    // Chromecast: created idle; used only while Settings → Playback → Chromecast is on.
+    {
+        let sink = sink.clone();
+        cast::init(move |e| sink(Msg::Cast(e)));
     }
     let local = {
         let sink = sink.clone();

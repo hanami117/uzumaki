@@ -218,6 +218,7 @@ impl State {
         self.resume = None;
         self.pending_play = None; // a newer click than the album or playlist still loading
         self.airplay_song_change();
+        self.cast_song_change(&song);
         self.playback.song = Some(song.clone());
         self.playback.state = PlayState::Loading;
         self.starting = Some(crate::clock::now());
@@ -477,6 +478,7 @@ impl State {
         if self.resume.is_some() {
             return self.play_resumed();
         }
+        self.cast_pause(false); // the TV plays on from its buffer at once
         if self.playback.local {
             if self.playback.state == PlayState::Paused {
                 #[cfg(test)]
@@ -497,6 +499,7 @@ impl State {
             return; // a resumed song is paused until Play
         }
         self.airplay_flush(); // the speaker goes quiet now, not after what it had queued
+        self.cast_pause(true); // the TV pauses now and keeps what comes next
         if self.playback.local {
             #[cfg(test)]
             self.local_sent.borrow_mut().push("pause".into());
@@ -529,9 +532,12 @@ impl State {
             if let Some(song) = self.next_allowed() {
                 self.begin_current(song);
             }
-        } else if let Some(b) = &self.bridge {
+        } else if self.bridge.is_some() {
             self.airplay_flush();
-            b.next();
+            self.cast_skip();
+            if let Some(b) = &self.bridge {
+                b.next();
+            }
         }
     }
 
@@ -549,8 +555,11 @@ impl State {
             return self.seek_to(0.0);
         }
         if self.queue.pos > self.queue.base && !self.playback.local {
-            if let Some(b) = &self.bridge {
+            if self.bridge.is_some() {
                 self.airplay_flush();
+                self.cast_skip();
+            }
+            if let Some(b) = &self.bridge {
                 b.previous();
             }
         } else if let Some(song) = self.queue.step_back() {
@@ -880,6 +889,7 @@ impl State {
         self.playback.slew = 0.0;
         self.playback.seek_target = Some((target, crate::clock::now()));
         self.airplay_flush(); // the seek is heard at once
+        self.cast_seeked();
         if self.playback.local {
             #[cfg(test)]
             self.local_sent.borrow_mut().push(format!("seek {target}"));

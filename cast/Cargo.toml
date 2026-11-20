@@ -1,0 +1,23 @@
+[package]
+name = "uzumaki-cast"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition = "2024"
+description = "Uzumaki Chromecast: finds Cast devices and plays the player's output on one through the Default Media Receiver"
+
+[dependencies]
+# Whole frames, the silence rule and this computer's addresses, shared with AirPlay.
+uzumaki-airplay = { path = "../airplay" }
+# Browse only (_googlecast._tcp); the same versions AirPlay uses.
+mdns-sd = "0.13"
+if-addrs = "0.13"
+# CASTV2 is TLS to port 8009. The ring provider (already in the tree through ureq): no aws-lc C build.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+# The per-session token of the HTTP stream.
+ring = "0.17"
+serde_json = "1"
+
+[dev-dependencies]
+# Decodes the FLAC stream back in the tests (bit-exact check).
+symphonia = { version = "0.5", default-features = false, features = ["flac"] }

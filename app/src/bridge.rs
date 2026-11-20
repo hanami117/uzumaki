@@ -567,6 +567,13 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
     pub fn airplay(&self, on: bool) {
         self.send(json!({"cmd": "airplay", "on": on}));
     }
+    /// The same capture for another socket (the Chromecast session's).
+    pub fn airplay_to(&self, on: bool, socket: Option<&std::path::Path>) {
+        match socket {
+            Some(p) => self.send(json!({"cmd": "airplay", "on": on, "socket": p.to_string_lossy()})),
+            None => self.airplay(on),
+        }
+    }
 
     pub fn show_window(&self, visible: bool) {
         self.send(json!({"cmd": if visible { "show" } else { "hide" }}));
