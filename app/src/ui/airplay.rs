@@ -1,6 +1,6 @@
 //! The AirPlay picker: a button in the player bar and in Now Playing, and its popover.
 //!
-//! With Settings → Playback → Chromecast on, the same popover lists the Cast devices too, under
+//! With Settings → Speakers → Chromecast on, the same popover lists the Cast devices too, under
 //! their own heading (one output at a time: picking one ends the AirPlay speakers, and the other
 //! way round); the device in use gets its volume slider, and the button shows its glyph.
 //!

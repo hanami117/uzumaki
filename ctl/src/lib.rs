@@ -249,7 +249,7 @@ pub enum Request {
     /// speakers play. An app older than this answers "bad request" (`Names`: older than multi-room).
     #[serde(rename = "airplay")]
     AirPlay { to: AirPlayTo },
-    /// Chromecast (only while Settings → Playback → Chromecast is on): replies `Cast`
+    /// Chromecast (only while Settings → Speakers → Chromecast is on): replies `Cast`
     /// with lines of text. An app without it answers "Chromecast is off"; an older one "bad request".
     Cast { to: CastTo },
     /// Shows the app's window. Replies `Status`.

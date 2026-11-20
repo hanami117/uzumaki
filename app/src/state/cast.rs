@@ -2,7 +2,7 @@
 //!
 //! `crate::cast` holds the controller; its events arrive as `Msg::Cast`. The picker
 //! (`ui/airplay.rs`, one picker for AirPlay and Cast devices) and `uzu cast` drive it, only while
-//! Settings → Playback → Chromecast is on. One output at a time: a Cast device ends the AirPlay
+//! Settings → Speakers → Chromecast is on. One output at a time: a Cast device ends the AirPlay
 //! speakers and the other way round. Headless runs and tests have no controller: the methods
 //! only change state, and scenes fill in made-up devices.
 //!
@@ -44,12 +44,12 @@ impl Cast {
 const CUT_WAIT: Duration = Duration::from_secs(10);
 
 impl State {
-    /// Settings → Playback → Chromecast is on (or `UZUMAKI_CAST_SPIKE=1`), on a system that has it.
+    /// Settings → Speakers → Chromecast is on (or `UZUMAKI_CAST_SPIKE=1`), on a system that has it.
     pub fn cast_enabled(&self) -> bool {
         crate::cast::SUPPORTED && (self.settings.chromecast || crate::cast::forced())
     }
 
-    /// Settings → Playback → Chromecast. Off ends a session and stops looking for devices.
+    /// Settings → Speakers → Chromecast. Off ends a session and stops looking for devices.
     pub fn set_chromecast(&mut self, on: bool) {
         if self.settings.chromecast == on {
             return;

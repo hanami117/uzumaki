@@ -17,7 +17,7 @@ use uzumaki_airplay::{Config, Controller, Event, LocalFeed};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
-    /// Settings → Playback → "Reconnect to last AirPlay device".
+    /// Settings → Speakers → "Reconnect to the last speaker".
     pub reconnect: bool,
     /// The speaker in use when the app last quit (None: this computer). With several, the first
     /// (an older app reads this one).

@@ -79,7 +79,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const BUILD: u32 = uzumaki_ctl::BUILD;
 /// Where Settings → Support sends you.
 pub const SUPPORT_URL: &str = "https://ko-fi.com/hanami117";
-/// The copyright line (Settings → General → About; the macOS About panel and Info.plist spell it out too).
+/// The copyright line (Settings → About; the macOS About panel and Info.plist spell it out too).
 pub const COPYRIGHT: &str = "© 2026 Thomas Lonigro";
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -381,7 +381,7 @@ fn main() {
         let sink = sink.clone();
         airplay::init(move |e| sink(Msg::AirPlay(e)));
     }
-    // Chromecast: created idle; used only while Settings → Playback → Chromecast is on.
+    // Chromecast: created idle; used only while Settings → Speakers → Chromecast is on.
     {
         let sink = sink.clone();
         cast::init(move |e| sink(Msg::Cast(e)));
@@ -484,7 +484,7 @@ fn main() {
         s.start_update_timer();
         // The last run's song, paused where it was left (`resume.rs`); also arms saving it.
         s.start_resume();
-        // Settings → Playback → "Reconnect to last AirPlay device" (off unless chosen).
+        // Settings → Speakers → "Reconnect to the last speaker" (off unless chosen).
         s.airplay_reconnect();
         s
     });

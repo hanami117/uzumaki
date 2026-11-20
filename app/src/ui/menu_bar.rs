@@ -62,7 +62,7 @@ pub enum Command {
     Key(Action),
     /// Zoom the window, as the green button's zoom.
     Zoom,
-    /// Help → Show the Welcome Tour (Settings → General → Show again).
+    /// Help → Show the Welcome Tour (Settings → Advanced → Show again).
     Tour,
 }
 

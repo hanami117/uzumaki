@@ -419,7 +419,7 @@ impl State {
         }
         let names: Vec<String> = self.airplay.prefs.reconnect_to().into_iter().map(|l| l.name).collect();
         if !names.is_empty() {
-            eprintln!("airplay: reconnecting to {} (Settings → Playback)", uzumaki_airplay::names_text(&names));
+            eprintln!("airplay: reconnecting to {} (Settings → Speakers)", uzumaki_airplay::names_text(&names));
             let _ = self.airplay_pick_names(&names);
         }
     }

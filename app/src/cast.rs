@@ -1,7 +1,7 @@
 //! Chromecast in the app: the one `uzumaki_cast::Controller` of the process. It is created idle
 //! (no thread, no mDNS, no server) in windowed runs; headless runs and tests have none.
 //!
-//! Settings → Playback → Chromecast (off by default) decides whether it is used at all: while
+//! Settings → Speakers → Chromecast (off by default) decides whether it is used at all: while
 //! off, the picker shows no Cast devices, nothing looks for them and `uzu cast` says so
 //! (`state/cast.rs`). `UZUMAKI_CAST_SPIKE=1` turns it on regardless, for development.
 
@@ -11,7 +11,7 @@ use uzumaki_cast::{Config, Controller, Event, LocalFeed};
 
 static CONTROLLER: OnceLock<Controller> = OnceLock::new();
 
-pub const OFF: &str = "Chromecast is off (Settings → Playback → Chromecast)";
+pub const OFF: &str = "Chromecast is off (Settings → Speakers → Chromecast)";
 
 /// Unix only for now: Apple Music's audio reaches the session over a Unix socket. On Windows
 /// the setting is hidden and Chromecast stays off.

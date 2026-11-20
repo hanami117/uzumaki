@@ -46,7 +46,7 @@ enum Nav {
 
 const TOP: [Nav; 4] = [Nav::Search, Nav::Home, Nav::New, Nav::Radio];
 
-/// Every sidebar entry the user can hide (Settings → Appearance), as (id, label), in sidebar
+/// Every sidebar entry the user can hide (Settings → General → Sidebar), as (id, label), in sidebar
 /// order. Ids are stored in `Settings::hidden_nav`.
 pub const NAV_ITEMS: [(&str, &str); 17] = [
     ("nav-search", "Search"),
@@ -77,7 +77,7 @@ fn shown(s: &State, id: &str) -> bool {
     !s.nav_hidden(id) && if s.local_only() { LOCAL_NAV.contains(&id) } else { !LOCAL_ONLY_NAV.contains(&id) }
 }
 
-/// The entries Settings → Appearance offers in the current mode, as (id, label).
+/// The entries Settings → General → Sidebar offers in the current mode, as (id, label).
 pub fn nav_choices(local: bool) -> Vec<(&'static str, &'static str)> {
     if local {
         // In the sidebar's order, Local Files as the Songs tab it is there.

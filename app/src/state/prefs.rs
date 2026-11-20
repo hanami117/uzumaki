@@ -7,7 +7,7 @@ use super::*;
 use crate::backdrop::Slot;
 use crate::appearance::{BgSource, Effect, NpBg, ShowOn, opacity_range};
 
-/// The caches Settings → General can clear.
+/// The caches Settings → Advanced can clear.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CacheKind {
     /// Cover images, `~/.cache/uzumaki/art`.
@@ -238,7 +238,7 @@ impl State {
         }
     }
 
-    /// Notify on song change (Settings → General). Switching it on asks the system for
+    /// Song notifications (Settings → Notifications). Switching it on asks the system for
     /// permission where that is needed (macOS).
     pub fn set_notify_song_change(&mut self, on: bool) {
         if self.settings.notify_song_change != on {
@@ -261,7 +261,7 @@ impl State {
         }
     }
 
-    /// Settings → General → "Start Uzumaki when I log in" (`login.rs`).
+    /// Settings → General → "Open at login" (`login.rs`).
     pub fn set_start_at_login(&mut self, on: bool) {
         if self.login.on != on && self.login.available() && !self.login_busy {
             self.apply_login(on);

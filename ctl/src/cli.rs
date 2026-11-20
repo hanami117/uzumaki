@@ -23,7 +23,7 @@ pub enum Command {
     Vol(Option<VolumeTo>),
     /// `airplay`, `airplay list`: the speakers; `airplay off`; `airplay <name>`; `airplay <name> + <name>`.
     AirPlay(uzumaki_ctl::AirPlayTo),
-    /// `cast [status|list|<name>|off|pause|resume|reload|volume N]` (Chromecast; Settings → Playback → Chromecast must be on).
+    /// `cast [status|list|<name>|off|pause|resume|reload|volume N]` (Chromecast; Settings → Speakers → Chromecast must be on).
     Cast(uzumaki_ctl::CastTo),
     Shuffle(Option<bool>),
     Repeat(Option<RepeatMode>),
@@ -304,7 +304,7 @@ In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (
   vol [<level>]               60  +5  -5
   airplay [list|<name>|off]   the AirPlay speakers; send the sound to one, or back to this computer;
                               several together: airplay Bedroom + Living Room
-  cast [list|<name>|off]      Chromecast (Settings → Playback → Chromecast on); also
+  cast [list|<name>|off]      Chromecast (Settings → Speakers → Chromecast on); also
                               cast pause|resume|reload|volume N|status
   shuffle [on|off]            no argument: turn it on/off (also: toggle shuffle)
   repeat [off|all|one]        no argument: off -> all -> one (also: toggle repeat)

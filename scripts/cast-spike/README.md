@@ -1,7 +1,7 @@
 # Chromecast spike
 
 Plays Uzumaki's output on a Cast device (Chromecast, Google TV, Nest speaker, Cast Group) through
-Google's Default Media Receiver. Off unless Settings → Playback → Chromecast is on (or the app is
+Google's Default Media Receiver. Off unless Settings → Speakers → Chromecast is on (or the app is
 started with `UZUMAKI_CAST_SPIKE=1`, a dev override); then Cast devices are in the AirPlay picker, and
 `uzu cast` drives it too. Code: `cast/` (crate `uzumaki-cast`).
 
