@@ -2,7 +2,7 @@
 
 Uzumaki can show what you are listening to on your Discord profile, like Spotify does: a "Listening to
 Uzumaki" card with the song, the artist, the cover, a progress bar and an "Open in Apple Music" button.
-It is off by default: Settings → General → **Show on Discord**.
+It is off by default: Settings → Notifications → **Show on Discord**.
 
 ## How it works
 

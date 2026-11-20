@@ -191,7 +191,7 @@ The first build takes a few minutes. To remove it: `./install.sh --uninstall`.
 ## Updates
 
 Once a day, Uzumaki asks [getuzumaki.app](https://getuzumaki.app) if there is a new version, and shows a
-quiet notice when there is. It never downloads or installs anything by itself. Settings → General has the
+quiet notice when there is. It never downloads or installs anything by itself. Settings → Advanced has the
 switch and a **Check now** button. If a version stops working with Apple Music, the notice says so and
 stays until you update; the app keeps running.
 
@@ -208,11 +208,12 @@ How you update depends on how you installed it. Quit Uzumaki first.
 
 - **Shortcuts:** Space play/pause, Ctrl+F search, Alt+Left back, Ctrl+, Settings, Ctrl+/ all shortcuts,
   Ctrl+Q quit (⌘ instead of Ctrl on macOS).
-- **Close to tray:** closing the window only hides it when Settings → General → Close to tray is on.
+- **Keep playing when the window closes:** closing the window only hides it when Settings → General → Keep
+  playing when the window closes is on (it needs the tray or menu bar icon).
 - **One copy at a time:** when you start Uzumaki again, the running one comes to the front.
-- **Song notifications:** Settings → General → Notify on song change. They show only while the window is
+- **Song notifications:** Settings → Notifications → Song notifications. They show only while the window is
   hidden or behind other apps.
-- **Discord:** Settings → General → Show on Discord shows the song you are playing on your Discord profile, like
+- **Discord:** Settings → Notifications → Show on Discord shows the song you are playing on your Discord profile, like
   Spotify does (off by default; see [docs/DISCORD.md](docs/DISCORD.md)).
 - **Hooks:** put an executable named `on-song-change` or `on-state-change` in `~/.config/uzumaki/hooks/`.
   Uzumaki runs it and gives it the song's details in environment variables. See [docs/hooks.md](docs/hooks.md).
@@ -283,7 +284,7 @@ For the details, see [docs/bridge-protocol.md](docs/bridge-protocol.md).
   type (x86_64 or arm64) and how it was installed (AppImage, AUR, Homebrew, DMG, …), plus a flag on the first
   check of a week and of a month. The server adds one to a counter for that day and that combination; those
   daily counts are all it keeps: no IP address, no install or device id, no cookies. The code is in
-  [server/update](server/update). You can turn the check off in Settings → General; then nothing is sent.
+  [server/update](server/update). You can turn the check off in Settings → Advanced; then nothing is sent.
 - **Show on Discord** (off by default) hands the song you are playing to the Discord app on your own computer,
   through its local socket; Uzumaki itself opens no connection for it, and Discord shows the card to others
   (and fetches the cover from Apple). See [docs/DISCORD.md](docs/DISCORD.md).

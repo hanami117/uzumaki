@@ -24,7 +24,7 @@ Cloudflare, which runs the Worker, sees each connection as any web host does; no
 written to the database. A request without a readable version and OS (a browser, say) is answered
 and not counted, as is one with `repeat=1` (a second check on the same day).
 
-Turning off "Check for updates" in Settings → General stops the request altogether.
+Turning off "Check for updates daily" in Settings → Advanced stops the request altogether.
 
 ## Reading the numbers
 
