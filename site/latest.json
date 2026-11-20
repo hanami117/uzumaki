@@ -1,15 +1,15 @@
 {
-  "version": "0.3.1",
+  "version": "0.4.0",
   "build": 1,
-  "date": "2026-11-18",
+  "date": "2026-11-20",
   "minimum_supported": "0.1.0",
-  "notes_url": "https://github.com/hanami117/uzumaki/releases/tag/v0.3.1",
+  "notes_url": "https://github.com/hanami117/uzumaki/releases/tag/v0.4.0",
   "downloads": {
     "macos_dmg": "https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-macOS.dmg",
-    "linux_tarball": "https://github.com/hanami117/uzumaki/releases/download/v0.3.1/uzumaki-0.3.1.tar.gz",
+    "linux_tarball": "https://github.com/hanami117/uzumaki/releases/download/v0.4.0/uzumaki-0.4.0.tar.gz",
     "appimage": "https://github.com/hanami117/uzumaki/releases/latest/download/Uzumaki-x86_64.AppImage",
-    "windows_installer": "https://github.com/hanami117/uzumaki/releases/download/v0.3.1/Uzumaki-0.3.1-windows-x64-setup.exe",
-    "windows_zip": "https://github.com/hanami117/uzumaki/releases/download/v0.3.1/Uzumaki-0.3.1-windows-x64.zip",
+    "windows_installer": "https://github.com/hanami117/uzumaki/releases/download/v0.4.0/Uzumaki-0.4.0-windows-x64-setup.exe",
+    "windows_zip": "https://github.com/hanami117/uzumaki/releases/download/v0.4.0/Uzumaki-0.4.0-windows-x64.zip",
     "aur": "https://aur.archlinux.org/packages/uzumaki",
     "brew": "brew install --cask hanami117/uzumaki/uzumaki"
   }
