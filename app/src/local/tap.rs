@@ -65,7 +65,7 @@ impl CastSink for uzumaki_cast::LocalFeed {
     }
 }
 
-/// AirPlay and Chromecast (spike) both listening: whichever casts gets the copy.
+/// AirPlay and Chromecast both listening: whichever casts gets the copy.
 pub struct Both<A, B>(pub A, pub B);
 
 impl<A: CastSink, B: CastSink> CastSink for Both<A, B> {

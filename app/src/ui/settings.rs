@@ -280,6 +280,7 @@ fn available(s: &State, row: Row) -> bool {
         Row::AppIcon => cfg!(any(target_os = "linux", target_os = "macos")),
         // No cliairplay helper (Linux for now): no AirPlay anywhere, the setting included.
         Row::AirPlay => s.airplay.available,
+        Row::Chromecast => crate::cast::SUPPORTED,
         Row::Binding(i) => i < super::keys::BINDINGS.len(),
         _ => true,
     }
@@ -357,6 +358,12 @@ fn row_el(r: &Rx, id: Row) -> El {
             "Reconnect to last AirPlay device",
             Some("At start, the sound goes back to the AirPlay speaker you used last, if it is on. Off: Uzumaki always starts on this computer.".to_string()),
             switch("settings/airplay", "Reconnect to last AirPlay device", s.airplay.prefs.reconnect, true, |s, on| s.set_airplay_reconnect(on)),
+        ),
+        Row::Chromecast => setting(
+            narrow,
+            "Chromecast",
+            Some(super::settings_search::CHROMECAST_NOTE.to_string()),
+            switch("settings/chromecast", "Chromecast", s.settings.chromecast, true, |s, on| s.set_chromecast(on)),
         ),
         Row::Lyrics => {
             let words = s.settings.lyrics_words;
@@ -964,7 +971,7 @@ fn account(r: &Rx) -> Vec<El> {
 }
 
 fn playback(r: &Rx) -> Vec<El> {
-    rows(r, &[Row::Quality, Row::Lyrics, Row::AutoPlay, Row::Resume, Row::AirPlay])
+    rows(r, &[Row::Quality, Row::Lyrics, Row::AutoPlay, Row::Resume, Row::AirPlay, Row::Chromecast])
 }
 
 fn appearance(r: &Rx) -> Vec<El> {

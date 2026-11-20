@@ -176,7 +176,10 @@ impl Ctl {
             R::AirPlay { to: uzumaki_ctl::AirPlayTo::Name(name) } => self.try_act(move |s| s.airplay_pick_named(&name)),
             R::AirPlay { to: uzumaki_ctl::AirPlayTo::Names(names) } => self.try_act(move |s| s.airplay_pick_names(&names)),
             R::Cast { to: uzumaki_ctl::CastTo::List } => {
-                let c = crate::cast::controller().ok_or(crate::cast::OFF)?;
+                if !self.on_ui(false, |s| s.cast_enabled())? {
+                    return Err(crate::cast::OFF.into());
+                }
+                let c = crate::cast::controller().ok_or("Chromecast isn't running")?;
                 let list = c.look(AIRPLAY_LOOK)?;
                 let mut lines: Vec<String> = list
                     .iter()

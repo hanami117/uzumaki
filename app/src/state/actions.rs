@@ -218,6 +218,7 @@ impl State {
         self.resume = None;
         self.pending_play = None; // a newer click than the album or playlist still loading
         self.airplay_song_change();
+        self.cast_song_change(&song);
         self.playback.song = Some(song.clone());
         self.playback.state = PlayState::Loading;
         self.starting = Some(crate::clock::now());
@@ -531,9 +532,12 @@ impl State {
             if let Some(song) = self.next_allowed() {
                 self.begin_current(song);
             }
-        } else if let Some(b) = &self.bridge {
+        } else if self.bridge.is_some() {
             self.airplay_flush();
-            b.next();
+            self.cast_skip();
+            if let Some(b) = &self.bridge {
+                b.next();
+            }
         }
     }
 
@@ -551,8 +555,11 @@ impl State {
             return self.seek_to(0.0);
         }
         if self.queue.pos > self.queue.base && !self.playback.local {
-            if let Some(b) = &self.bridge {
+            if self.bridge.is_some() {
                 self.airplay_flush();
+                self.cast_skip();
+            }
+            if let Some(b) = &self.bridge {
                 b.previous();
             }
         } else if let Some(song) = self.queue.step_back() {

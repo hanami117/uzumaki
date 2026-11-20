@@ -330,6 +330,9 @@ pub struct Settings {
     /// AutoPlay: when the queue ends, similar songs keep playing (Settings → Playback, the ∞
     /// button in Up Next; `state/autoplay.rs`). On by default, as in Apple Music.
     pub autoplay: bool,
+    /// Chromecast: Cast devices in the AirPlay picker (Settings → Playback; `state/cast.rs`).
+    /// Off by default: while off, nothing looks for them on the network.
+    pub chromecast: bool,
     /// Pictures the user chose for playlists, by playlist id: shown only in Uzumaki (Apple's
     /// web API can't change a playlist's artwork). `file://` artwork in `playlist_art_dir`.
     pub playlist_art: BTreeMap<String, Artwork>,
@@ -395,6 +398,7 @@ impl Default for Settings {
             check_updates: true,
             resume_playback: true,
             autoplay: true,
+            chromecast: false,
             playlist_art: BTreeMap::new(),
             music_source: MusicSource::Apple,
             onboarded: None,

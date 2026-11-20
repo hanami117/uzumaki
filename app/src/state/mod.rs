@@ -350,7 +350,7 @@ pub enum Msg {
     Bridge(Event),
     /// AirPlay: speakers found, the output changed, a question or a failure (`state/airplay.rs`).
     AirPlay(uzumaki_airplay::Event),
-    /// Chromecast spike (`state/cast.rs`).
+    /// Chromecast (`state/cast.rs`).
     Cast(uzumaki_cast::Event),
     /// A reply about the signed-in account (a `/v1/me` read, any write), stamped with the
     /// `Session::account` it was asked under: one from before a sign-out (or a sign-in) is
@@ -625,7 +625,7 @@ pub struct State {
     pub motion: motion::MotionState,
     /// Where the audio goes: this computer or an AirPlay speaker (`airplay.rs`).
     pub airplay: airplay::AirPlay,
-    /// Chromecast spike: where the Cast session is (`cast.rs`).
+    /// Chromecast: the Cast session and devices (`cast.rs`).
     pub cast: cast::Cast,
     /// View-only state owned by the UI module (text field contents, scroll, …).
     pub ui: crate::ui::UiState,
@@ -1180,6 +1180,7 @@ impl State {
                         t.set_song(Some(&song));
                     }
                     self.playback.song = Some(song);
+                    self.cast_new_song(); // after a skip: the Cast device starts on it afresh
                 } else if let (Some(cur), Some(bg)) = (self.playback.song.as_mut(), song.artwork.and_then(|a| a.bg)) {
                     // Keep our artwork URL but take Apple's background colour (Now Playing tint).
                     if let Some(a) = cur.artwork.as_mut() {

@@ -381,7 +381,7 @@ fn main() {
         let sink = sink.clone();
         airplay::init(move |e| sink(Msg::AirPlay(e)));
     }
-    // Chromecast spike: only with UZUMAKI_CAST_SPIKE=1 (else nothing is created).
+    // Chromecast: created idle; used only while Settings → Playback → Chromecast is on.
     {
         let sink = sink.clone();
         cast::init(move |e| sink(Msg::Cast(e)));

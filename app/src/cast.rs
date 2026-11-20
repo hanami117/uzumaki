@@ -1,6 +1,9 @@
-//! Chromecast spike: the one `uzumaki_cast::Controller` of the process, only when the app was
-//! started with `UZUMAKI_CAST_SPIKE=1`. Without it nothing exists: no thread, no mDNS, no server,
-//! and `uzu cast` says Chromecast is off. Driven by `uzu cast` (`state/cast.rs`); no picker row yet.
+//! Chromecast in the app: the one `uzumaki_cast::Controller` of the process. It is created idle
+//! (no thread, no mDNS, no server) in windowed runs; headless runs and tests have none.
+//!
+//! Settings → Playback → Chromecast (off by default) decides whether it is used at all: while
+//! off, the picker shows no Cast devices, nothing looks for them and `uzu cast` says so
+//! (`state/cast.rs`). `UZUMAKI_CAST_SPIKE=1` turns it on regardless, for development.
 
 use std::sync::OnceLock;
 
@@ -8,21 +11,21 @@ use uzumaki_cast::{Config, Controller, Event, LocalFeed};
 
 static CONTROLLER: OnceLock<Controller> = OnceLock::new();
 
-pub const OFF: &str = "Chromecast is off in this app (start it with UZUMAKI_CAST_SPIKE=1)";
+pub const OFF: &str = "Chromecast is off (Settings → Playback → Chromecast)";
 
-/// The opt-in switch.
-pub fn wanted() -> bool {
-    std::env::var("UZUMAKI_CAST_SPIKE").is_ok_and(|v| v.trim() == "1")
+/// Unix only for now: Apple Music's audio reaches the session over a Unix socket. On Windows
+/// the setting is hidden and Chromecast stays off.
+pub const SUPPORTED: bool = cfg!(unix);
+
+/// The development override: on whatever the setting says.
+pub fn forced() -> bool {
+    SUPPORTED && std::env::var("UZUMAKI_CAST_SPIKE").is_ok_and(|v| v.trim() == "1")
 }
 
-/// Creates the controller when the switch is on (once, at launch; nothing runs yet).
-pub fn init(sink: impl Fn(Event) + Send + Sync + 'static) -> Option<&'static Controller> {
-    if !wanted() {
-        return None;
-    }
-    Some(CONTROLLER.get_or_init(|| {
+/// Creates the controller (once, at launch; nothing runs until a device is looked for or picked).
+pub fn init(sink: impl Fn(Event) + Send + Sync + 'static) -> &'static Controller {
+    CONTROLLER.get_or_init(|| {
         let cfg = Config::from_env();
-        eprintln!("cast: spike on (UZUMAKI_CAST_SPIKE=1), {} stream; nothing runs until `uzu cast <name>`", cfg.format.ext());
         extern "C" fn at_exit() {
             shutdown();
         }
@@ -31,7 +34,7 @@ pub fn init(sink: impl Fn(Event) + Send + Sync + 'static) -> Option<&'static Con
             eprintln!("cast: could not register the exit handler");
         }
         Controller::new(cfg, sink)
-    }))
+    })
 }
 
 pub fn controller() -> Option<&'static Controller> {
