@@ -305,6 +305,12 @@ fn setting_titled(narrow: bool, title: El, desc: Option<String>, control: El) ->
     }
 }
 
+/// A small muted "Beta" pill beside a row's title (Chromecast, until it is tested on more TVs).
+fn beta_chip(key: &str) -> El {
+    row().key(key).label("Beta").px(6.0).h(17.0).radius(8.5).center().fill(PAL.chip_hover).shrink()
+        .child(text("BETA").font(TextStyle::new(10.0, 600.0).tracking(0.6)).color(PAL.dim))
+}
+
 // ---- rows, by id (the pages and search build the same ones) ----
 
 /// What a row needs to build itself.
@@ -437,7 +443,10 @@ fn row_el(r: &Rx, id: Row) -> El {
         Row::AutoPlay => setting(narrow, title, desc(), switch("settings/autoplay", title, s.settings.autoplay, true, |s, on| s.set_autoplay(on))),
         Row::Resume => setting(narrow, title, desc(), switch("settings/resume", title, s.settings.resume_playback, true, |s, on| s.set_resume_playback(on))),
         Row::AirPlay => setting(narrow, title, desc(), switch("settings/airplay", title, s.airplay.prefs.reconnect, true, |s, on| s.set_airplay_reconnect(on))),
-        Row::Chromecast => setting(narrow, title, desc(), switch("settings/chromecast", title, s.settings.chromecast, true, |s, on| s.set_chromecast(on))),
+        Row::Chromecast => {
+            let heading = row().gap(8.0).center_y().child(text(title).font(BODY14).color(PAL.text).wrap()).child(beta_chip("settings/chromecast/beta"));
+            setting_titled(narrow, heading, desc(), switch("settings/chromecast", title, s.settings.chromecast, true, |s, on| s.set_chromecast(on)))
+        }
         Row::Lyrics => {
             let words = s.settings.lyrics_words;
             setting(
@@ -1703,6 +1712,16 @@ mod tests {
         assert!(!on_page(&rt, Row::CloseToTray) && !on_page(&rt, Row::StartHidden));
         click(&mut rt, "settings/tray");
         assert!(on_page(&rt, Row::CloseToTray));
+    }
+
+    #[test]
+    fn chromecast_is_beta_and_off_by_default() {
+        assert!(!crate::settings::Settings::default().chromecast, "a new user");
+        assert!(!crate::settings::Settings::from_json(br#"{"autoplay": true}"#).chromecast, "a settings file from before Chromecast");
+        if crate::cast::SUPPORTED {
+            let rt = page_window(Tab::Speakers, (1360.0, 860.0), |_| {});
+            assert!(rt.presented("settings/chromecast/beta").is_some(), "the Beta tag");
+        }
     }
 
     #[test]
