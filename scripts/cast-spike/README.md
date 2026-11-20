@@ -1,8 +1,9 @@
 # Chromecast spike
 
 Plays Uzumaki's output on a Cast device (Chromecast, Google TV, Nest speaker, Cast Group) through
-Google's Default Media Receiver. Off unless the app is started with `UZUMAKI_CAST_SPIKE=1`; driven by
-`uzu cast`, no picker row yet. Code: `cast/` (crate `uzumaki-cast`).
+Google's Default Media Receiver. Off unless Settings → Playback → Chromecast is on (or the app is
+started with `UZUMAKI_CAST_SPIKE=1`, a dev override); then Cast devices are in the AirPlay picker, and
+`uzu cast` drives it too. Code: `cast/` (crate `uzumaki-cast`).
 
 How it works: the app speaks CASTV2 to the device (TLS, port 8009), launches the Default Media Receiver
 and `LOAD`s a URL served by Uzumaki itself: `http://<this computer>:<port>/cast/<random token>/stream.wav`
@@ -64,7 +65,7 @@ session after 15 s with "A firewall may be blocking it".
 
 | Variable | |
 |---|---|
-| `UZUMAKI_CAST_SPIKE=1` | the app creates the Cast controller (else nothing exists) |
+| `UZUMAKI_CAST_SPIKE=1` | Chromecast on whatever the setting says (dev override) |
 | `UZUMAKI_CAST_FORMAT=wav\|flac` | stream format (default wav) |
 | `UZUMAKI_CAST_PORT` | fixed HTTP port (default: any free one) |
 | `UZUMAKI_CAST_STREAM_TYPE=LIVE\|BUFFERED` | what `LOAD` says (default LIVE) |
