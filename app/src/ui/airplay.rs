@@ -1,5 +1,9 @@
 //! The AirPlay picker: a button in the player bar and in Now Playing, and its popover.
 //!
+//! With Settings → Playback → Chromecast on, the same popover lists the Cast devices too, under
+//! their own heading (one output at a time: picking one ends the AirPlay speakers, and the other
+//! way round); the device in use gets its volume slider, and the button shows its glyph.
+//!
 //! The popover lists this computer and the AirPlay speakers on the network (found only while it
 //! is open), each with a checkbox, as Apple's Music does: tick several speakers and they play
 //! together, in step (multi-room); this computer is either alone or off (picking it unticks every
@@ -14,6 +18,7 @@
 use rune::{Cursor, Cx, El, Icon, Key, KeyEvent, LoopSpec, Phase, TextEdit, TextStyle, Transition, Tx, col, el, icon, row, text, text_input};
 use uzumaki_airplay::discover::{Kind, Output};
 use uzumaki_airplay::{Cast, Need};
+use uzumaki_cast::{CastDevice, State as CastState};
 
 use super::icons;
 use super::widgets::{slider, small_button};
@@ -103,7 +108,7 @@ pub struct Picker {
 /// Opens the picker above the button `anchor` (or closes it, on a second press) and starts or
 /// stops looking for speakers.
 pub fn toggle(s: &mut State, anchor: &'static str) {
-    if !s.airplay.available {
+    if !shown(s) {
         return;
     }
     if s.ui.airplay.open && s.ui.airplay.anchor == anchor {
@@ -113,12 +118,19 @@ pub fn toggle(s: &mut State, anchor: &'static str) {
     s.ui.airplay.open = true;
     s.ui.airplay.anchor = anchor;
     s.airplay_browse(true);
+    s.cast_browse(true);
 }
 
 pub fn close(s: &mut State) {
     s.ui.airplay.open = false;
     s.ui.airplay.field.focused = false;
     s.airplay_browse(false);
+    s.cast_browse(false);
+}
+
+/// The button exists: this install has AirPlay, or Chromecast is on.
+fn shown(s: &State) -> bool {
+    s.airplay.available || s.cast_enabled()
 }
 
 /// The field of a question that just arrived gets the keyboard (and starts empty). Returns
@@ -127,6 +139,9 @@ pub fn poll(s: &mut State) -> bool {
     // Closed by a change of page (`UiState::route_changed`): stop looking for speakers too.
     if !s.ui.airplay.open && s.airplay.browsing {
         s.airplay_browse(false);
+    }
+    if !s.ui.airplay.open && s.cast.browsing {
+        s.cast_browse(false);
     }
     if s.ui.airplay.asked == s.airplay.ask {
         return false;
@@ -146,19 +161,26 @@ pub(super) fn edit(p: &Picker) -> &TextEdit {
 /// from it. `idle` is its colour otherwise (the bar's and Now Playing's differ). None when this
 /// install has no cliairplay helper (Linux for now): no dead button.
 pub fn button(s: &State, key: &'static str, idle: rune::Color) -> Option<El> {
-    if !s.airplay.available {
+    if !shown(s) {
         return None;
     }
-    let lit = s.airplay.active() || (s.ui.airplay.open && s.ui.airplay.anchor == key);
-    let label = match &s.airplay.cast {
-        Cast::Off => "AirPlay".to_string(),
-        Cast::Connecting { .. } => format!("AirPlay: connecting to {}", s.airplay.names()),
-        Cast::On { .. } => format!("AirPlay: playing on {}", s.airplay.names()),
+    let lit = s.airplay.active() || s.cast.active() || (s.ui.airplay.open && s.ui.airplay.anchor == key);
+    let label = match (&s.airplay.cast, &s.cast.state) {
+        (_, CastState::Connecting { name } | CastState::Launching { name } | CastState::Loading { name }) => format!("Chromecast: connecting to {name}"),
+        (_, CastState::Buffering { name } | CastState::Playing { name, .. } | CastState::Paused { name }) => format!("Chromecast: playing on {name}"),
+        (Cast::Off, CastState::Off) => "AirPlay".to_string(),
+        (Cast::Connecting { .. }, _) => format!("AirPlay: connecting to {}", s.airplay.names()),
+        (Cast::On { .. }, _) => format!("AirPlay: playing on {}", s.airplay.names()),
+    };
+    // On a Cast device the button wears that device's glyph, so the bar says where the sound is.
+    let glyph = match s.cast.state.name() {
+        Some(name) => cast_glyph(s.cast.devices.iter().find(|d| d.name == name)),
+        None => Glyph { sym: Sym::AirPlay, line: &AIRPLAY },
     };
     Some(el().key(key).role("button").label(label).focusable(true).size(36.0, 36.0).radius(18.0).center()
         .hover(ov(0.08)).press(ov(0.12)).cursor(Cursor::Pointer)
         .on_press(move |s: &mut State| toggle(s, key))
-        .child(glyph_el(Glyph { sym: Sym::AirPlay, line: &AIRPLAY }, if lit { PAL.accent } else { idle }, 18.0)))
+        .child(glyph_el(glyph, if lit { PAL.accent } else { idle }, 18.0)))
 }
 
 /// What a row shows at its right end: its checkbox.
@@ -355,8 +377,11 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
     let left = (centre - W / 2.0).clamp(8.0, (win[0] - W - 8.0).max(8.0));
     let bottom = (win[1] - top + 8.0).max(8.0);
 
-    let cast = &s.airplay.cast;
-    let mut panel = col().key("airplay-pop").role("menu").label("AirPlay").w(W).padding(6.0).radius(12.0)
+    let title = match (s.airplay.available, s.cast_enabled()) {
+        (false, true) => "Chromecast",
+        _ => "AirPlay",
+    };
+    let mut panel = col().key("airplay-pop").role("menu").label(title).w(W).padding(6.0).radius(12.0)
         .fill(pop_fill()).border(1.0, pop_border()).shadow(8.0, 28.0, shadow(0.5))
         .pin(Some(left), None, None, Some(bottom))
         .transition(Transition::opacity())
@@ -374,17 +399,22 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
         })
         .on_press(|_s: &mut State| {});
     let here = if cfg!(target_os = "macos") { kind_glyph(Kind::Computer, false) } else { Glyph { sym: Sym::Computer, line: &DESKTOP } };
-    panel = panel.child(el().key("airplay-title").w_full().px(10.0).pt(4.0).pb(6.0).child(text("AirPlay").font(TextStyle::new(12.0, 600.0)).color(PAL.muted)));
+    panel = panel.child(heading("airplay-title", title));
     let list = if s.airplay.available { listed(s) } else { Vec::new() };
     let in_use = list.iter().filter(|o| mark_of(s, o) != Mark::Off).count();
     if in_use > 1 {
         panel = panel.child(master_row(s));
     }
-    let here_on = *cast == Cast::Off;
+    let here_on = s.airplay.cast == Cast::Off && !s.cast.active();
     panel = panel.child(
-        output_row("airplay-this".into(), here, this_computer(), None, if here_on { Mark::On } else { Mark::Off }, here_on)
-            .on_press(|s: &mut State| s.airplay_pick(None)),
+        output_row("airplay-this".into(), here, this_computer(), None, if here_on { Mark::On } else { Mark::Off }, here_on).on_press(|s: &mut State| {
+            s.airplay_pick(None);
+            s.cast_stop();
+        }),
     );
+    if !s.airplay.available && s.cast_enabled() {
+        return Some(layer(cast_rows(s, panel, false)));
+    }
     if !s.airplay.available {
         return Some(layer(panel.child(super::menu::sep()).child(note(
             "airplay-unavailable",
@@ -423,7 +453,99 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
     if s.airplay.devices.is_empty() {
         panel = panel.child(note("airplay-looking", true, "Looking for speakers\u{2026}"));
     }
+    if s.cast_enabled() {
+        panel = cast_rows(s, panel, true);
+    }
     Some(layer(panel))
+}
+
+/// A section's small grey title.
+fn heading(key: &'static str, title: &str) -> El {
+    el().key(key).w_full().px(10.0).pt(4.0).pb(6.0).child(text(title.to_string()).font(TextStyle::new(12.0, 600.0)).color(PAL.muted))
+}
+
+/// A Cast device's glyph: a speaker for Google/Nest speakers and Cast Groups, else a TV (a
+/// Chromecast, a Google TV, a TV with it built in).
+fn cast_glyph(d: Option<&CastDevice>) -> Glyph {
+    let speaker = d.is_some_and(|d| {
+        let m = d.model.to_ascii_lowercase();
+        d.group || ["speaker", "nest audio", "nest mini", "home mini", "google home", "audio"].iter().any(|k| m.contains(k))
+    });
+    kind_glyph(if speaker { Kind::Speaker } else { Kind::Tv }, false)
+}
+
+/// The Cast devices to list: those found, with the one in use first even before the network
+/// answered for it (`uzu cast <name>`, or the picker was just opened).
+fn cast_listed(s: &State) -> Vec<CastDevice> {
+    let mut list = s.cast.devices.clone();
+    if let Some(name) = s.cast.state.name()
+        && !list.iter().any(|d| d.name == name)
+    {
+        let mut d = CastDevice::at(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0, name);
+        d.id = format!("in-use:{name}");
+        list.insert(0, d);
+    }
+    list
+}
+
+/// Where a listed Cast device stands: off, connecting, or playing (paused counts as playing).
+fn cast_mark(s: &State, d: &CastDevice) -> Mark {
+    if s.cast.state.name() != Some(d.name.as_str()) {
+        return Mark::Off;
+    }
+    match s.cast.state {
+        CastState::Off => Mark::Off,
+        CastState::Connecting { .. } | CastState::Launching { .. } | CastState::Loading { .. } | CastState::Buffering { .. } => Mark::Connecting,
+        CastState::Playing { .. } | CastState::Paused { .. } => Mark::On,
+    }
+}
+
+/// The Cast section: its heading (`titled`: under the AirPlay speakers), each device with a
+/// "Chromecast" line, the one in use with its volume.
+fn cast_rows(s: &State, mut panel: El, titled: bool) -> El {
+    panel = panel.child(super::menu::sep());
+    if titled {
+        panel = panel.child(heading("cast-title", "Chromecast"));
+    }
+    let list = cast_listed(s);
+    for d in list.iter().take(MAX_ROWS) {
+        let mark = cast_mark(s, d);
+        let sub = match (&s.cast.state, mark) {
+            (CastState::Connecting { .. }, Mark::Connecting) => "Connecting\u{2026}".to_string(),
+            (CastState::Launching { .. } | CastState::Loading { .. }, Mark::Connecting) => "Starting\u{2026}".to_string(),
+            (CastState::Buffering { .. }, Mark::Connecting) => "Buffering\u{2026}".to_string(),
+            (CastState::Paused { .. }, Mark::On) => "Chromecast \u{b7} Paused".to_string(),
+            (CastState::Playing { latency_ms: Some(ms), .. }, Mark::On) => format!("Chromecast \u{b7} {:.1} s behind", f64::from(*ms) / 1000.0),
+            _ if d.group => "Chromecast \u{b7} Group".to_string(),
+            _ => "Chromecast".to_string(),
+        };
+        let id = d.id.clone();
+        let on = mark != Mark::Off;
+        panel = panel.child(
+            output_row(format!("cast-dev-{}", d.id), cast_glyph(Some(d)), &d.name, Some(sub), mark, mark == Mark::On).on_press(move |s: &mut State| {
+                if on {
+                    s.cast_stop(); // the one in use again: back to this computer
+                } else {
+                    s.cast_pick(&id);
+                }
+            }),
+        );
+        if on && let Some(v) = s.cast.volume {
+            let slider_el = slider("cast-volume", f32::from(v) / 100.0, PAL.text2, |s, f, phase, cancelled, _tx| {
+                if !(phase == Phase::Up && cancelled) {
+                    s.cast_volume((f * 100.0).round() as u8);
+                }
+            });
+            panel = panel.child(volume_line("cast-volume-row".into(), slider_el, v, 48.0));
+        }
+    }
+    if list.len() > MAX_ROWS {
+        panel = panel.child(note("cast-more", false, &format!("and {} more", list.len() - MAX_ROWS)));
+    }
+    if list.is_empty() {
+        panel = panel.child(note("cast-looking", true, "Looking for Chromecast devices\u{2026}"));
+    }
+    panel
 }
 
 fn layer(panel: El) -> El {
@@ -457,6 +579,9 @@ fn scene_devices() -> Vec<Output> {
 /// `password-wrong`, `unavailable`, `failed`.
 pub fn scene(s: &mut State, what: &str) {
     symbols::load_now();
+    if let Some(cast) = what.strip_prefix("cast-") {
+        return scene_cast(s, cast);
+    }
     s.airplay.available = what != "unavailable";
     s.airplay.prefs.volume = Some(35);
     s.ui.airplay.open = !matches!(what, "closed" | "failed" | "on-closed" | "unavailable" | "group-failed");
@@ -492,6 +617,50 @@ pub fn scene(s: &mut State, what: &str) {
         s.ui.airplay.asked = s.airplay.ask.clone();
         s.ui.airplay.field = TextEdit::new("12");
         s.ui.airplay.field.focused = true;
+    }
+}
+
+fn scene_cast_devices() -> Vec<CastDevice> {
+    let dev = |n: u8, name: &str, model: &str, group: bool| {
+        let mut d = CastDevice::at(std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, n)), 8009, name);
+        d.id = format!("cast{n}");
+        d.model = model.into();
+        d.group = group;
+        d
+    };
+    vec![dev(173, "Smart TV Pro", "Smart TV Pro", false), dev(40, "Kitchen speaker", "Nest Audio", false), dev(41, "Downstairs", "Google Cast Group", true)]
+}
+
+/// The picker with Chromecast on (`cast-` scenes): `list`, `looking`, `connecting`, `on`,
+/// `paused`, `on-closed`, `failed`, and `only-*` for a system without AirPlay (Linux).
+fn scene_cast(s: &mut State, what: &str) {
+    let (only, what) = match what.strip_prefix("only-") {
+        Some(w) => (true, w),
+        None => (false, what),
+    };
+    s.settings.chromecast = true;
+    s.airplay.available = !only;
+    s.ui.airplay.open = !matches!(what, "on-closed" | "failed");
+    s.ui.airplay.anchor = if s.ui.now_playing { "np-airplay" } else { "airplay" };
+    if !only {
+        s.airplay.devices = scene_devices();
+    }
+    if what != "looking" {
+        s.cast.devices = scene_cast_devices();
+    }
+    let name = "Smart TV Pro".to_string();
+    match what {
+        "connecting" => s.cast.state = CastState::Loading { name },
+        "on" | "on-closed" => {
+            s.cast.state = CastState::Playing { name, latency_ms: Some(2400) };
+            s.cast.volume = Some(26);
+        }
+        "paused" => {
+            s.cast.state = CastState::Paused { name };
+            s.cast.volume = Some(26);
+        }
+        "failed" => s.toast = Some(format!("{} Playing on {}.", uzumaki_cast::Why::Lost.message("Smart TV Pro"), this_computer())),
+        _ => {}
     }
 }
 
