@@ -111,6 +111,14 @@ impl Hub {
     pub fn published(&self) -> u64 {
         self.published.load(Ordering::Relaxed)
     }
+
+    /// Drops the recent history: the next pre-roll is silence. After a seek or a skip, the audio
+    /// from before it must not play again on the device.
+    pub fn forget(&self) {
+        let mut s = self.subs.lock().unwrap();
+        s.history.clear();
+        s.history_frames = 0;
+    }
 }
 
 /// What the players and the session share.
@@ -477,6 +485,16 @@ mod tests {
         }
         let s = hub.subs.lock().unwrap();
         assert!(s.history_frames <= HISTORY_FRAMES && s.history_frames >= HISTORY_FRAMES - 44100, "{}", s.history_frames);
+    }
+
+    #[test]
+    fn after_forget_the_preroll_is_silence() {
+        let hub = Hub::default();
+        hub.publish(&[7u8; 4410 * FRAME_BYTES]);
+        hub.forget();
+        let sub = hub.subscribe_preroll(4, 4410);
+        assert_eq!((sub.pad_frames, sub.backlog_frames), (4410, 0), "nothing from before the seek");
+        assert!(sub.rx.try_recv().is_err());
     }
 
     #[test]

@@ -489,6 +489,19 @@ impl Controller {
         self.send(Cmd::Reload(meta))
     }
 
+    /// A seek, a skip or a song the user picked: the recent audio is dropped and a new `LOAD`
+    /// follows, so the device plays a short silence (its pre-roll) and then the new place, in
+    /// step, instead of the seconds it still had from before.
+    pub fn restart(&self, meta: Option<Meta>) -> bool {
+        self.inner.hub.forget();
+        self.reload(meta)
+    }
+
+    /// Drops the recent audio only (a skip whose song is not known yet; `restart` follows).
+    pub fn forget(&self) {
+        self.inner.hub.forget();
+    }
+
     /// Back to this computer: stops the receiver and ends the session.
     pub fn stop(&self) {
         if let Some(h) = self.inner.session.lock().unwrap().take() {
