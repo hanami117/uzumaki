@@ -55,6 +55,8 @@ The screenshots use made-up albums and artists.
   own picture or the current cover) with dither, ASCII, halftone, scanline or blur effects.
 - **Desktop integration:** media keys and desktop widgets (MPRIS on Linux, Now Playing on macOS, the media overlay on Windows), a tray or
   menu bar icon, close to tray, and song notifications.
+- **Speakers:** AirPlay on macOS, and **Chromecast (Beta)** on macOS and Linux: Google TVs and Cast speakers on
+  your network, a few seconds behind (Settings → Speakers → Chromecast; off by default, not on Windows).
 - **Keyboard first:** you can change every shortcut in Settings → Keyboard.
 - **`uzu`:** a command line and terminal player for the running app (see below).
 - **Hooks:** your own scripts run on every song change or play/pause.
@@ -74,7 +76,7 @@ The screenshots use made-up albums and artists.
 
 ## Install
 
-> **Uzumaki 0.3.0 is out for Linux, macOS and Windows**: the AUR and an AppImage on Linux; a disk image and Homebrew on macOS; an installer and a zip on Windows.
+> **Uzumaki 0.4.0 is out for Linux, macOS and Windows**: the AUR and an AppImage on Linux; a disk image and Homebrew on macOS; an installer and a zip on Windows.
 > The install pages on
 > [getuzumaki.app](https://getuzumaki.app/#download) have the same steps.
 

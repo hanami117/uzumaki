@@ -51,7 +51,7 @@
    "url": "https://getuzumaki.app/",
    "operatingSystem": "Linux, macOS, Windows",
    "applicationCategory": "MultimediaApplication",
-   "softwareVersion": "0.3.0",
+   "softwareVersion": "0.4.0",
    "license": "https://www.gnu.org/licenses/gpl-3.0.html",
    "offers": {
     "@type": "Offer",
@@ -354,7 +354,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
     </li>
     <li class="reveal">
       <h3>Media keys, tray and notifications</h3>
-      <p>MPRIS on Linux, Now Playing on macOS and the media overlay on Windows, so media keys and desktop widgets just work. A tray icon with playback controls, optional close-to-tray, song-change notifications, and hook scripts that run on every song change.</p>
+      <p>MPRIS on Linux, Now Playing on macOS and the media overlay on Windows, so media keys and desktop widgets just work. A tray icon with playback controls, optional close-to-tray, song-change notifications, and hook scripts that run on every song change. AirPlay speakers on macOS, and Chromecast (Beta, off by default) on macOS and Linux.</p>
     </li>
     <li class="reveal">
       <h3>Your whole library, fast</h3>
@@ -363,7 +363,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
     <li class="reveal wide" id="discord">
       <div>
         <h3>Show it on Discord</h3>
-        <p>An optional setting, off by default: Settings &rarr; General &rarr; Show on Discord. Your Discord profile then says &ldquo;Listening to Uzumaki&rdquo; with the title, the artist, the cover and a progress bar. It works for Apple Music songs and local files, on macOS, Linux (Flatpak and Snap Discord too) and Windows. It needs the Discord desktop app on the same computer; the web version can&rsquo;t show it.</p>
+        <p>An optional setting, off by default: Settings &rarr; Notifications &rarr; Show on Discord. Your Discord profile then says &ldquo;Listening to Uzumaki&rdquo; with the title, the artist, the cover and a progress bar. It works for Apple Music songs and local files, on macOS, Linux (Flatpak and Snap Discord too) and Windows. It needs the Discord desktop app on the same computer; the web version can&rsquo;t show it.</p>
       </div>
       <!-- MOCK, not a real screenshot: made-up name, no real avatar or account. -->
       <div class="dmock" role="img" aria-label="A mock-up of a Discord profile card: Listening to Uzumaki, a song title, an artist, a cover and a progress bar.">
@@ -533,7 +533,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
     <li class="reveal">
       <span class="n">01</span>
       <h3>Install</h3>
-      <p>On Arch, from the AUR; on other Linux, as an AppImage or from source; on macOS, the DMG or Homebrew; on Windows, the installer or a zip. Version 0.3.0 is out for Linux, macOS and Windows: see <a href="#download">Download</a>.</p>
+      <p>On Arch, from the AUR; on other Linux, as an AppImage or from source; on macOS, the DMG or Homebrew; on Windows, the installer or a zip. Version 0.4.0 is out for Linux, macOS and Windows: see <a href="#download">Download</a>.</p>
     </li>
     <li class="reveal">
       <span class="n">02</span>
@@ -632,7 +632,7 @@ Juniper Vale - Small Rooms
 <section class="wrap dl" id="download" aria-labelledby="dl-h">
   <span class="eyebrow reveal"><b>05</b> &middot; download</span>
   <h2 id="dl-h" class="reveal">Get Uzumaki</h2>
-  <p class="lead reveal">The latest beta, version 0.3.0, is out for Linux, macOS and Windows. Free and open source under the GPL. Each system has an install page, and <a href="/apple-music-linux/">Apple Music on Linux</a> sums up what you get on Linux.</p>
+  <p class="lead reveal">The latest beta, version 0.4.0, is out for Linux, macOS and Windows. Free and open source under the GPL. Each system has an install page, and <a href="/apple-music-linux/">Apple Music on Linux</a> sums up what you get on Linux.</p>
   <div class="dl-grid stagger">
     <div class="card reveal" id="download-macos">
       <h3>macOS</h3>
@@ -679,7 +679,7 @@ Juniper Vale - Small Rooms
       <a class="more" href="/download/windows/">Windows install guide &rarr;</a>
     </div>
   </div>
-  <p class="note reveal">Once a day Uzumaki asks this site whether a new version is out and tells you; it never downloads or installs anything by itself. Settings &rarr; General turns it off. Checksums are on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.3.0">release page</a>.</p>
+  <p class="note reveal">Once a day Uzumaki asks this site whether a new version is out and tells you; it never downloads or installs anything by itself. Settings &rarr; Advanced turns it off. Checksums are on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.4.0">release page</a>.</p>
 </section>
 
 <section class="wrap faq" id="faq" aria-labelledby="faq-h">
@@ -723,12 +723,12 @@ Juniper Vale - Small Rooms
 
   <details class="reveal">
     <summary>Can it show what I&rsquo;m playing on Discord?</summary>
-    <p>Yes. It&rsquo;s an optional setting, off by default (Settings &rarr; General &rarr; Show on Discord). Your profile then shows &ldquo;Listening to Uzumaki&rdquo; with the title, artist, cover and a progress bar, for Apple Music songs and local files. It needs the Discord desktop app on the same computer, on macOS, Linux (Flatpak and Snap too) or Windows. Uzumaki talks to Discord locally and has no account or login for this. You can hide the song title, or the cover, if you prefer.</p>
+    <p>Yes. It&rsquo;s an optional setting, off by default (Settings &rarr; Notifications &rarr; Show on Discord). Your profile then shows &ldquo;Listening to Uzumaki&rdquo; with the title, artist, cover and a progress bar, for Apple Music songs and local files. It needs the Discord desktop app on the same computer, on macOS, Linux (Flatpak and Snap too) or Windows. Uzumaki talks to Discord locally and has no account or login for this. You can hide the song title, or the cover, if you prefer.</p>
   </details>
 
   <details class="reveal">
     <summary>When can I download it?</summary>
-    <p>Now: version 0.3.0 is out for Linux (AUR and AppImage), macOS and Windows. The <a href="#download">Download</a> section has an install page for each system, and releases appear on the <a href="https://github.com/hanami117/uzumaki/releases">GitHub releases page</a>.</p>
+    <p>Now: version 0.4.0 is out for Linux (AUR and AppImage), macOS and Windows. The <a href="#download">Download</a> section has an install page for each system, and releases appear on the <a href="https://github.com/hanami117/uzumaki/releases">GitHub releases page</a>.</p>
   </details>
 
   <details class="reveal">

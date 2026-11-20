@@ -5,16 +5,25 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
-### Changed
+## [0.4.0] - 2026-11-20
 
-- **Settings, reorganised:** 11 shorter pages instead of 7. General (start, tray or menu bar icon, sidebar),
-  Account, Playback, **Speakers** (reconnect to the last speaker, Chromecast; only where there is one),
-  Appearance (theme, player bar, app icon, then the background), **Now Playing** (lyrics, animated artwork,
-  its background), **Notifications** (song notifications and Discord), Local Files, Keyboard, **Advanced**
-  (updates, the welcome tour, storage) and About. Rows that only matter when another switch is on (Discord's
-  choices, the background's, Open in the background, Keep playing when the window closes) hide until it is.
-  Shorter labels and notes, the same on every system where they can be; search finds the old labels too.
-  Nothing was removed and your settings stay as they are.
+Reorganised Settings and, as a Beta, Chromecast. You need an Apple Music subscription.
+
+### Added
+- **Chromecast (Beta, off by default):** Settings → Speakers → Chromecast. Google TVs and Cast speakers on your
+  network then show up in the speaker menu, with their volume; the player bar shows where the sound goes. The
+  sound arrives a few seconds behind the app. macOS and Linux; not on Windows yet. `uzu cast` controls it too.
+
+### Changed
+- **Settings, reorganised:** 11 shorter pages instead of 7: General, Account, Playback, **Speakers**, Appearance,
+  **Now Playing**, **Notifications** (song notifications and Discord), Local Files, Keyboard, **Advanced** (updates,
+  the welcome tour, storage) and About. Rows that only matter when another switch is on hide until it is. Search
+  finds the old names too. Nothing was removed and your settings stay as they are.
+
+### Fixed
+- **Discord:** with Title – Artist, the album no longer shows twice on your card.
+- An install with a missing player (castLabs Electron) now says the install is incomplete, instead of naming a
+  folder from the machine that built it.
 
 ## [0.3.1] - 2026-11-18
 
