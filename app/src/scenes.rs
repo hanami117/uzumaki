@@ -175,7 +175,7 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("settings-signed-out", settings_signed_out),
     ("settings-sign-out-confirm", settings_sign_out_confirm),
     ("settings-playback", settings_playback),
-    ("settings-playback-chromecast", |s| { settings_playback(s); s.settings.chromecast = true }),
+    ("settings-playback-chromecast", |s| { settings_page(s, crate::ui::settings::Tab::Speakers); s.settings.chromecast = true }),
     ("settings-search-chromecast", |s| { settings_playback(s); crate::ui::settings::set_query(s, "chromecast") }),
     ("settings-general", settings_general),
     ("settings-discord", |s| { settings_discord(s); s.settings.discord.enabled = true; s.settings.discord.hide_title = true }),
@@ -186,6 +186,24 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("settings-login-unavailable", |s| { settings_general(s); s.login = crate::login::Login::unavailable("Only in the app (Uzumaki.app). This copy runs from a build folder.") }),
     ("settings-search-login", |s| { settings_account(s); crate::ui::settings::set_query(s, "login") }),
     ("settings-about", |s| { settings_account(s); s.ui.settings.open = Some(crate::ui::settings::Tab::About) }),
+    // One per page, with every row that can show showing (`settings_page`), plus the pages whose
+    // rows hide behind a switch with that switch off.
+    ("settings-page-general", |s| settings_page(s, crate::ui::settings::Tab::General)),
+    ("settings-page-general-off", |s| { settings_page(s, crate::ui::settings::Tab::General); s.login.on = false; s.settings.tray_icon = false }),
+    ("settings-page-account", |s| settings_page(s, crate::ui::settings::Tab::Account)),
+    ("settings-page-playback", |s| settings_page(s, crate::ui::settings::Tab::Playback)),
+    ("settings-page-speakers", |s| settings_page(s, crate::ui::settings::Tab::Speakers)),
+    ("settings-page-appearance", |s| settings_page(s, crate::ui::settings::Tab::Appearance)),
+    ("settings-page-appearance-off", |s| { settings_page(s, crate::ui::settings::Tab::Appearance); s.settings.appearance.source = crate::appearance::BgSource::Off }),
+    ("settings-page-now-playing", |s| settings_page(s, crate::ui::settings::Tab::NowPlaying)),
+    ("settings-page-notifications", |s| settings_page(s, crate::ui::settings::Tab::Notifications)),
+    ("settings-page-notifications-off", |s| { settings_page(s, crate::ui::settings::Tab::Notifications); s.settings.discord.enabled = false }),
+    ("settings-page-local", |s| settings_page(s, crate::ui::settings::Tab::Local)),
+    ("settings-page-keyboard", |s| settings_page(s, crate::ui::settings::Tab::Keyboard)),
+    ("settings-page-advanced", |s| settings_page(s, crate::ui::settings::Tab::Advanced)),
+    ("settings-page-about", |s| settings_page(s, crate::ui::settings::Tab::About)),
+    // A search that finds rows hidden behind a switch: Discord off, so Show on Discord stands in.
+    ("settings-search-hidden", |s| { settings_page(s, crate::ui::settings::Tab::General); s.settings.discord.enabled = false; crate::ui::settings::set_query(s, "album cover") }),
     ("settings-about-search", settings_about),
     ("settings-playback-local", settings_playback_local),
     ("settings-check-now", settings_check_now),
@@ -1006,13 +1024,13 @@ fn settings_search_empty(s: &mut State) {
     settings_account(s);
 }
 
-/// "lyrics": rows on Playback and Keyboard.
+/// "lyrics": rows on Now Playing and Keyboard.
 fn settings_search(s: &mut State) {
     settings_account(s);
     crate::ui::settings::set_query(s, "lyrics");
 }
 
-/// Settings search for "version": Check for updates and About (the version).
+/// Settings search for "version": Check for updates daily and About (the version).
 fn settings_about(s: &mut State) {
     settings_account(s);
     crate::ui::settings::set_query(s, "version");
@@ -1053,7 +1071,7 @@ fn settings_playback_local(s: &mut State) {
     s.ui.settings.open = Some(crate::ui::settings::Tab::Playback);
 }
 
-/// General → Updates after a manual check (found via search, so it is on screen).
+/// Advanced → Check for updates daily after a manual check (found via search).
 fn settings_check_now(s: &mut State) {
     settings_general(s);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
@@ -2175,11 +2193,11 @@ fn player_floating(s: &mut State) {
     s.settings.player_style = crate::settings::PlayerStyle::Floating;
 }
 
-/// Appearance → Sidebar in use: New, Radio and Made for You hidden.
+/// General → Sidebar in use: New, Radio and Made for You hidden.
 fn sidebar_hidden(s: &mut State) {
     home(s);
     s.settings.hidden_nav = vec!["nav-new".into(), "nav-radio".into(), "nav-mfy".into()];
-    crate::ui::settings::open_tab(s, crate::ui::settings::Tab::Appearance);
+    crate::ui::settings::open_tab(s, crate::ui::settings::Tab::General);
 }
 
 /// Settings → Appearance with a picture background (the app icon) and the halftone effect:
@@ -2437,4 +2455,26 @@ fn local_only_big_artist(s: &mut State) {
 
 fn local_only_big_folder(s: &mut State) {
     local_only_with(s, &big_index(), Route::Folders { path: Some(home_dir().join("Music/Unsorted")) });
+}
+
+/// Settings on `tab` with every row that depends on a switch showing: signed in (store Italy),
+/// start at login and in the background on, the tray icon and close to tray on, Discord on (with
+/// an app id), the Uzumaki background with dither, Now Playing's cover background, AirPlay's
+/// helper there, Chromecast on, cache sizes known.
+fn settings_page(s: &mut State, tab: crate::ui::settings::Tab) {
+    appearance(s);
+    s.session.storefront = Some("it".into());
+    s.settings.storefront = Some(crate::settings::Storefront { id: "it".into(), name: Some("Italy".into()) });
+    s.login = crate::login::Login { on: true, hidden: Some(true), ..Default::default() };
+    s.settings.start_hidden = true;
+    s.settings.tray_icon = true;
+    s.settings.close_to_tray = true;
+    s.settings.discord.client_id = Some("123456789012345678".into());
+    s.settings.discord.enabled = true;
+    s.settings.appearance.show_on = crate::appearance::ShowOn::All;
+    s.settings.appearance.np = crate::appearance::NpBg::Cover;
+    s.airplay.available = true;
+    s.settings.chromecast = true;
+    s.cache_sizes = Some(crate::state::CacheSizes { art: 123 * 1024 * 1024, library: 4_404_019 });
+    s.ui.settings.open = Some(tab);
 }

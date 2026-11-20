@@ -1,4 +1,4 @@
-//! Discord Rich Presence (`crate::discord`): what `State` tells it, and the Settings → General
+//! Discord Rich Presence (`crate::discord`): what `State` tells it, and the Settings → Notifications
 //! switches. The snapshot is built after every playback message, but only while the worker runs
 //! (the setting on): with it off, none of this costs anything.
 
@@ -61,7 +61,7 @@ impl State {
         }
     }
 
-    /// Settings → General → Show on Discord.
+    /// Settings → Notifications → Show on Discord.
     pub fn set_discord_enabled(&mut self, on: bool) {
         self.set_discord(|d| d.enabled = on);
     }

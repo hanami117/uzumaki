@@ -574,7 +574,7 @@ pub struct State {
     pub syncing: bool,
     /// Every library playlist's songs and covers, fetched after the lists.
     pl_sync: library::PlaylistSync,
-    /// Bytes on disk per cache (Settings → General); None until measured.
+    /// Bytes on disk per cache (Settings → Advanced); None until measured.
     pub cache_sizes: Option<CacheSizes>,
     /// Last non-fatal error, shown briefly.
     pub toast: Option<String>,
@@ -583,7 +583,7 @@ pub struct State {
     pub pending_share: Option<PendingShare>,
     /// A newer version is out (`update.rs`, `state/update.rs`): the banner atop the content.
     pub update: Option<crate::update::Notice>,
-    /// The manual update check and when the last check ran (Settings → General).
+    /// The manual update check and when the last check ran (Settings → Advanced).
     pub update_check: crate::update::CheckStatus,
     /// The hourly timer's bookkeeping (`state/update.rs`).
     update_auto: update::AutoCheck,

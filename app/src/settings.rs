@@ -147,7 +147,7 @@ impl IconVariant {
     }
 }
 
-/// Where Apple's animated artwork (the video loop of an album's cover) plays (Settings → Appearance
+/// Where Apple's animated artwork (the video loop of an album's cover) plays (Settings → Now Playing
 /// → Animated artwork; `motion`). Whatever the choice, Reduce Motion keeps the covers still.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AnimatedArtwork {
@@ -295,7 +295,7 @@ pub struct Settings {
     pub number_keys: NumberKeys,
     /// Songs-table choices (view as Songs, sorts), remembered.
     pub table: crate::ui::TableView,
-    /// Sidebar entries the user hid (Settings → Appearance, or right-click → Hide): their ids,
+    /// Sidebar entries the user hid (Settings → General → Sidebar, or right-click → Hide): their ids,
     /// see `ui::sidebar::NAV_IDS`.
     pub hidden_nav: Vec<String>,
     /// Docked or floating player bar (Settings → Appearance).
@@ -310,19 +310,19 @@ pub struct Settings {
     /// library sync shows its screen either way.
     pub startup_animation: bool,
     /// Apple's video loop of the album in the full-screen Now Playing cover and the cover at the
-    /// top of an album page, when it has one (Settings → Appearance; `motion`). Never with
+    /// top of an album page, when it has one (Settings → Now Playing; `motion`). Never with
     /// Reduce Motion. A file from when this was a switch still loads (`from_json`).
     #[serde(deserialize_with = "animated_artwork_or_legacy")]
     pub animated_artwork: AnimatedArtwork,
     /// A desktop notification (title, artist and album, cover) when a new song starts while
-    /// the window isn't in front (Settings → General; `notify.rs`). Off by default.
+    /// the window isn't in front (Settings → Notifications; `notify.rs`). Off by default.
     pub notify_song_change: bool,
-    /// Discord Rich Presence: "Listening to …" on the user's Discord profile (Settings → General;
+    /// Discord Rich Presence: "Listening to …" on the user's Discord profile (Settings → Notifications;
     /// `discord/`). Off by default.
     pub discord: crate::discord::Prefs,
     /// Once per UTC day, ask updates.getuzumaki.app for the latest version (sending the version,
     /// OS, architecture and install channel, which the server counts) and show a notice when a
-    /// newer one is out (Settings → General; `update.rs`). On by default; off sends nothing.
+    /// newer one is out (Settings → Advanced; `update.rs`). On by default; off sends nothing.
     pub check_updates: bool,
     /// Resume where you left off: the last song, its position and the queue come back paused
     /// at the next start (Settings → Playback; `resume.rs`). On by default.
@@ -330,7 +330,7 @@ pub struct Settings {
     /// AutoPlay: when the queue ends, similar songs keep playing (Settings → Playback, the ∞
     /// button in Up Next; `state/autoplay.rs`). On by default, as in Apple Music.
     pub autoplay: bool,
-    /// Chromecast: Cast devices in the AirPlay picker (Settings → Playback; `state/cast.rs`).
+    /// Chromecast: Cast devices in the AirPlay picker (Settings → Speakers; `state/cast.rs`).
     /// Off by default: while off, nothing looks for them on the network.
     pub chromecast: bool,
     /// Pictures the user chose for playlists, by playlist id: shown only in Uzumaki (Apple's

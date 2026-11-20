@@ -142,7 +142,7 @@ impl Cache {
     }
 
     /// No library on disk for an account that may be signed in: the first start, or the first
-    /// after the library cache was cleared (Settings → General). The intro then waits for the
+    /// after the library cache was cleared (Settings → Advanced). The intro then waits for the
     /// whole library (`ui::intro`). A last session that was signed out has nothing to sync.
     pub fn needs_sync(&self) -> bool {
         if self.read::<bool>(SESSION).is_some_and(|s| !s.data) {

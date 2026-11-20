@@ -1,4 +1,4 @@
-//! "Notify on song change" (Settings → General): a desktop notification with the title,
+//! "Song notifications" (Settings → Notifications): a desktop notification with the title,
 //! "artist — album" and the cover when a new song starts and Uzumaki isn't in front.
 //!
 //! The song change itself is found by `hooks::Hooks::observe` (one detector for both); `State`

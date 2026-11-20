@@ -1,4 +1,6 @@
-//! The Settings overlay (Ctrl+,): a modal panel with Account / Playback / General pages.
+//! The Settings overlay (Ctrl+,): a modal panel with a page list (General, Account, Playback,
+//! Speakers, Appearance, Now Playing, Notifications, Local Files, Keyboard, Advanced, About) and
+//! a search over every row. Titles and notes come from `settings_search`'s table.
 
 use rune::{Cx, Cursor, El, Key, KeyEvent, ScrollSpec, TextEdit, TextStyle, Tx, col, el, icon, row, text, text_input};
 
@@ -14,29 +16,54 @@ use crate::theme::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tab {
+    /// Startup, the tray or menu bar icon, the sidebar.
     #[default]
+    General,
     Account,
     Playback,
+    /// AirPlay and Chromecast; hidden where neither exists (`Tab::shown`).
+    Speakers,
     Appearance,
-    General,
+    /// Lyrics, animated artwork, the Now Playing background.
+    NowPlaying,
+    /// Song notifications and Discord.
+    Notifications,
     Local,
     /// Every keyboard shortcut (`ui::keys::BINDINGS`).
     Keyboard,
+    /// Updates, the welcome tour, the caches.
+    Advanced,
     /// Version, licences, links and Support.
     About,
 }
 
 impl Tab {
-    pub(super) const ALL: [Tab; 7] = [Tab::Account, Tab::Playback, Tab::Appearance, Tab::General, Tab::Local, Tab::Keyboard, Tab::About];
+    pub(super) const ALL: [Tab; 11] = [
+        Tab::General,
+        Tab::Account,
+        Tab::Playback,
+        Tab::Speakers,
+        Tab::Appearance,
+        Tab::NowPlaying,
+        Tab::Notifications,
+        Tab::Local,
+        Tab::Keyboard,
+        Tab::Advanced,
+        Tab::About,
+    ];
 
     fn info(self) -> (&'static str, &'static str, &'static rune::Icon) {
         match self {
+            Tab::General => ("settings/tab/general", "General", &icons::GEAR),
             Tab::Account => ("settings/tab/account", "Account", &icons::USER),
             Tab::Playback => ("settings/tab/playback", "Playback", &icons::SLIDERS),
+            Tab::Speakers => ("settings/tab/speakers", "Speakers", &icons::SPEAKER),
             Tab::Appearance => ("settings/tab/appearance", "Appearance", &icons::IMAGE),
-            Tab::General => ("settings/tab/general", "General", &icons::GEAR),
+            Tab::NowPlaying => ("settings/tab/now-playing", "Now Playing", &icons::LYRICS),
+            Tab::Notifications => ("settings/tab/notifications", "Notifications", &icons::BELL),
             Tab::Local => ("settings/tab/local", "Local Files", &icons::LOCAL_FILES),
             Tab::Keyboard => ("settings/tab/keyboard", "Keyboard", &icons::KEYBOARD),
+            Tab::Advanced => ("settings/tab/advanced", "Advanced", &icons::WRENCH),
             Tab::About => ("settings/tab/about", "About", &icons::INFO),
         }
     }
@@ -44,6 +71,15 @@ impl Tab {
     /// The page's name.
     pub fn title(self) -> &'static str {
         self.info().1
+    }
+
+    /// Whether the page is in the list: Speakers only where one of its rows exists (no AirPlay
+    /// helper and no Chromecast on Windows today).
+    pub fn shown(self, s: &State) -> bool {
+        match self {
+            Tab::Speakers => layout_rows(self).any(|r| exists(s, r)),
+            _ => true,
+        }
     }
 }
 
@@ -71,7 +107,8 @@ pub struct SettingsUi {
 const FLASH: f64 = 1.4;
 
 pub fn open(s: &mut State) {
-    s.ui.settings.open = Some(s.ui.settings.last);
+    let last = s.ui.settings.last;
+    s.ui.settings.open = Some(if last.shown(s) { last } else { Tab::General });
     s.ui.settings.confirm = false;
     s.refresh_cache_sizes();
     s.refresh_login();
@@ -118,7 +155,15 @@ fn clear_search(s: &mut State) {
 /// The rows the search shows: its hits that exist in the app's current state, as
 /// `(page, row)` in page order.
 pub fn results(s: &State) -> Vec<(Tab, Row)> {
-    s.ui.settings.hits.iter().filter_map(|&i| search::INDEX.get(i)).filter(|e| available(s, e.row)).map(|e| (e.tab, e.row)).collect()
+    let mut v: Vec<(Tab, Row)> = Vec::new();
+    for e in s.ui.settings.hits.iter().filter_map(|&i| search::INDEX.get(i)) {
+        if let Some(row) = shown_as(s, e.row)
+            && !v.iter().any(|&(_, r)| r == row)
+        {
+            v.push((search::tab(row), row));
+        }
+    }
+    v
 }
 
 /// Leaves the search for `tab`, scrolled to `row`, which is tinted for a moment.
@@ -271,18 +316,62 @@ struct Rx<'a> {
     search: bool,
 }
 
-/// Whether `row` exists in the app's current state (local only mode has no Apple rows; the
-/// cover effect shows only with the Cover background; App icon only on Linux and the Mac).
-fn available(s: &State, row: Row) -> bool {
+/// Whether `row` exists in this copy and mode: local only mode has no Apple rows, App icon is on
+/// Linux and the Mac, AirPlay needs its helper, Chromecast is Unix only.
+fn exists(s: &State, row: Row) -> bool {
     match row {
         Row::AppleMusic | Row::ExplicitContent | Row::Quality | Row::Lyrics | Row::AutoPlay => !s.local_only(),
-        Row::NpCoverEffect => s.settings.appearance.np == NpBg::Cover,
         Row::AppIcon => cfg!(any(target_os = "linux", target_os = "macos")),
         // No cliairplay helper (Linux for now): no AirPlay anywhere, the setting included.
         Row::AirPlay => s.airplay.available,
         Row::Chromecast => crate::cast::SUPPORTED,
         Row::Binding(i) => i < super::keys::BINDINGS.len(),
         _ => true,
+    }
+}
+
+/// The row a dependent row hides behind while that one is off: Discord's choices behind Show on
+/// Discord, the background's rows behind Background, and so on. `None` for a row that stands alone.
+fn parent(row: Row) -> Option<Row> {
+    match row {
+        Row::DiscordStatus | Row::DiscordArtwork | Row::DiscordButtons | Row::DiscordHidePaused | Row::DiscordHideTitle => Some(Row::Discord),
+        Row::Picture | Row::Effect | Row::ShowOn | Row::CardStrength | Row::Fade => Some(Row::Background),
+        Row::ListStrength => Some(Row::ShowOn),
+        Row::StartHidden => Some(Row::StartAtLogin),
+        Row::CloseToTray => Some(Row::Tray),
+        Row::NpCoverEffect => Some(Row::NpBackground),
+        _ => None,
+    }
+}
+
+/// Whether `row` shows now: it exists and, for a dependent row, the choice it depends on is made
+/// (dependent rows are hidden, not dimmed).
+fn available(s: &State, row: Row) -> bool {
+    let ap = &s.settings.appearance;
+    exists(s, row)
+        && match row {
+            Row::DiscordStatus | Row::DiscordArtwork | Row::DiscordButtons | Row::DiscordHidePaused | Row::DiscordHideTitle => s.settings.discord.enabled,
+            Row::Picture => ap.source == BgSource::Picture,
+            Row::Effect | Row::ShowOn | Row::CardStrength | Row::Fade => ap.source != BgSource::Off,
+            Row::ListStrength => ap.source != BgSource::Off && ap.show_on == ShowOn::All,
+            Row::StartHidden => s.login.on,
+            Row::CloseToTray => s.settings.tray_icon,
+            Row::NpCoverEffect => ap.np == NpBg::Cover,
+            _ => true,
+        }
+}
+
+/// Where search shows `row`: itself when it shows, else the nearest row it depends on that does
+/// (a search for "album cover" with Discord off finds Show on Discord), else nowhere.
+fn shown_as(s: &State, mut row: Row) -> Option<Row> {
+    loop {
+        if available(s, row) {
+            return Some(row);
+        }
+        if !exists(s, row) {
+            return None;
+        }
+        row = parent(row)?;
     }
 }
 
@@ -311,66 +400,50 @@ fn rows(r: &Rx, rows: &[Row]) -> Vec<El> {
 fn row_el(r: &Rx, id: Row) -> El {
     let (s, narrow) = (r.s, r.narrow);
     let ap = &s.settings.appearance;
-    let bg_on = ap.source != BgSource::Off;
     let d = &s.settings.discord;
+    // The row's title and note on this system (`settings_search::SPECS`, which search reads too).
+    let (title, note) = (search::title(id), search::note(id));
+    let desc = || Some(note.to_string());
     match id {
         Row::MusicSource => music_source(s, narrow),
         Row::AppleMusic => apple_music(s, narrow),
         Row::ExplicitContent => setting(
             narrow,
-            "Explicit content",
-            Some(crate::state::restricted::SETTINGS_TEXT.into()),
-            small_button("settings/explicit-help", "Open music.apple.com").on_press_tx(|s: &mut State, tx: &mut rune::Tx| {
-                if tx.open_url(crate::state::restricted::HELP_URL).is_err() {
-                    s.toast = Some("Couldn't open the link.".into());
-                }
-            }),
+            title,
+            desc(),
+            small_button("settings/explicit-help", "Open music.apple.com").help(crate::state::restricted::HELP_STEPS).on_press_tx(
+                |s: &mut State, tx: &mut rune::Tx| {
+                    if tx.open_url(crate::state::restricted::HELP_URL).is_err() {
+                        s.toast = Some("Couldn't open the link.".into());
+                    }
+                },
+            ),
         ),
         Row::Quality => {
             let saver = s.settings.data_saver;
             setting(
                 narrow,
-                "Streaming quality",
-                Some("Data saver uses about a quarter of the data. Lossless and Dolby Atmos aren't available in Apple Music on the web.".into()),
+                title,
+                desc(),
                 segmented(
                     "settings/quality",
                     vec![
-                        segment("settings/quality/best", "Best \u{b7} 256 kbps", !saver).on_press(|s: &mut State| s.set_data_saver(false)),
+                        segment("settings/quality/best", "High \u{b7} 256 kbps", !saver).on_press(|s: &mut State| s.set_data_saver(false)),
                         segment("settings/quality/saver", "Data saver \u{b7} 64 kbps", saver).on_press(|s: &mut State| s.set_data_saver(true)),
                     ],
                 ),
             )
         }
-        Row::AutoPlay => setting(
-            narrow,
-            "AutoPlay",
-            Some("When the queue ends, similar music keeps playing. Also the \u{221e} button in Up Next. Not with Repeat or on radio stations.".to_string()),
-            switch("settings/autoplay", "AutoPlay", s.settings.autoplay, true, |s, on| s.set_autoplay(on)),
-        ),
-        Row::Resume => setting(
-            narrow,
-            "Resume where you left off",
-            Some("At start, the last song comes back paused where you stopped, with its queue. Nothing plays until you press Play.".to_string()),
-            switch("settings/resume", "Resume where you left off", s.settings.resume_playback, true, |s, on| s.set_resume_playback(on)),
-        ),
-        Row::AirPlay => setting(
-            narrow,
-            "Reconnect to last AirPlay device",
-            Some("At start, the sound goes back to the AirPlay speaker you used last, if it is on. Off: Uzumaki always starts on this computer.".to_string()),
-            switch("settings/airplay", "Reconnect to last AirPlay device", s.airplay.prefs.reconnect, true, |s, on| s.set_airplay_reconnect(on)),
-        ),
-        Row::Chromecast => setting(
-            narrow,
-            "Chromecast",
-            Some(super::settings_search::CHROMECAST_NOTE.to_string()),
-            switch("settings/chromecast", "Chromecast", s.settings.chromecast, true, |s, on| s.set_chromecast(on)),
-        ),
+        Row::AutoPlay => setting(narrow, title, desc(), switch("settings/autoplay", title, s.settings.autoplay, true, |s, on| s.set_autoplay(on))),
+        Row::Resume => setting(narrow, title, desc(), switch("settings/resume", title, s.settings.resume_playback, true, |s, on| s.set_resume_playback(on))),
+        Row::AirPlay => setting(narrow, title, desc(), switch("settings/airplay", title, s.airplay.prefs.reconnect, true, |s, on| s.set_airplay_reconnect(on))),
+        Row::Chromecast => setting(narrow, title, desc(), switch("settings/chromecast", title, s.settings.chromecast, true, |s, on| s.set_chromecast(on))),
         Row::Lyrics => {
             let words = s.settings.lyrics_words;
             setting(
                 narrow,
-                "Lyrics highlight",
-                Some("Word by word when Apple has word timing, otherwise whole lines.".into()),
+                title,
+                desc(),
                 segmented(
                     "settings/lyrics",
                     vec![
@@ -387,8 +460,8 @@ fn row_el(r: &Rx, id: Row) -> El {
             };
             setting(
                 narrow,
-                "Theme",
-                Some("System follows your computer's light or dark appearance.".into()),
+                title,
+                desc(),
                 segmented(
                     "settings/theme",
                     vec![
@@ -399,30 +472,23 @@ fn row_el(r: &Rx, id: Row) -> El {
                 ),
             )
         }
-        Row::AppIcon => {
-            // Linux: the installed icon files (`app_icon.rs`). macOS: the Dock (`dock_icon.rs`)
-            // and the installed .app (`bundle_icon.rs`); the menu bar keeps the template swirl.
-            let note = if MAC {
-                "In the Dock and the Finder."
-            } else {
-                "In the dock, taskbar and menu. The tray icon changes at the next start."
-            };
-            // Four tiles leave the title no room beside them: always stacked.
-            setting(
-                true,
-                "App icon",
-                Some(note.into()),
-                row().key("settings/app-icon").gap(4.0).children(AppIcon::ALL.map(|i| icon_tile(i, s.settings.app_icon == i))),
-            )
-        }
+        // Linux: the installed icon files (`app_icon.rs`). macOS: the Dock (`dock_icon.rs`) and
+        // the installed .app (`bundle_icon.rs`); the menu bar keeps the template swirl. Four tiles
+        // leave the title no room beside them: always stacked.
+        Row::AppIcon => setting(
+            true,
+            title,
+            desc(),
+            row().key("settings/app-icon").gap(4.0).children(AppIcon::ALL.map(|i| icon_tile(i, s.settings.app_icon == i))),
+        ),
         Row::Player => {
             let style_seg = |key: &'static str, label: &'static str, v: PlayerStyle| {
                 segment(key, label, s.settings.player_style == v).on_press(move |s: &mut State| s.set_player_style(v))
             };
             setting(
                 narrow,
-                "Player",
-                Some("The bar at the bottom: full width, or a floating capsule.".into()),
+                title,
+                desc(),
                 segmented(
                     "settings/player/style",
                     vec![
@@ -434,20 +500,21 @@ fn row_el(r: &Rx, id: Row) -> El {
         }
         Row::StartupAnimation => setting(
             narrow,
-            "Startup animation",
-            Some("The Uzumaki swirl twists open when the app starts. The first library sync always shows it.".into()),
+            title,
+            desc(),
             row().gap(10.0).center_y()
                 .child(small_button("settings/intro/preview", "Preview").on_press(|s: &mut State| super::intro::preview(s)))
-                .child(switch("settings/intro", "Startup animation", s.settings.startup_animation, true, |s, v| s.set_startup_animation(v))),
+                .child(switch("settings/intro", title, s.settings.startup_animation, true, |s, v| s.set_startup_animation(v))),
         ),
         Row::Background => {
             let seg = |key: &'static str, label: &'static str, v: BgSource| {
                 segment(key, label, ap.source == v).on_press(move |s: &mut State| s.set_bg_source(v))
             };
+            // Four segments under the title, so the note keeps its width.
             setting(
-                narrow,
-                "Background",
-                Some("A picture behind the content area.".into()),
+                true,
+                title,
+                desc(),
                 segmented(
                     "settings/bg/source",
                     vec![
@@ -484,21 +551,17 @@ fn row_el(r: &Rx, id: Row) -> El {
                     .child(text("Remove").font(rune::TextStyle::new(13.0, 600.0)).color(PAL.danger_text));
                 controls = controls.child(remove);
             }
-            setting(narrow, if r.search { "Background picture" } else { "Picture" }, Some(picture), controls)
+            setting(narrow, title, Some(picture), controls)
         }
-        Row::Effect => block(
-            if r.search { "Background effect" } else { "Effect" },
-            ap.effect.description(),
-            effect_chips("settings/bg/effect", ap.effect, bg_on, |s, e| s.set_bg_effect(e)),
-        ),
+        Row::Effect => block(title, ap.effect.description(), effect_chips("settings/bg/effect", ap.effect, |s, e| s.set_bg_effect(e))),
         Row::ShowOn => {
             let show_seg = |key: &'static str, label: &'static str, v: ShowOn| {
                 segment(key, label, ap.show_on == v).on_press(move |s: &mut State| s.set_show_on(v))
             };
             setting(
                 narrow,
-                if r.search { "Show background on" } else { "Show on" },
-                Some("Card pages only, or every page including song lists.".into()),
+                title,
+                desc(),
                 segmented(
                     "settings/bg/show-on",
                     vec![
@@ -510,42 +573,32 @@ fn row_el(r: &Rx, id: Row) -> El {
         }
         Row::CardStrength => setting(
             narrow,
-            "Card page strength",
-            Some(format!("Home, New, Radio, album grids and artist pages. {}", theme_note())),
-            strength("settings/bg/opacity", narrow, ap.opacity_for(is_light()), bg_on, |s, v| s.set_bg_opacity(is_light(), v)),
+            title,
+            Some(format!("{note} {}", theme_note())),
+            strength("settings/bg/opacity", narrow, ap.opacity_for(is_light()), |s, v| s.set_bg_opacity(is_light(), v)),
         ),
         Row::ListStrength => setting(
             narrow,
-            "Song list strength",
-            Some(format!("Album and playlist pages, Songs and Local Files. {}", theme_note())),
-            strength(
-                "settings/bg/list-opacity",
-                narrow,
-                ap.list_opacity_for(is_light()),
-                bg_on && ap.show_on == ShowOn::All,
-                |s, v| s.set_bg_list_opacity(is_light(), v),
-            ),
+            title,
+            Some(format!("{note} {}", theme_note())),
+            strength("settings/bg/list-opacity", narrow, ap.list_opacity_for(is_light()), |s, v| s.set_bg_list_opacity(is_light(), v)),
         ),
-        Row::Fade => setting(
-            narrow,
-            "Fade toward the bottom",
-            Some("Keeps long lists on the plain background.".into()),
-            switch("settings/bg/fade", "Fade toward the bottom", ap.fade, bg_on, |s, on| s.set_bg_fade(on)),
-        ),
+        Row::Fade => setting(narrow, title, desc(), switch("settings/bg/fade", title, ap.fade, true, |s, on| s.set_bg_fade(on))),
         Row::NpBackground => {
             let np_seg = |key: &'static str, label: &'static str, v: NpBg| {
                 segment(key, label, ap.np == v).on_press(move |s: &mut State| s.set_np_bg(v))
             };
             setting(
-                narrow,
-                if r.search { "Now Playing background" } else { "Background" },
-                Some("Colour tints the screen with the cover. Same as app uses the picture above.".into()),
+                // Three wide segments: under the title, so the note keeps its width.
+                true,
+                title,
+                desc(),
                 segmented(
                     "settings/np/bg",
                     vec![
                         np_seg("settings/np/tint", "Colour", NpBg::Tint),
                         np_seg("settings/np/cover", "Cover", NpBg::Cover),
-                        np_seg("settings/np/app", "Same as app", NpBg::App),
+                        np_seg("settings/np/app", "App background", NpBg::App),
                     ],
                 ),
             )
@@ -555,9 +608,10 @@ fn row_el(r: &Rx, id: Row) -> El {
                 segment(key, v.label(), s.settings.animated_artwork == v).on_press(move |s: &mut State| s.set_animated_artwork(v))
             };
             setting(
-                narrow,
-                "Animated artwork",
-                Some(super::settings_search::ANIMATED_ARTWORK.into()),
+                // Three wide segments: under the title, so the note keeps its width.
+                true,
+                title,
+                desc(),
                 segmented(
                     "settings/motion",
                     vec![
@@ -568,28 +622,14 @@ fn row_el(r: &Rx, id: Row) -> El {
                 ),
             )
         }
-        Row::NpCoverEffect => block(
-            if r.search { "Now Playing cover effect" } else { "Cover effect" },
-            ap.np_effect.description(),
-            effect_chips("settings/np/effect", ap.np_effect, true, |s, e| s.set_np_effect(e)),
-        ),
-        Row::Sidebar => {
-            const NOTE: &str = "Turn off what you don't use. Right-click an entry in the sidebar to hide it from there.";
-            if r.search {
-                block("Sidebar", NOTE, sidebar_chips(s))
-            } else {
-                col().w_full()
-                    .child(text("Sidebar").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0))
-                    .child(text(NOTE).font(SMALL13).color(PAL.dim).wrap().mb(10.0))
-                    .child(sidebar_chips(s).pb(16.0))
-            }
-        }
+        Row::NpCoverEffect => block(title, ap.np_effect.description(), effect_chips("settings/np/effect", ap.np_effect, |s, e| s.set_np_effect(e))),
+        Row::Sidebar => block(title, note, sidebar_chips(s)),
         Row::OpenOn => {
             let last = s.settings.start_page == StartPage::Last;
             setting(
                 narrow,
-                "Open on",
-                None,
+                title,
+                desc(),
                 segmented(
                     "settings/start",
                     vec![
@@ -603,94 +643,49 @@ fn row_el(r: &Rx, id: Row) -> El {
             let l = &s.login;
             let note = match (l.unavailable, l.needs_approval) {
                 (Some(why), _) => why.to_string(),
-                (None, true) => "Waiting for your OK in System Settings, General, Login Items.".to_string(),
-                _ if MAC => "Opens Uzumaki when you log in to your Mac. It is listed in System Settings, General, Login Items.".to_string(),
-                _ if cfg!(windows) => "Opens Uzumaki when you sign in to Windows. It is listed in Windows Settings, Apps, Startup.".to_string(),
-                _ => "Adds Uzumaki to your desktop's autostart programs (~/.config/autostart).".to_string(),
+                (None, true) => "Waiting for your OK in System Settings \u{203a} General \u{203a} Login Items.".to_string(),
+                _ => note.to_string(),
             };
-            let sw = switch("settings/start-at-login", "Start Uzumaki when I log in", l.on, l.available() && !s.login_busy, |s, on| s.set_start_at_login(on));
+            let sw = switch("settings/start-at-login", title, l.on, l.available() && !s.login_busy, |s, on| s.set_start_at_login(on));
             let control = if l.needs_approval {
                 row().gap(12.0).center_y().child(small_button("settings/login-items", "Open Login Items").on_press(|s: &mut State| s.open_login_items())).child(sw)
             } else {
                 sw
             };
-            setting(narrow, "Start Uzumaki when I log in", Some(note), control)
+            setting(narrow, title, Some(note), control)
         }
         Row::StartHidden => {
-            let mut note = String::from(if MAC {
-                "When Uzumaki opens at login, the window stays closed and only the menu bar icon shows. Show it from the menu bar icon or by opening Uzumaki."
-            } else {
-                "When Uzumaki starts at login, the window stays closed: the music, media keys and tray icon are ready. Show it from the tray or by opening Uzumaki."
-            });
+            let mut note = note.to_string();
             if !s.settings.tray_icon {
                 note.push_str(if MAC { " The menu bar icon is off, so open Uzumaki again to see it." } else { " The tray icon is off, so open Uzumaki again to see it." });
             }
-            let enabled = s.login.on && s.login.available() && !s.login_busy;
-            setting(narrow, "Start in the background", Some(note), switch("settings/start-hidden", "Start in the background", s.settings.start_hidden, enabled, |s, on| s.set_start_hidden(on)))
+            let enabled = s.login.available() && !s.login_busy;
+            setting(narrow, title, Some(note), switch("settings/start-hidden", title, s.settings.start_hidden, enabled, |s, on| s.set_start_hidden(on)))
         }
-        Row::Tray => setting(
-            narrow,
-            if MAC { "Show icon in the menu bar" } else { "Show in system tray" },
-            Some(if MAC {
-                "Play, pause and skip from the menu bar.".into()
-            } else if cfg!(windows) {
-                "Play, pause and skip from the notification area, next to the clock.".into()
-            } else {
-                "Play, pause and skip from the tray. Needs a tray host (on GNOME, the AppIndicator extension).".into()
-            }),
-            switch("settings/tray", if MAC { "Show icon in the menu bar" } else { "Show in system tray" }, s.settings.tray_icon, true, |s, on| s.set_tray_icon(on)),
-        ),
+        Row::Tray => setting(narrow, title, desc(), switch("settings/tray", title, s.settings.tray_icon, true, |s, on| s.set_tray_icon(on))),
         Row::CloseToTray => setting(
             narrow,
-            if MAC { "Close to the menu bar" } else { "Close to tray" },
-            Some(super::keys::hint(
-                s,
-                if MAC {
-                    "Closing the window also hides the Dock icon and keeps the music playing. Quit from the menu bar icon or with the Quit shortcut"
-                } else {
-                    "Closing the window keeps the music playing. Quit from the tray or with the Quit shortcut"
-                },
-                super::keys::Action::Quit,
-            ) + "."),
-            switch("settings/close-tray", if MAC { "Close to the menu bar" } else { "Close to tray" }, s.settings.close_to_tray, s.settings.tray_icon, |s, on| s.set_close_to_tray(on)),
+            title,
+            Some(super::keys::hint(s, note.trim_end_matches('.'), super::keys::Action::Quit) + "."),
+            switch("settings/close-tray", title, s.settings.close_to_tray, true, |s, on| s.set_close_to_tray(on)),
         ),
-        Row::Notify => setting(
-            narrow,
-            "Notify on song change",
-            Some("Shows the song and its cover when a new one starts while Uzumaki isn't in front.".to_string()),
-            switch("settings/notify", "Notify on song change", s.settings.notify_song_change, true, |s, on| s.set_notify_song_change(on)),
-        ),
+        Row::Notify => setting(narrow, title, desc(), switch("settings/notify", title, s.settings.notify_song_change, true, |s, on| s.set_notify_song_change(on))),
         Row::Discord => {
-            let mut note = super::settings_search::DISCORD.to_string();
-            if !d.available() {
-                note.push_str(" This copy has no Discord application yet (see docs/DISCORD.md), so it shows nothing.");
+            let mut note = note.to_string();
+            // Only a build of one's own lacks the app's id; users never see this.
+            if !d.available() && cfg!(debug_assertions) {
+                note.push_str(" This copy has no Discord application (docs/DISCORD.md), so it shows nothing.");
             }
-            setting(narrow, "Show on Discord", Some(note), switch("settings/discord", "Show on Discord", d.enabled, true, |s, on| s.set_discord_enabled(on)))
+            setting(narrow, title, Some(note), switch("settings/discord", title, d.enabled, true, |s, on| s.set_discord_enabled(on)))
         }
-        Row::DiscordArtwork => setting(
-            narrow,
-            "Show artwork",
-            Some("The album cover on your Discord card. Discord fetches it from Apple. Off: the Uzumaki icon.".to_string()),
-            switch("settings/discord-artwork", "Show artwork", d.artwork, d.enabled, |s, on| s.set_discord_artwork(on)),
-        ),
-        Row::DiscordButtons => setting(
-            narrow,
-            "Show buttons",
-            Some("An \"Open in Apple Music\" button on your Discord card, for songs from Apple Music.".to_string()),
-            switch("settings/discord-buttons", "Show buttons", d.buttons, d.enabled, |s, on| s.set_discord_buttons(on)),
-        ),
-        Row::DiscordHidePaused => setting(
-            narrow,
-            "Hide when paused",
-            Some("Takes the card off your profile while the music is paused or stopped. Off: it stays, without the progress bar.".to_string()),
-            switch("settings/discord-hide-paused", "Hide when paused", d.hide_when_paused, d.enabled, |s, on| s.set_discord_hide_paused(on)),
-        ),
-        Row::DiscordHideTitle => setting(
-            narrow,
-            "Hide song title",
-            Some("Shows \"Listening to music\" and the artist, not the song, the album or a link to it.".to_string()),
-            switch("settings/discord-hide-title", "Hide song title", d.hide_title, d.enabled, |s, on| s.set_discord_hide_title(on)),
-        ),
+        Row::DiscordArtwork => setting(narrow, title, desc(), switch("settings/discord-artwork", title, d.artwork, true, |s, on| s.set_discord_artwork(on))),
+        Row::DiscordButtons => setting(narrow, title, desc(), switch("settings/discord-buttons", title, d.buttons, true, |s, on| s.set_discord_buttons(on))),
+        Row::DiscordHidePaused => {
+            setting(narrow, title, desc(), switch("settings/discord-hide-paused", title, d.hide_when_paused, true, |s, on| s.set_discord_hide_paused(on)))
+        }
+        Row::DiscordHideTitle => {
+            setting(narrow, title, desc(), switch("settings/discord-hide-title", title, d.hide_title, true, |s, on| s.set_discord_hide_title(on)))
+        }
         Row::DiscordStatus => {
             use crate::discord::StatusDisplay as S;
             let segs = S::ALL
@@ -702,35 +697,32 @@ fn row_el(r: &Rx, id: Row) -> El {
                         S::Artist => "settings/discord-show/artist",
                         S::TitleArtist => "settings/discord-show/title-artist",
                     };
-                    let seg = segment(key, v.label(), d.status == v);
-                    if d.enabled { seg.on_press(move |s: &mut State| s.set_discord_status(v)) } else { seg.focusable(false).cursor(Cursor::NotAllowed) }
+                    segment(key, v.label(), d.status == v).on_press(move |s: &mut State| s.set_discord_status(v))
                 })
                 .collect();
-            let bar = segmented("settings/discord-status-bar", segs);
-            setting(narrow, "Show in status", Some(super::settings_search::STATUS_NOTE.to_string()), if d.enabled { bar } else { bar.opacity(0.4) })
+            // Four segments under the title, so the note keeps its width.
+            setting(true, title, desc(), segmented("settings/discord-status-bar", segs))
         }
-        Row::CheckUpdates => setting(
-            narrow,
-            "Check for updates",
-            Some("Once a day, asks getuzumaki.app whether a new version is out, and says so. The check sends only the Uzumaki version, the system, the processor type and how Uzumaki was installed; the server keeps a daily count and nothing else. Nothing is downloaded.".to_string()),
-            switch("settings/check-updates", "Check for updates", s.settings.check_updates, true, |s, on| s.set_check_updates(on)),
-        ),
-        Row::CheckNow => {
+        Row::CheckUpdates => {
             let st = &s.update_check;
-            let mut note = crate::update::last_checked(st.last_check);
+            let mut last = crate::update::last_checked(st.last_check);
             if let Some(n) = s.update.as_ref().filter(|n| n.required) {
-                note = format!("{} {note}.", n.message());
+                last = format!("{} {last}", n.message());
             } else if let Some(result) = &st.result {
-                note = format!("{result} {note}.");
-            } else {
-                note.push('.');
+                last = format!("{result} {last}");
             }
             let button = if st.running {
                 small_button("settings/check-now", "Checking\u{2026}").opacity(0.6)
             } else {
                 small_button("settings/check-now", "Check now").on_press(|s: &mut State| s.check_updates_now())
             };
-            setting(narrow, if r.search { "Check for updates now" } else { "Updates" }, Some(note), button)
+            setting(
+                narrow,
+                title,
+                Some(format!("{note} {last}.")),
+                row().gap(12.0).center_y().child(button)
+                    .child(switch("settings/check-updates", title, s.settings.check_updates, true, |s, on| s.set_check_updates(on))),
+            )
         }
         Row::About => {
             let version = format!("Version {} (build {}{})", crate::VERSION, crate::BUILD, uzumaki_ctl::dev_suffix());
@@ -740,23 +732,23 @@ fn row_el(r: &Rx, id: Row) -> El {
                     col().grow(1.0).min_w(0.0).gap(4.0)
                         .child(text("Uzumaki").font(rune::TextStyle::new(17.0, 600.0)).color(PAL.text))
                         .child(text(version).font(SMALL13.features("'tnum' 1")).color(PAL.muted).wrap())
-                        .child(text("A native Apple Music client for Linux and macOS.").font(BODY14).color(PAL.text2).wrap().mt(4.0))
+                        .child(text(ABOUT_LINE).font(BODY14).color(PAL.text2).wrap().mt(4.0))
                         .child(text(format!("{}. Free software under the GNU General Public License, version 3 or later.", crate::COPYRIGHT)).font(SMALL13).color(PAL.dim).wrap()),
                 )
         }
         Row::Licences => col().w_full().py(16.0).gap(6.0)
-            .child(text("Licences").font(BODY14).color(PAL.text))
+            .child(text(title).font(BODY14).color(PAL.text))
             .child(text(LICENCES).font(SMALL13).color(PAL.dim).wrap()),
         Row::Links => row().w_full().py(16.0).gap(20.0).center_y()
             .child(link("settings/website", "getuzumaki.app", "https://getuzumaki.app"))
             .child(link("settings/source", "Source code (GitHub)", "https://github.com/hanami117/uzumaki")),
         Row::Support => {
-            let title = text("Support Uzumaki").font(BODY14).color(PAL.text).wrap();
-            let title = if r.search { title } else { row().gap(8.0).center_y().child(icon(&icons::HEART, 15.0).color(PAL.accent)).child(title) };
+            let heading = text(title).font(BODY14).color(PAL.text).wrap();
+            let heading = if r.search { heading } else { row().gap(8.0).center_y().child(icon(&icons::HEART, 15.0).color(PAL.accent)).child(heading) };
             setting_titled(
                 narrow,
-                title,
-                Some("Uzumaki is free and built in my spare time. If you enjoy it, you can support it on Ko-fi.".to_string()),
+                heading,
+                desc(),
                 small_button("settings/support", "Support on Ko-fi").on_press_tx(|s: &mut State, tx: &mut Tx| {
                     if tx.open_url(crate::SUPPORT_URL).is_err() {
                         s.toast = Some("Couldn't open the link.".into());
@@ -764,32 +756,26 @@ fn row_el(r: &Rx, id: Row) -> El {
                 }),
             )
         }
-        Row::Tour => setting(
-            narrow,
-            "Welcome tour",
-            Some("Plays the welcome and the shortcuts tour again.".to_string()),
-            small_button("settings/tour", "Show again").on_press(|s: &mut State| super::onboarding::replay(s)),
-        ),
-        Row::ArtCache => cache_row(s, narrow, CacheKind::Art, if r.search { "Artwork cache" } else { "Artwork" }, "settings/clear/art"),
-        Row::LibraryCache => cache_row(s, narrow, CacheKind::Library, if r.search { "Library cache" } else { "Library" }, "settings/clear/library"),
+        Row::Tour => setting(narrow, title, desc(), small_button("settings/tour", "Show again").on_press(|s: &mut State| super::onboarding::replay(s))),
+        Row::ArtCache => cache_row(s, narrow, CacheKind::Art, title, "settings/clear/art"),
+        Row::LibraryCache => cache_row(s, narrow, CacheKind::Library, title, "settings/clear/library"),
         Row::MusicFolders => music_folders(s, narrow),
         Row::NumberKeys => number_keys(s, narrow),
         Row::Binding(i) => binding(s, i),
     }
 }
 
+/// About's one-line description.
+pub const ABOUT_LINE: &str = "A native Apple Music client for Linux, macOS and Windows.";
+
 /// Account → Music source: Apple Music, or local files only (switching keeps the sign-in and
 /// the caches).
 fn music_source(s: &State, narrow: bool) -> El {
     let local = s.local_only();
-    let desc = if local {
-        "Only your music folders. Apple Music's engine doesn't run and its pages are hidden. Your Apple sign-in and library copy are kept for when you switch back."
-    } else {
-        "Apple Music, with your music folders beside it. Local files only stops Apple Music's engine and hides its pages; your sign-in is kept."
-    };
+    let desc = if local { search::MUSIC_SOURCE_LOCAL } else { search::note(Row::MusicSource) };
     setting(
         narrow,
-        "Music source",
+        search::title(Row::MusicSource),
         Some(desc.into()),
         segmented(
             "settings/source",
@@ -834,7 +820,7 @@ fn apple_music(s: &State, narrow: bool) -> El {
     } else {
         row().child(small_button("settings/sign-in", "Sign in").on_press(|s: &mut State| s.sign_in()))
     };
-    let mut v = col().w_full().child(setting(narrow, "Apple Music", Some(status), control));
+    let mut v = col().w_full().child(setting(narrow, search::title(Row::AppleMusic), Some(status), control));
     if ses.authorized && s.ui.settings.confirm && !ses.signing_out {
         v = v.child(
             col().key("settings/confirm").w_full().padding(14.0).gap(12.0).radius(10.0).fill(PAL.danger_bg).items_start().mb(8.0)
@@ -868,7 +854,7 @@ fn music_folders(s: &State, narrow: bool) -> El {
             .on_press_tx(|_s: &mut State, tx: &mut rune::Tx| super::local_files::pick_folder(tx)),
     ).child(rescan);
     let mut v = col().w_full()
-        .child(setting(narrow, "Music folders", Some("Songs in these folders (and their subfolders) show up under Local Files.".into()), buttons));
+        .child(setting(narrow, search::title(Row::MusicFolders), Some(search::note(Row::MusicFolders).into()), buttons));
     let folders = &s.settings.music_folders;
     if folders.is_empty() {
         v = v.child(text("No folders yet.").font(SMALL13).color(PAL.dim).mb(8.0));
@@ -896,7 +882,7 @@ fn number_keys(s: &State, narrow: bool) -> El {
     let (nm, nk) = (s.settings.number_mod, s.settings.number_keys);
     setting(
         narrow,
-        "Number keys 1–9",
+        search::title(Row::NumberKeys),
         Some({
             let targets: Vec<String> = (1..=9u8).filter_map(|n| keys::slot_target(s, n).map(|t| format!("{n} {t}"))).collect();
             match (nm, nk) {
@@ -966,41 +952,119 @@ fn binding(s: &State, i: usize) -> El {
 
 // ---- pages ----
 
-fn account(r: &Rx) -> Vec<El> {
-    rows(r, &[Row::MusicSource, Row::AppleMusic, Row::ExplicitContent])
+/// The rows of each page made of plain rows, in order; a `Heading` starts a group under a small
+/// uppercase title. (The order matches `settings_search::SPECS`, a test checks.)
+#[derive(Clone, Copy)]
+enum Part {
+    Row(Row),
+    Heading(&'static str),
 }
 
-fn playback(r: &Rx) -> Vec<El> {
-    rows(r, &[Row::Quality, Row::Lyrics, Row::AutoPlay, Row::Resume, Row::AirPlay, Row::Chromecast])
+use Part::{Heading as H, Row as R};
+
+const GENERAL: &[Part] = &[R(Row::OpenOn), R(Row::StartAtLogin), R(Row::StartHidden), R(Row::Tray), R(Row::CloseToTray), R(Row::Sidebar)];
+const ACCOUNT: &[Part] = &[R(Row::MusicSource), R(Row::AppleMusic), R(Row::ExplicitContent)];
+const PLAYBACK: &[Part] = &[R(Row::Quality), R(Row::AutoPlay), R(Row::Resume)];
+const SPEAKERS: &[Part] = &[R(Row::AirPlay), R(Row::Chromecast)];
+const APPEARANCE: &[Part] = &[
+    R(Row::Theme),
+    R(Row::Player),
+    R(Row::AppIcon),
+    R(Row::StartupAnimation),
+    H("Background"),
+    R(Row::Background),
+    R(Row::Picture),
+    R(Row::Effect),
+    R(Row::ShowOn),
+    R(Row::CardStrength),
+    R(Row::ListStrength),
+    R(Row::Fade),
+];
+const NOW_PLAYING: &[Part] = &[R(Row::Lyrics), R(Row::AnimatedArtwork), R(Row::NpBackground), R(Row::NpCoverEffect)];
+const NOTIFICATIONS: &[Part] = &[
+    R(Row::Notify),
+    H("Discord"),
+    R(Row::Discord),
+    R(Row::DiscordStatus),
+    R(Row::DiscordArtwork),
+    R(Row::DiscordButtons),
+    R(Row::DiscordHidePaused),
+    R(Row::DiscordHideTitle),
+];
+const ADVANCED: &[Part] = &[R(Row::CheckUpdates), R(Row::Tour), H("Storage"), R(Row::ArtCache), R(Row::LibraryCache)];
+
+/// The plain-row pages' layouts (the others are built by hand).
+fn layout(tab: Tab) -> &'static [Part] {
+    match tab {
+        Tab::General => GENERAL,
+        Tab::Account => ACCOUNT,
+        Tab::Playback => PLAYBACK,
+        Tab::Speakers => SPEAKERS,
+        Tab::Appearance => APPEARANCE,
+        Tab::NowPlaying => NOW_PLAYING,
+        Tab::Notifications => NOTIFICATIONS,
+        Tab::Advanced => ADVANCED,
+        Tab::Local | Tab::Keyboard | Tab::About => &[],
+    }
+}
+
+/// The rows of `tab`'s layout, headings aside.
+fn layout_rows(tab: Tab) -> impl Iterator<Item = Row> {
+    layout(tab).iter().filter_map(|p| match p {
+        Part::Row(r) => Some(*r),
+        Part::Heading(_) => None,
+    })
+}
+
+/// A small uppercase heading over a group of rows (Keyboard's group style).
+fn heading(t: &str) -> El {
+    text(t.to_uppercase()).font(SECTION11).color(PAL.dim).pt(22.0).pb(2.0)
+}
+
+/// A page from its layout: the rows that exist, a divider between two rows of a group, and each
+/// heading (with its group, if any row of it exists). `before` adds a page's extra element above
+/// a row (Appearance's preview above Background).
+fn page(r: &Rx, tab: Tab, before: impl Fn(Row) -> Option<El>) -> Vec<El> {
+    let mut v = Vec::new();
+    let mut pending: Option<&str> = None;
+    let mut group_open = false;
+    for part in layout(tab) {
+        match *part {
+            Part::Heading(t) => {
+                pending = Some(t);
+                group_open = false;
+            }
+            Part::Row(row) => {
+                let Some(e) = item(r, row) else { continue };
+                if let Some(t) = pending.take() {
+                    v.push(heading(t));
+                } else if group_open {
+                    v.push(divider());
+                }
+                v.extend(before(row));
+                v.push(e);
+                group_open = true;
+            }
+        }
+    }
+    v
+}
+
+fn plain(r: &Rx, tab: Tab) -> Vec<El> {
+    page(r, tab, |_| None)
 }
 
 fn appearance(r: &Rx) -> Vec<El> {
-    let mut v = vec![el().h(4.0), preview(r.s, r.cx), el().h(8.0)];
-    v.extend(rows(
-        r,
-        &[
-            Row::Theme,
-            Row::AppIcon,
-            Row::Player,
-            Row::StartupAnimation,
-            Row::AnimatedArtwork,
-            Row::Background,
-            Row::Picture,
-            Row::Effect,
-            Row::ShowOn,
-            Row::CardStrength,
-            Row::ListStrength,
-            Row::Fade,
-        ],
-    ));
+    let mut v = page(r, Tab::Appearance, |row| (row == Row::Background).then(|| preview(r.s, r.cx).mt(8.0)));
     if let Some(e) = r.s.backdrops.error(Slot::App) {
         v.push(text(format!("Couldn't show the background: {e}")).font(SMALL13).color(PAL.danger_text).wrap().mb(8.0));
     }
-    v.push(divider());
-    v.push(text("Now Playing").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
-    v.extend(rows(r, &[Row::NpBackground, Row::NpCoverEffect]));
-    v.push(divider());
-    v.extend(item(r, Row::Sidebar));
+    v
+}
+
+fn advanced(r: &Rx) -> Vec<El> {
+    let mut v = plain(r, Tab::Advanced);
+    v.push(text("Cleared files are downloaded again when needed.").font(SMALL13).color(PAL.dim).wrap().mt(4.0));
     v
 }
 
@@ -1013,15 +1077,6 @@ fn cache_row(s: &State, narrow: bool, kind: CacheKind, title: &str, key: &'stati
         .child(text(size).font(SMALL13.features("'tnum' 1")).color(PAL.muted))
         .child(small_button(key, "Clear").on_press(move |s: &mut State| s.clear_cache(kind)));
     setting(narrow, title, None, control)
-}
-
-fn general(r: &Rx) -> Vec<El> {
-    let mut v = rows(r, &[Row::OpenOn, Row::StartAtLogin, Row::StartHidden, Row::Tray, Row::CloseToTray, Row::Notify, Row::Discord, Row::DiscordStatus, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle, Row::CheckUpdates, Row::CheckNow, Row::Tour]);
-    v.push(divider());
-    v.push(text("Caches").font(CARD_TITLE).color(PAL.text).mt(22.0).mb(2.0));
-    v.extend(rows(r, &[Row::ArtCache, Row::LibraryCache]));
-    v.push(text("Cleared files are downloaded again when needed.").font(SMALL13).color(PAL.dim).wrap().mt(4.0));
-    v
 }
 
 /// Settings → About: the header card (icon, name, version, licence), the licences, the links, and
@@ -1195,6 +1250,7 @@ fn tab_row(tab: Tab, active: bool) -> El {
 pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
     // In local only mode Playback holds only Resume (its other rows are Apple Music's).
     let tab = s.ui.settings.open?;
+    let tab = if tab.shown(s) { tab } else { Tab::General };
     let w = 760.0_f32.min(win[0] - 48.0).max(320.0);
     let h = 540.0_f32.min(win[1] - 48.0).max(240.0);
     let narrow = w < 700.0;
@@ -1205,10 +1261,9 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
         ("Search", search_results(&r))
     } else {
         let items = match tab {
-            Tab::Account => account(&r),
-            Tab::Playback => playback(&r),
             Tab::Appearance => appearance(&r),
-            Tab::General => general(&r),
+            Tab::Advanced => advanced(&r),
+            Tab::General | Tab::Account | Tab::Playback | Tab::Speakers | Tab::NowPlaying | Tab::Notifications => plain(&r, tab),
             Tab::Local => local(&r),
             Tab::Keyboard => keyboard(&r),
             Tab::About => about(&r),
@@ -1219,9 +1274,12 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
     let mut side = col().w(200.0).h_full().fill(PAL.sidebar).px(10.0).pt(24.0).gap(2.0)
         .child(text("Settings").font(H2).color(PAL.text).px(10.0).pb(12.0))
         .child(search_box(s).mb(10.0));
-    for t in Tab::ALL {
-        side = side.child(tab_row(t, !searching && t == tab));
+    // The list scrolls if the window is too short for all its pages.
+    let mut list = col().w_full().gap(2.0).pb(12.0);
+    for t in Tab::ALL.into_iter().filter(|t| t.shown(s)) {
+        list = list.child(tab_row(t, !searching && t == tab));
     }
+    side = side.child(col().key("settings/pages").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list));
 
     let head = row().w_full().px(28.0).pt(22.0).pb(8.0).center_y()
         .child(text(title).font(H2).color(PAL.text).grow(1.0))
@@ -1260,14 +1318,13 @@ pub fn set_query(s: &mut State, q: &str) {
     s.ui.settings.hits = search::find(q);
 }
 
-/// A row of effect chips (they wrap), dimmed and inert while `enabled` is false.
-fn effect_chips(prefix: &'static str, current: Effect, enabled: bool, set: fn(&mut State, Effect)) -> El {
+/// A row of effect chips (they wrap).
+fn effect_chips(prefix: &'static str, current: Effect, set: fn(&mut State, Effect)) -> El {
     let mut r = row().key(prefix).w_full().flex_wrap().gap(8.0);
     for e in Effect::ALL {
-        let c = chip(format!("{prefix}/{}", e.label()), e.label(), enabled && e == current);
-        r = r.child(if enabled { c.on_press(move |s: &mut State| set(s, e)) } else { c.cursor(Cursor::NotAllowed) });
+        r = r.child(chip(format!("{prefix}/{}", e.label()), e.label(), e == current).on_press(move |s: &mut State| set(s, e)));
     }
-    if enabled { r } else { r.opacity(0.4) }
+    r
 }
 
 /// True while the Appearance preview tile has something to draw (so `ui::view` knows when to free
@@ -1322,16 +1379,13 @@ fn theme_note() -> &'static str {
     if is_light() { "For the light theme (dark has its own)." } else { "For the dark theme (light has its own)." }
 }
 
-/// A strength slider (0..=1 of the opacity range of the theme in force) with its percentage,
-/// dimmed and inert unless `enabled`. Moves apply live; the release saves.
-fn strength(key: &'static str, narrow: bool, value: f32, enabled: bool, set: fn(&mut State, f32)) -> El {
+/// A strength slider (0..=1 of the opacity range of the theme in force) with its percentage.
+/// Moves apply live; the release saves.
+fn strength(key: &'static str, narrow: bool, value: f32, set: fn(&mut State, f32)) -> El {
     let (min, max) = opacity_range(is_light());
     let frac = (value - min) / (max - min);
-    let r = row().w(if narrow { 260.0 } else { 220.0 }).gap(12.0).center_y()
+    row().w(if narrow { 260.0 } else { 220.0 }).gap(12.0).center_y()
         .child(el().grow(1.0).child(slider(key, frac, PAL.accent, move |s, f, phase, cancelled, _tx| {
-            if !enabled {
-                return;
-            }
             if !(phase == rune::Phase::Up && cancelled) {
                 set(s, min + f * (max - min));
             }
@@ -1339,8 +1393,7 @@ fn strength(key: &'static str, narrow: bool, value: f32, enabled: bool, set: fn(
                 s.save_appearance();
             }
         })))
-        .child(text(format!("{}%", (value * 100.0).round())).font(SMALL13.features("'tnum' 1")).color(PAL.muted).w(36.0));
-    if enabled { r } else { r.opacity(0.4).cursor(Cursor::NotAllowed).disabled(true) }
+        .child(text(format!("{}%", (value * 100.0).round())).font(SMALL13.features("'tnum' 1")).color(PAL.muted).w(36.0))
 }
 
 /// A titled block with an optional muted description, then full-width content (effect chips).
@@ -1371,7 +1424,7 @@ fn keycap(k: &str) -> El {
 }
 
 
-/// Settings → Appearance → Sidebar: one chip per entry; a lit chip shows in the sidebar.
+/// Settings → General → Sidebar: one chip per entry; a lit chip shows in the sidebar.
 fn sidebar_chips(s: &State) -> El {
     let mut chips = row().key("settings/sidebar").w_full().gap(8.0).flex_wrap();
     // Local only mode: the Apple entries are hidden anyway (their choices are kept).
@@ -1457,9 +1510,9 @@ mod tests {
         focus_field(&mut rt);
         type_text(&mut rt, "Lyrics");
         assert!(searching(&rt.state));
-        assert!(rt.presented(&Row::Lyrics.key()).is_some(), "Playback's row");
+        assert!(rt.presented(&Row::Lyrics.key()).is_some(), "Now Playing's row");
         assert!(rt.presented("settings/lyrics/words").is_some(), "with its working control");
-        assert!(rt.presented("settings/group/playback").is_some());
+        assert!(rt.presented("settings/group/now-playing").is_some());
         assert!(rt.presented("settings/group/keyboard").is_some(), "shortcuts too");
         assert!(rt.presented(&Row::MusicSource.key()).is_none(), "the page gave way");
         // The control works from the results.
@@ -1505,6 +1558,7 @@ mod tests {
     #[test]
     fn enter_opens_the_first_result_and_flashes_it() {
         let mut rt = window();
+        rt.update(|s, _| s.settings.appearance.source = BgSource::Builtin);
         focus_field(&mut rt);
         type_text(&mut rt, "fade");
         let first = results(&rt.state)[0];
@@ -1535,7 +1589,9 @@ mod tests {
         let st = &rt.state.ui.settings;
         assert_eq!(st.open, Some(Tab::General));
         assert!(st.query.text.is_empty());
-        assert_eq!(st.flash, Some(Row::StartHidden), "its first match (the background start names the tray)");
+        // Open in the background names the tray, but hides while Open at login is off: the row
+        // it hides behind stands in for it.
+        assert_eq!(st.flash, Some(Row::StartAtLogin), "its first match");
     }
 
     #[test]
@@ -1543,22 +1599,20 @@ mod tests {
         let mut rt = window();
         rt.update(|s, _| set_query(s, "discord"));
         settle(&mut rt, 10);
-        let found: Vec<Row> = results(&rt.state).iter().map(|(_, r)| *r).collect();
-        for r in [Row::Discord, Row::DiscordStatus, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle] {
-            assert!(found.contains(&r), "{r:?} in {found:?}");
-        }
+        let found = |rt: &Runtime<State>| -> Vec<Row> { results(&rt.state).iter().map(|(_, r)| *r).collect() };
         assert!(!rt.state.settings.discord.enabled, "off by default");
+        assert_eq!(found(&rt), vec![Row::Discord], "its choices hide behind the switch");
+        assert!(rt.presented("settings/discord-artwork").is_none());
         assert_eq!(rt.state.settings.discord.status, crate::discord::StatusDisplay::TitleArtist, "the default");
-        // "Show in status" is the row right below the switch.
-        let order: Vec<Row> = results(&rt.state).iter().map(|(_, r)| *r).collect();
-        let at = |r: Row| order.iter().position(|x| *x == r).unwrap();
-        assert_eq!(at(Row::DiscordStatus), at(Row::Discord) + 1, "{order:?}");
-        click(&mut rt, "settings/discord-artwork");
-        assert!(rt.state.settings.discord.artwork, "dimmed while the switch is off");
-        click(&mut rt, "settings/discord-show/artist");
-        assert_eq!(rt.state.settings.discord.status, crate::discord::StatusDisplay::TitleArtist, "the status choice is dimmed too");
         click(&mut rt, "settings/discord");
         assert!(rt.state.settings.discord.enabled);
+        let order = found(&rt);
+        for r in [Row::Discord, Row::DiscordStatus, Row::DiscordArtwork, Row::DiscordButtons, Row::DiscordHidePaused, Row::DiscordHideTitle] {
+            assert!(order.contains(&r), "{r:?} in {order:?}");
+        }
+        // "Status text" is the row right below the switch.
+        let at = |r: Row| order.iter().position(|x| *x == r).unwrap();
+        assert_eq!(at(Row::DiscordStatus), at(Row::Discord) + 1, "{order:?}");
         click(&mut rt, "settings/discord-show/artist");
         assert_eq!(rt.state.settings.discord.status, crate::discord::StatusDisplay::Artist);
         click(&mut rt, "settings/discord-artwork");
@@ -1576,6 +1630,143 @@ mod tests {
         settle(&mut rt, 30);
         click(&mut rt, "settings/discord");
         assert!(!rt.state.settings.discord.enabled);
+        assert_eq!(found(&rt), vec![Row::Discord], "hidden again, their choices kept");
+        assert!(rt.state.settings.discord.hide_title);
+    }
+
+    /// A search for a row that hides behind a switch shows that switch's row, once.
+    #[test]
+    fn a_hidden_row_is_found_through_the_row_it_hides_behind() {
+        let mut s = State::offline();
+        s.settings.discord.enabled = false;
+        set_query(&mut s, "discord album cover");
+        assert_eq!(results(&s), vec![(Tab::Notifications, Row::Discord)]);
+        set_query(&mut s, "discord");
+        assert_eq!(results(&s), vec![(Tab::Notifications, Row::Discord)], "five hidden rows, one stand-in");
+        s.settings.discord.enabled = true;
+        set_query(&mut s, "discord album cover");
+        assert_eq!(results(&s), vec![(Tab::Notifications, Row::DiscordArtwork)]);
+        // Two levels: Strength on song lists → Show on → Background.
+        s.settings.appearance.source = BgSource::Off;
+        set_query(&mut s, "song list strength");
+        assert_eq!(results(&s), vec![(Tab::Appearance, Row::Background)]);
+        s.settings.appearance.source = BgSource::Builtin;
+        s.settings.appearance.show_on = ShowOn::Cards;
+        set_query(&mut s, "song list strength");
+        assert_eq!(results(&s), vec![(Tab::Appearance, Row::ShowOn)]);
+        s.settings.appearance.show_on = ShowOn::All;
+        set_query(&mut s, "song list strength");
+        assert_eq!(results(&s), vec![(Tab::Appearance, Row::ListStrength)]);
+        // A row this copy lacks stays out (no parent stands in for it).
+        s.settings.music_source = MusicSource::LocalOnly;
+        set_query(&mut s, "highlight lyrics");
+        assert!(results(&s).iter().all(|(t, _)| *t == Tab::Keyboard), "{:?}", results(&s));
+    }
+
+    /// Settings open on `tab` in a window of `size`.
+    fn page_window(tab: Tab, size: (f32, f32), set: impl FnOnce(&mut State)) -> Runtime<State> {
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == "settings-account").unwrap().1)(&mut s);
+        set(&mut s);
+        s.ui.settings.open = Some(tab);
+        let mut rt = Runtime::new(s, crate::ui::view, size, rune::Env { system_dark: true, scale: 1.0 });
+        rt.on_key = Some(crate::ui::on_key);
+        rt.poll = Some(crate::ui::poll);
+        settle(&mut rt, 30);
+        rt
+    }
+
+    fn on_page(rt: &Runtime<State>, row: Row) -> bool {
+        rt.presented(&row.key()).is_some()
+    }
+
+    #[test]
+    fn rows_that_depend_on_a_switch_hide_while_it_is_off() {
+        let mut rt = page_window(Tab::Notifications, (1360.0, 860.0), |_| {});
+        assert!(on_page(&rt, Row::Notify) && on_page(&rt, Row::Discord));
+        assert!(!on_page(&rt, Row::DiscordStatus) && !on_page(&rt, Row::DiscordArtwork), "Discord is off");
+        click(&mut rt, "settings/discord");
+        assert!(on_page(&rt, Row::DiscordStatus) && on_page(&rt, Row::DiscordArtwork));
+
+        let mut rt = page_window(Tab::Appearance, (1360.0, 860.0), |_| {});
+        rt.update(|_, tx| tx.scroll_center(Row::Background.key()));
+        settle(&mut rt, 30);
+        assert!(!on_page(&rt, Row::Effect) && !on_page(&rt, Row::Fade) && !on_page(&rt, Row::Picture), "the background is off");
+        click(&mut rt, "settings/bg/builtin");
+        rt.update(|_, tx| tx.scroll_center(Row::Effect.key()));
+        settle(&mut rt, 30);
+        assert!(on_page(&rt, Row::Effect) && !on_page(&rt, Row::Picture), "Picture only with Picture");
+        click(&mut rt, "settings/bg/picture");
+        assert!(on_page(&rt, Row::Picture));
+
+        let mut rt = page_window(Tab::General, (1360.0, 860.0), |s| s.settings.tray_icon = false);
+        assert!(!on_page(&rt, Row::CloseToTray) && !on_page(&rt, Row::StartHidden));
+        click(&mut rt, "settings/tray");
+        assert!(on_page(&rt, Row::CloseToTray));
+    }
+
+    #[test]
+    fn speakers_shows_only_where_it_has_a_row() {
+        let mut s = State::offline();
+        s.airplay.available = false;
+        assert_eq!(Tab::Speakers.shown(&s), crate::cast::SUPPORTED, "Chromecast is Unix only");
+        s.airplay.available = true;
+        assert!(Tab::Speakers.shown(&s));
+        // Reopening on a page that went away lands on General.
+        s.airplay.available = false;
+        s.ui.settings.last = Tab::Speakers;
+        open(&mut s);
+        assert_eq!(s.ui.settings.open, Some(if crate::cast::SUPPORTED { Tab::Speakers } else { Tab::General }));
+    }
+
+    /// Each page lists its rows in the table's order (`settings_search::SPECS`), and every row of
+    /// the table is on its page.
+    #[test]
+    fn pages_follow_the_table() {
+        for tab in Tab::ALL {
+            let table = search::rows_of(tab);
+            let page: Vec<Row> = match tab {
+                Tab::Local => vec![Row::MusicFolders],
+                Tab::Keyboard => vec![Row::NumberKeys],
+                Tab::About => vec![Row::About, Row::Licences, Row::Links, Row::Support],
+                _ => layout_rows(tab).collect(),
+            };
+            assert_eq!(page, table, "{tab:?}");
+            for r in page {
+                assert_eq!(search::tab(r), tab, "{r:?}");
+            }
+        }
+    }
+
+    /// The smallest window (640×500): the panel is narrow and short, and the page list scrolls
+    /// to its last page.
+    #[test]
+    fn the_smallest_window_reaches_every_page() {
+        let mut rt = page_window(Tab::General, (640.0, 500.0), |_| {});
+        let panel = rt.presented("settings/panel").unwrap().0;
+        assert!(panel[2] < 700.0 && panel[3] <= 452.5, "{panel:?}");
+        rt.update(|_, tx| tx.scroll_center("settings/tab/about"));
+        settle(&mut rt, 30);
+        let about = rt.presented("settings/tab/about").expect("About in the list").0;
+        assert!(about[1] + about[3] <= panel[1] + panel[3] + 0.5, "{about:?} in {panel:?}");
+        click(&mut rt, "settings/tab/about");
+        assert_eq!(rt.state.ui.settings.open, Some(Tab::About));
+    }
+
+    /// Tab walks the page list in order, after the search field.
+    #[test]
+    fn tab_walks_the_page_list() {
+        let mut rt = page_window(Tab::General, (1360.0, 860.0), |_| {});
+        focus_field(&mut rt);
+        let focus = |rt: &Runtime<State>| rt.elements().into_iter().find(|e| e.focused).and_then(|e| e.key);
+        let mut seen = Vec::new();
+        for _ in 0..Tab::ALL.len() + 1 {
+            rt.key(KeyEvent { key: Key::Tab, mods: Default::default() });
+            settle(&mut rt, 5);
+            seen.extend(focus(&rt));
+        }
+        let shown: Vec<String> = Tab::ALL.iter().filter(|t| t.shown(&rt.state)).map(|t| t.info().0.to_string()).collect();
+        assert_eq!(seen[..shown.len()], shown[..], "{seen:?}");
     }
 
     #[test]
@@ -1623,9 +1814,8 @@ mod tests {
     fn the_start_at_login_switches_turn_on_in_order() {
         // No handle in tests: the switches move, nothing on the system is touched.
         let mut rt = general_window(crate::login::Login::default());
-        assert!(rt.presented(&Row::StartAtLogin.key()).is_some() && rt.presented(&Row::StartHidden.key()).is_some());
-        click(&mut rt, "settings/start-hidden");
-        assert!(!rt.state.settings.start_hidden, "background needs start at login first");
+        assert!(rt.presented(&Row::StartAtLogin.key()).is_some());
+        assert!(rt.presented(&Row::StartHidden.key()).is_none(), "the background start shows once Open at login is on");
         click(&mut rt, "settings/start-at-login");
         assert!(rt.state.login.on && !rt.state.login_busy);
         click(&mut rt, "settings/start-hidden");
@@ -1636,6 +1826,7 @@ mod tests {
         click(&mut rt, "settings/start-at-login");
         assert!(!rt.state.login.on);
         assert!(rt.state.settings.start_hidden, "kept for the next time");
+        assert!(rt.presented(&Row::StartHidden.key()).is_none());
     }
 
     #[test]

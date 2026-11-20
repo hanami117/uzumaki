@@ -22,7 +22,7 @@
 //!
 //! When the last check ran, its answer and the skipped version live in
 //! `$XDG_STATE_HOME/uzumaki/update.json` (else `~/.local/state/…`, on macOS too): state, not
-//! settings. The switch is `Settings::check_updates` (Settings → General): off, nothing is sent.
+//! settings. The switch is `Settings::check_updates` (Settings → Advanced): off, nothing is sent.
 //! Headless runs and tests never fetch: only the real app's `State` (with a handle) starts the
 //! worker.
 
@@ -366,7 +366,7 @@ pub fn check(rec: &mut Record, now: u64, fetch: impl FnOnce(Flags) -> Result<Lat
     true
 }
 
-/// A manual check ("Check for Updates…", Settings → General → Check now): always asks. On a day
+/// A manual check ("Check for Updates…", Settings → Advanced → Check now): always asks. On a day
 /// that already had an answered check it is a `repeat` (not counted again); otherwise its answer is
 /// the day's check.
 pub fn manual(rec: &mut Record, now: u64, fetch: impl FnOnce(Flags) -> Result<Latest, String>) -> Result<Latest, String> {
@@ -375,7 +375,7 @@ pub fn manual(rec: &mut Record, now: u64, fetch: impl FnOnce(Flags) -> Result<La
     answer
 }
 
-/// Where a manual check stands, for Settings → General.
+/// Where a manual check stands, for Settings → Advanced.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CheckStatus {
     /// A manual check is running.

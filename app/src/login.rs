@@ -1,4 +1,4 @@
-//! Settings → General → "Start Uzumaki when I log in" and "Start in the background".
+//! Settings → General → "Open at login" and "Open in the background".
 //!
 //! The switch shows what the system holds, read back at start (`read`), not a saved bool:
 //! - Linux (`login_linux.rs`): an XDG autostart entry, `~/.config/autostart/<app id>.desktop`,

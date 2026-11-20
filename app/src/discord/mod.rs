@@ -1,4 +1,4 @@
-//! "Show on Discord" (Settings → General): Discord Rich Presence, the "Listening to …" card
+//! "Show on Discord" (Settings → Notifications): Discord Rich Presence, the "Listening to …" card
 //! Spotify shows on your profile. See docs/DISCORD.md for how to create the Discord Application
 //! this needs.
 //!

@@ -3,7 +3,7 @@
 //! Welcome → Choice (Apple Music or local files only) → Done, in one full-window layer drawn
 //! where the intro is drawn. The app sits folded behind it (`intro::fold`) and twists out of the
 //! swirl at the end, as after the intro. Back, Skip (and Esc) and the step dots sit at the bottom.
-//! "Show the tour again" (Settings → General) replays Welcome → Tour → Done; the choice and
+//! "Show the tour again" (Settings → Advanced) replays Welcome → Tour → Done; the choice and
 //! sign-in are not replayed.
 //!
 //! Local only: no bridge runs while the onboarding is up until Apple Music is chosen, or the
@@ -88,7 +88,7 @@ pub enum SignInView {
 pub enum Mode {
     /// A new install: Welcome → Choice → Sign in or Folders → Tour → Done.
     FirstRun,
-    /// Settings → General → Show again: Welcome → Tour → Done (no choice, no sign-in).
+    /// Settings → Advanced → Show again: Welcome → Tour → Done (no choice, no sign-in).
     Replay,
     /// Settings → Account → Apple Music while not signed in: the Sign in step on its own.
     SignIn,
@@ -248,7 +248,7 @@ fn xdg_music_dir(text: &str, home: &std::path::Path) -> Option<PathBuf> {
     Some(path)
 }
 
-/// Settings → General → Show again: Welcome → Tour → Done over the app, which folds away first.
+/// Settings → Advanced → Show again: Welcome → Tour → Done over the app, which folds away first.
 pub fn replay(s: &mut State) {
     super::settings::close(s);
     if s.ui.onboarding.is_some() {
@@ -2006,7 +2006,7 @@ mod tests {
         }
     }
 
-    /// Settings → General → Show again in a window: Welcome, the tour, Done; nothing else.
+    /// Settings → Advanced → Show again in a window: Welcome, the tour, Done; nothing else.
     #[test]
     fn show_again_in_a_window() {
         let mut s = State::offline();
@@ -2014,9 +2014,9 @@ mod tests {
         let mut rt = rune::Runtime::new(s, crate::ui::view, (1360.0, 860.0), rune::Env { system_dark: true, scale: 1.0 });
         rt.on_key = Some(crate::ui::on_key);
         rt.poll = Some(crate::ui::poll);
-        rt.update(|s, _| super::super::settings::open_tab(s, super::super::settings::Tab::General));
+        rt.update(|s, _| super::super::settings::open_tab(s, super::super::settings::Tab::Advanced));
         run(&mut rt, 0.6);
-        // General is taller than the panel: scroll to the row first, as a person would.
+        // Scroll to the row first, as a person would on a short window.
         rt.update(|_, tx| tx.scroll_center(crate::ui::settings_search::Row::Tour.key()));
         run(&mut rt, 0.6);
         click(&mut rt, "settings/tour");

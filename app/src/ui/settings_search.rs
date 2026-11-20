@@ -1,5 +1,6 @@
-//! Settings search: a static table of every row (its page, title, note and a few synonyms),
-//! folded once into one lower-case, accent-free string per row. A keystroke folds the query and
+//! Settings rows: a static table of every row (its page, title, note and a few synonyms). The
+//! pages take their titles and notes from it; search folds each row once into one lower-case,
+//! accent-free string. A keystroke folds the query and
 //! keeps the rows that contain every word of it (`find`); the view only filters that short list.
 
 use std::sync::LazyLock;
@@ -21,9 +22,9 @@ pub enum Row {
     Resume,
     /// AutoPlay (Settings → Playback; Apple Music only), the ∞ in Up Next.
     AutoPlay,
-    /// Reconnect to last AirPlay device (Settings → Playback; also in local only mode).
+    /// Reconnect to the last speaker (Settings → Speakers; also in local only mode).
     AirPlay,
-    /// Chromecast on or off (Settings → Playback; Unix only).
+    /// Chromecast on or off (Settings → Speakers; Unix only).
     Chromecast,
     Theme,
     AppIcon,
@@ -41,9 +42,9 @@ pub enum Row {
     NpCoverEffect,
     Sidebar,
     OpenOn,
-    /// "Start Uzumaki when I log in" (`login.rs`).
+    /// "Open at login" (`login.rs`).
     StartAtLogin,
-    /// "Start in the background" (a start at login opens no window).
+    /// "Open in the background" (a start at login opens no window).
     StartHidden,
     Tray,
     CloseToTray,
@@ -55,9 +56,8 @@ pub enum Row {
     DiscordHidePaused,
     DiscordHideTitle,
     DiscordStatus,
+    /// "Check for updates daily": the switch, Check now and when the last check ran.
     CheckUpdates,
-    /// "Check now" and when the last check ran.
-    CheckNow,
     Tour,
     ArtCache,
     LibraryCache,
@@ -117,7 +117,6 @@ impl Row {
             Row::DiscordHideTitle => "discord-hide-title",
             Row::DiscordStatus => "discord-status",
             Row::CheckUpdates => "check-updates",
-            Row::CheckNow => "check-now",
             Row::Tour => "tour",
             Row::ArtCache => "art-cache",
             Row::LibraryCache => "library-cache",
@@ -158,6 +157,8 @@ enum On {
     All,
     Mac,
     Linux,
+    /// Windows (`Os::Other`).
+    Win,
     NotMac,
 }
 
@@ -167,6 +168,7 @@ impl On {
             On::All => true,
             On::Mac => os == Os::Mac,
             On::Linux => os == Os::Linux,
+            On::Win => os == Os::Other,
             On::NotMac => os != Os::Mac,
         }
     }
@@ -178,7 +180,7 @@ struct Spec {
     on: On,
     title: &'static str,
     note: &'static str,
-    /// Synonyms: words people may type that the title and note don't hold.
+    /// Synonyms: words people may type that the title and note don't hold (old labels too).
     words: &'static str,
 }
 
@@ -190,65 +192,115 @@ const fn only(on: On, row: Row, tab: Tab, title: &'static str, note: &'static st
     Spec { row, tab, on, title, note, words }
 }
 
-/// The Chromecast row's note (the page and the search say the same).
-pub const CHROMECAST_NOTE: &str = "Chromecast devices and Google TVs on this network show up in the AirPlay picker. They play a couple of seconds behind. Off: Uzumaki doesn't look for them.";
-
-/// Every row of every page, in page order. Titles and notes follow the pages (`ui::settings`);
-/// notes that change with the state are left out or given in their usual form.
+/// Every row of every page, in page order: the one place a row's page, title and note are written.
+/// The pages (`ui::settings`) take their titles and notes from here, so search can't drift from
+/// them. A note that changes with the state (a file name, the last update check) is the page's
+/// own; the note here is then what search matches.
 const SPECS: &[Spec] = &[
-    spec(Row::MusicSource, Tab::Account, "Music source", "Apple Music, or local files only.", "offline local mode streaming"),
-    spec(Row::AppleMusic, Tab::Account, "Apple Music", "Signed in, store.", "sign in sign out log in login logout apple id storefront country region store"),
-    spec(Row::ExplicitContent, Tab::Account, "Explicit content", "Allow it on music.apple.com first; a Screen Time change on iPhone or Mac may not reach the web player.", "explicit restricted restriction refused content_restricted screen time parental controls child age e clean music.apple.com"),
-    spec(Row::Quality, Tab::Playback, "Streaming quality", "Data saver uses about a quarter of the data. Lossless and Dolby Atmos aren't available in Apple Music on the web.", "bitrate kbps audio sound 256 64 mobile"),
-    spec(Row::Lyrics, Tab::Playback, "Lyrics highlight", "Word by word when Apple has word timing, otherwise whole lines.", "karaoke words lines sync"),
-    spec(Row::AutoPlay, Tab::Playback, "AutoPlay", "When the queue ends, similar music keeps playing. Also the \u{221e} button in Up Next.", "auto play infinite endless continue similar songs radio station suggestions queue end infinity"),
-    spec(Row::Resume, Tab::Playback, "Resume where you left off", "At start, the last song comes back paused where you stopped, with its queue. Nothing plays until you press Play.", "restore continue last song position queue startup launch remember session"),
-    spec(Row::AirPlay, Tab::Playback, "Reconnect to last AirPlay device", "At start, the sound goes back to the AirPlay speaker you used last, if it is on. Off: Uzumaki always starts on this computer.", "airplay speaker homepod apple tv output cast wireless reconnect startup launch remember"),
-    spec(Row::Chromecast, Tab::Playback, "Chromecast", CHROMECAST_NOTE, "chromecast google cast tv android tv google tv nest speaker output wireless stream network"),
+    // ---- General ----
+    spec(Row::OpenOn, Tab::General, "Open on", "The page Uzumaki shows when it opens.", "startup start page launch home last page"),
+    only(On::Linux, Row::StartAtLogin, Tab::General, "Open at login", "Adds Uzumaki to your desktop's autostart programs (~/.config/autostart).", "start uzumaki when i log in autostart auto start startup boot login log in logon sign in launch automatically session"),
+    only(On::Mac, Row::StartAtLogin, Tab::General, "Open at login", "Listed in System Settings \u{203a} General \u{203a} Login Items.", "start uzumaki when i log in autostart auto start startup boot login log in logon launch login items automatically"),
+    only(On::Win, Row::StartAtLogin, Tab::General, "Open at login", "Listed in Windows Settings \u{203a} Apps \u{203a} Startup.", "start uzumaki when i log in autostart auto start startup boot login log in logon sign in launch automatically task manager"),
+    only(On::NotMac, Row::StartHidden, Tab::General, "Open in the background", "At login, no window: only the tray icon.", "start in the background hidden minimised minimized minimise minimize tray silent quiet no window autostart startup login"),
+    only(On::Mac, Row::StartHidden, Tab::General, "Open in the background", "At login, no window: only the menu bar icon.", "start in the background hidden minimised minimized minimise minimize menu bar tray silent quiet no window dock autostart startup login"),
+    only(On::Linux, Row::Tray, Tab::General, "Tray icon", "Play, pause and skip from the tray. On GNOME, needs the AppIndicator extension.", "show in system tray menu bar status icon notification area"),
+    only(On::Mac, Row::Tray, Tab::General, "Menu bar icon", "Play, pause and skip from the menu bar.", "show icon in the menu bar tray status icon"),
+    only(On::Win, Row::Tray, Tab::General, "Tray icon", "Play, pause and skip from the notification area, next to the clock.", "show in system tray menu bar status icon taskbar"),
+    only(On::NotMac, Row::CloseToTray, Tab::General, "Keep playing when the window closes", "Quit from the tray icon or with the Quit shortcut.", "close to tray menu bar background minimize minimise quit"),
+    only(On::Mac, Row::CloseToTray, Tab::General, "Keep playing when the window closes", "The Dock icon goes too. Quit from the menu bar icon or with the Quit shortcut.", "close to the menu bar tray background minimize minimise quit dock"),
+    spec(Row::Sidebar, Tab::General, "Sidebar", "What the sidebar lists. You can also right-click an entry to hide it.", "navigation hide show entries menu edit sidebar"),
+    // ---- Account ----
+    spec(Row::MusicSource, Tab::Account, "Music source", MUSIC_SOURCE_APPLE, "offline local mode streaming"),
+    spec(Row::AppleMusic, Tab::Account, "Apple Music", "Signed in, store.", "sign in sign out log in login logout apple id storefront country region store account"),
+    spec(Row::ExplicitContent, Tab::Account, "Explicit content", "It is set on music.apple.com, with the same Apple Account. Screen Time may not reach it.", "explicit restricted restriction refused content_restricted screen time parental controls child age e clean"),
+    // ---- Playback ----
+    spec(Row::Quality, Tab::Playback, "Audio quality", "Data saver uses a quarter of the data. Apple Music on the web has no Lossless or Dolby Atmos.", "streaming quality best high bitrate kbps audio sound 256 64 mobile"),
+    spec(Row::AutoPlay, Tab::Playback, "AutoPlay", "When the queue ends, similar music keeps playing (the \u{221e} in Up Next). Not with Repeat or on radio.", "auto play infinite endless continue similar songs radio station suggestions queue end infinity"),
+    spec(Row::Resume, Tab::Playback, "Resume where you left off", "Uzumaki opens on the last song and its queue, paused.", "restore continue last song position queue startup launch remember session"),
+    // ---- Speakers ----
+    spec(Row::AirPlay, Tab::Speakers, "Reconnect to the last speaker", "At start, play on the AirPlay speaker you used last, if it is on. Off: always this computer.", "airplay device speaker homepod apple tv output cast wireless reconnect startup launch remember"),
+    spec(Row::Chromecast, Tab::Speakers, "Chromecast", "Google TVs and Cast speakers on this network show up in the speaker menu, a couple of seconds behind. Off: Uzumaki doesn't look for them.", "chromecast google cast tv android tv google tv nest speaker output wireless stream network device"),
+    // ---- Appearance ----
     spec(Row::Theme, Tab::Appearance, "Theme", "System follows your computer's light or dark appearance.", "dark mode light mode colour color appearance night"),
+    spec(Row::Player, Tab::Appearance, "Player bar", "Full width at the bottom, or a floating capsule.", "player docked floating controls"),
     only(On::Linux, Row::AppIcon, Tab::Appearance, "App icon", "In the dock, taskbar and menu. The tray icon changes at the next start.", "icon logo dark light coral launcher"),
     only(On::Mac, Row::AppIcon, Tab::Appearance, "App icon", "In the Dock and the Finder.", "icon logo dark light coral launcher"),
-    spec(Row::Player, Tab::Appearance, "Player", "The bar at the bottom: full width, or a floating capsule.", "player bar docked floating controls"),
-    spec(Row::StartupAnimation, Tab::Appearance, "Startup animation", "The Uzumaki swirl twists open when the app starts. The first library sync always shows it.", "intro splash launch swirl motion"),
-    spec(Row::AnimatedArtwork, Tab::Appearance, "Animated artwork", ANIMATED_ARTWORK, "motion video moving cover album art loop now playing album page always off still"),
-    spec(Row::Background, Tab::Appearance, "Background", "A picture behind the content area.", "wallpaper backdrop image cover"),
-    spec(Row::Picture, Tab::Appearance, "Picture", "Choose a background picture.", "wallpaper image photo file background"),
-    spec(Row::Effect, Tab::Appearance, "Effect", "Background effect.", "dither ascii halftone blur scanlines background"),
-    spec(Row::ShowOn, Tab::Appearance, "Show on", "Card pages only, or every page including song lists.", "background pages"),
-    spec(Row::CardStrength, Tab::Appearance, "Card page strength", "Home, New, Radio, album grids and artist pages.", "background opacity strength transparency"),
-    spec(Row::ListStrength, Tab::Appearance, "Song list strength", "Album and playlist pages, Songs and Local Files.", "background opacity strength transparency"),
-    spec(Row::Fade, Tab::Appearance, "Fade toward the bottom", "Keeps long lists on the plain background.", "background gradient"),
-    spec(Row::NpBackground, Tab::Appearance, "Now Playing background", "Colour tints the screen with the cover. Same as app uses the picture above.", "full screen fullscreen tint color"),
-    spec(Row::NpCoverEffect, Tab::Appearance, "Now Playing cover effect", "The effect on the cover behind Now Playing.", "full screen fullscreen dither blur"),
-    spec(Row::Sidebar, Tab::Appearance, "Sidebar", "Turn off what you don't use. Right-click an entry in the sidebar to hide it from there.", "navigation hide show entries menu"),
-    spec(Row::OpenOn, Tab::General, "Open on", "Home or the last page.", "startup start page launch home last page"),
-    only(On::NotMac, Row::StartAtLogin, Tab::General, "Start Uzumaki when I log in", "Adds Uzumaki to your desktop's autostart programs.", "autostart auto start startup boot login log in logon sign in launch open automatically session"),
-    only(On::Mac, Row::StartAtLogin, Tab::General, "Start Uzumaki when I log in", "Opens Uzumaki when you log in to your Mac. Listed in System Settings, Login Items.", "autostart auto start startup boot login log in logon launch open at login login items automatically"),
-    only(On::NotMac, Row::StartHidden, Tab::General, "Start in the background", "When Uzumaki starts at login, the window stays closed: the music, media keys and tray icon are ready. Show it from the tray or by opening Uzumaki.", "background hidden minimised minimized minimise minimize tray silent quiet no window autostart startup login"),
-    only(On::Mac, Row::StartHidden, Tab::General, "Start in the background", "When Uzumaki opens at login, the window stays closed and only the menu bar icon shows. Show it from the menu bar icon or by opening Uzumaki.", "background hidden minimised minimized minimise minimize menu bar tray silent quiet no window dock autostart startup login"),
-    only(On::NotMac, Row::Tray, Tab::General, "Show in system tray", "Play, pause and skip from the tray. Needs a tray host (on GNOME, the AppIndicator extension).", "tray menu bar status icon notification area"),
-    only(On::Mac, Row::Tray, Tab::General, "Show icon in the menu bar", "Play, pause and skip from the menu bar.", "tray menu bar status icon"),
-    only(On::NotMac, Row::CloseToTray, Tab::General, "Close to tray", "Closing the window keeps the music playing. Quit from the tray or with the Quit shortcut.", "tray menu bar background minimize minimise quit"),
-    only(On::Mac, Row::CloseToTray, Tab::General, "Close to the menu bar", "Closing the window also hides the Dock icon and keeps the music playing. Quit from the menu bar icon or with the Quit shortcut.", "tray menu bar background minimize minimise quit"),
-    spec(Row::Notify, Tab::General, "Notify on song change", "Shows the song and its cover when a new one starts while Uzumaki isn't in front.", "notification notifications alert popup toast"),
-    spec(Row::Discord, Tab::General, "Show on Discord", DISCORD, "discord rich presence activity status listening spotify profile game"),
-    spec(Row::DiscordStatus, Tab::General, "Show in status", STATUS_NOTE, "discord status line member list mini profile compact song title artist app name"),
-    spec(Row::DiscordArtwork, Tab::General, "Show artwork", "The album cover on your Discord card. Discord fetches it from Apple. Off: the Uzumaki icon.", "discord cover album art picture image"),
-    spec(Row::DiscordButtons, Tab::General, "Show buttons", "An \"Open in Apple Music\" button on your Discord card, for songs from Apple Music.", "discord button link share apple music"),
-    spec(Row::DiscordHidePaused, Tab::General, "Hide when paused", "Takes the card off your profile while the music is paused or stopped. Off: it stays, without the progress bar.", "discord pause paused stop remove clear"),
-    spec(Row::DiscordHideTitle, Tab::General, "Hide song title", "Shows \"Listening to music\" and the artist, not the song, the album or a link to it.", "discord private privacy hide title song name secret"),
-    spec(Row::CheckUpdates, Tab::General, "Check for updates", "Once a day, asks getuzumaki.app whether a new version is out. Nothing about you is sent.", "update updates upgrade new version release download"),
-    spec(Row::CheckNow, Tab::General, "Check now", "Asks getuzumaki.app now whether a new version is out. Shows when it last checked.", "update updates upgrade new version release check for updates last checked"),
-    spec(Row::Tour, Tab::General, "Welcome tour", "Plays the welcome and the shortcuts tour again.", "onboarding intro help tutorial shortcuts keys keyboard"),
-    spec(Row::ArtCache, Tab::General, "Artwork cache", "Clear the downloaded covers.", "cache caches clear disk storage space covers images"),
-    spec(Row::LibraryCache, Tab::General, "Library cache", "Clear the copy of your library.", "cache caches clear disk storage space offline"),
+    spec(Row::StartupAnimation, Tab::Appearance, "Startup animation", "The swirl that opens when Uzumaki starts.", "intro splash launch swirl motion"),
+    spec(Row::Background, Tab::Appearance, "Background", "A picture behind the pages.", "wallpaper backdrop image cover"),
+    spec(Row::Picture, Tab::Appearance, "Picture", "The background picture.", "wallpaper image photo file background choose"),
+    spec(Row::Effect, Tab::Appearance, "Effect", "The background's effect.", "dither ascii halftone blur scanlines background"),
+    spec(Row::ShowOn, Tab::Appearance, "Show on", "Card pages only, or song lists too.", "background pages"),
+    spec(Row::CardStrength, Tab::Appearance, "Strength on card pages", "Home, New, Radio, grids and artist pages.", "card page strength background opacity transparency"),
+    spec(Row::ListStrength, Tab::Appearance, "Strength on song lists", "Albums, playlists, Songs and Local Files.", "song list strength background opacity transparency"),
+    spec(Row::Fade, Tab::Appearance, "Fade out at the bottom", "Long lists end on the plain background.", "fade toward the bottom background gradient"),
+    // ---- Now Playing ----
+    spec(Row::Lyrics, Tab::NowPlaying, "Highlight lyrics", "Word by word when the song has word timing, otherwise by line.", "lyrics highlight karaoke words lines sync"),
+    spec(Row::AnimatedArtwork, Tab::NowPlaying, "Animated artwork", "Apple's video loop of an album, in Now Playing and, with Always, atop album pages. Off downloads no video.", "motion video moving cover album art loop album page always off still"),
+    spec(Row::NpBackground, Tab::NowPlaying, "Background", "A colour from the cover, the cover itself, or the app's background.", "full screen fullscreen tint color colour same as app"),
+    spec(Row::NpCoverEffect, Tab::NowPlaying, "Cover effect", "The effect on the cover behind Now Playing.", "full screen fullscreen dither blur background"),
+    // ---- Notifications ----
+    spec(Row::Notify, Tab::Notifications, "Song notifications", "When a new song starts and Uzumaki isn't in front.", "notify on song change notification alert popup toast"),
+    spec(Row::Discord, Tab::Notifications, "Show on Discord", "Your Discord profile shows the song, like Spotify does. Needs the Discord app on this computer.", "discord rich presence activity status listening profile game"),
+    spec(Row::DiscordStatus, Tab::Notifications, "Status text", "Next to your name in the member list. Needs a recent Discord.", "discord show in status line member list mini profile compact song title artist app name"),
+    spec(Row::DiscordArtwork, Tab::Notifications, "Album cover", "On your Discord card. Off: the Uzumaki icon.", "discord show artwork cover album art picture image"),
+    spec(Row::DiscordButtons, Tab::Notifications, "\u{201c}Open in Apple Music\u{201d} button", "On your Discord card, for songs from Apple Music.", "discord show buttons button link share"),
+    spec(Row::DiscordHidePaused, Tab::Notifications, "Hide when paused", "Off: the card stays, without the progress bar.", "discord pause paused stop remove clear"),
+    spec(Row::DiscordHideTitle, Tab::Notifications, "Hide the song title", "Shows \u{201c}Listening to music\u{201d} and the artist only.", "discord private privacy hide song title name secret"),
+    // ---- Local Files ----
+    spec(Row::MusicFolders, Tab::Local, "Music folders", "Songs in these folders (and their subfolders) show up under Local Files.", "folder directory files flac mp3 rescan scan import"),
+    // ---- Keyboard ----
+    spec(Row::NumberKeys, Tab::Keyboard, "Number keys 1\u{2013}9", "Your sidebar pins or pages.", "shortcuts keys hotkeys keybindings pins pages ctrl alt digits"),
+    // ---- Advanced ----
+    spec(Row::CheckUpdates, Tab::Advanced, "Check for updates daily", "Sends only the app version and system details. Nothing is downloaded.", "update updates upgrade new version release download check now last checked"),
+    spec(Row::Tour, Tab::Advanced, "Welcome tour", "The welcome and the shortcuts tour.", "onboarding intro help tutorial shortcuts keys keyboard show again"),
+    spec(Row::ArtCache, Tab::Advanced, "Artwork cache", "The downloaded covers.", "cache caches clear disk storage space covers images"),
+    spec(Row::LibraryCache, Tab::Advanced, "Library copy", "The copy of your Apple Music library.", "library cache caches clear disk storage space offline"),
+    // ---- About ----
     spec(Row::About, Tab::About, "About Uzumaki", "Version, build and copyright.", "version build about copyright credits"),
     spec(Row::Licences, Tab::About, "Licences", "GPL-3.0-or-later, castLabs Electron, symphonia, rodio, Rune, Inter.", "licence license licences licenses gpl gnu free software castlabs electron widevine symphonia rodio inter plex fonts third party not affiliated apple"),
     spec(Row::Links, Tab::About, "Links", "getuzumaki.app and the source code.", "website site getuzumaki.app github source code links repository"),
-    spec(Row::Support, Tab::About, "Support Uzumaki", "Uzumaki is free. You can support it on Ko-fi.", "donate donation tip coffee ko-fi kofi sponsor heart"),
-    spec(Row::MusicFolders, Tab::Local, "Music folders", "Songs in these folders (and their subfolders) show up under Local Files.", "folder directory files flac mp3 rescan scan import"),
-    spec(Row::NumberKeys, Tab::Keyboard, "Number keys 1–9", "Your sidebar pins or pages.", "shortcuts keys hotkeys keybindings pins pages ctrl alt digits"),
+    spec(Row::Support, Tab::About, "Support Uzumaki", "Uzumaki is free and built in my spare time. If you enjoy it, you can support it on Ko-fi.", "donate donation tip coffee ko-fi kofi sponsor heart"),
 ];
+
+/// Account → Music source, in Apple Music mode (the table's note) and in local only mode.
+pub const MUSIC_SOURCE_APPLE: &str = "Apple Music, with your music folders beside it. Local files only stops Apple Music's engine and hides its pages; your sign-in is kept.";
+pub const MUSIC_SOURCE_LOCAL: &str = "Only your music folders. Apple Music's engine doesn't run and its pages are hidden. Your Apple sign-in and library copy are kept for when you switch back.";
+
+/// `row`'s entry on `os`, if it is listed there.
+fn spec_on(os: Os, row: Row) -> Option<&'static Spec> {
+    SPECS.iter().find(|s| s.row == row && s.on.has(os))
+}
+
+/// `row`'s title on this system, as its page and search show it ("" for a row this system lacks).
+pub fn title(row: Row) -> &'static str {
+    spec_on(Os::current(), row).map_or("", |s| s.title)
+}
+
+/// `row`'s note on this system ("" for a row this system lacks).
+pub fn note(row: Row) -> &'static str {
+    spec_on(Os::current(), row).map_or("", |s| s.note)
+}
+
+/// The page `row` is on.
+pub fn tab(row: Row) -> Tab {
+    match row {
+        Row::Binding(_) => Tab::Keyboard,
+        _ => SPECS.iter().find(|s| s.row == row).map_or(Tab::General, |s| s.tab),
+    }
+}
+
+/// The rows the table lists on `tab`, in order, each once.
+#[cfg(test)]
+pub fn rows_of(tab: Tab) -> Vec<Row> {
+    let mut v: Vec<Row> = Vec::new();
+    for s in SPECS.iter().filter(|s| s.tab == tab) {
+        if !v.contains(&s.row) {
+            v.push(s.row);
+        }
+    }
+    v
+}
 
 /// The words every shortcut row also answers to.
 const BINDING_WORDS: &str = "shortcut shortcuts keys hotkey hotkeys keybinding keybindings key binding";
@@ -256,24 +308,27 @@ const BINDING_WORDS: &str = "shortcut shortcuts keys hotkey hotkeys keybinding k
 /// A row as search sees it.
 pub struct Entry {
     pub row: Row,
-    pub tab: Tab,
     /// Page, title, note and synonyms, folded (`songs_table::fold`).
     hay: String,
 }
 
-/// The rows listed on `os`, with their folded text.
+/// The rows listed on `os`, with their folded text, in page order (`Tab::ALL`); the shortcuts
+/// go in Keyboard's place.
 pub fn index(os: Os) -> Vec<Entry> {
-    let mut v: Vec<Entry> = SPECS.iter().filter(|s| s.on.has(os)).map(|s| Entry {
-        row: s.row,
-        tab: s.tab,
-        hay: fold(&format!("{} {} {} {}", s.tab.title(), s.title, s.note, s.words)),
-    }).collect();
-    for (i, b) in keys::BINDINGS.iter().enumerate() {
-        v.push(Entry {
-            row: Row::Binding(i),
-            tab: Tab::Keyboard,
-            hay: fold(&format!("{} {} {} {BINDING_WORDS}", Tab::Keyboard.title(), b.label, b.group)),
-        });
+    let mut v = Vec::new();
+    for t in Tab::ALL {
+        v.extend(SPECS.iter().filter(|s| s.tab == t && s.on.has(os)).map(|s| Entry {
+            row: s.row,
+            hay: fold(&format!("{} {} {} {}", s.tab.title(), s.title, s.note, s.words)),
+        }));
+        if t == Tab::Keyboard {
+            for (i, b) in keys::BINDINGS.iter().enumerate() {
+                v.push(Entry {
+                    row: Row::Binding(i),
+                    hay: fold(&format!("{} {} {} {BINDING_WORDS}", Tab::Keyboard.title(), b.label, b.group)),
+                });
+            }
+        }
     }
     v
 }
@@ -297,13 +352,6 @@ pub fn find(query: &str) -> Vec<usize> {
     find_in(&INDEX, query)
 }
 
-/// Settings → Appearance → Animated artwork: what it does.
-/// "Show on Discord" (`discord/`).
-pub const DISCORD: &str = "Shows what you're listening to on your Discord profile, like Spotify does: the song, the artist, a progress bar. Needs the Discord app running on this computer. Nothing is sent by Uzumaki itself; Discord shows the card to your friends.";
-/// "Show in status" (`discord::StatusDisplay`).
-pub const STATUS_NOTE: &str = "What Discord shows after the music note in the member list and the mini profile. Needs a recent Discord.";
-pub const ANIMATED_ARTWORK: &str = "Apple's video loop of an album, when it has one: in the Now Playing cover and, with Always, at the top of an album page. Off keeps still covers and downloads no video.";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,7 +369,8 @@ mod tests {
     fn matches_titles_notes_and_page_names() {
         assert_eq!(rows(Os::Linux, "streaming quality"), vec![Row::Quality]);
         assert!(finds(Os::Linux, "atmos", Row::Quality), "a word from the note");
-        assert!(finds(Os::Linux, "playback", Row::Lyrics), "the page name");
+        assert!(finds(Os::Linux, "now playing", Row::Lyrics), "the page name");
+        assert!(finds(Os::Linux, "advanced", Row::ArtCache));
         assert!(finds(Os::Linux, "local files", Row::MusicFolders));
         assert!(rows(Os::Linux, "").is_empty(), "an empty query finds nothing");
         assert!(rows(Os::Linux, "   ").is_empty());
@@ -401,9 +450,64 @@ mod tests {
     fn results_keep_page_order() {
         let ix = index(Os::Linux);
         let hits = find_in(&ix, "lyrics");
-        let tabs: Vec<Tab> = hits.iter().map(|&i| ix[i].tab).collect();
-        assert!(tabs.contains(&Tab::Playback) && tabs.contains(&Tab::Keyboard), "{tabs:?}");
+        let tabs: Vec<Tab> = hits.iter().map(|&i| tab(ix[i].row)).collect();
+        assert!(tabs.contains(&Tab::NowPlaying) && tabs.contains(&Tab::Keyboard), "{tabs:?}");
         let order = |t: Tab| Tab::ALL.iter().position(|x| *x == t).unwrap();
         assert!(tabs.windows(2).all(|w| order(w[0]) <= order(w[1])), "{tabs:?}");
+    }
+
+    /// Every row has a title and a note on each system that has it (App icon: not Windows).
+    #[test]
+    fn every_row_has_its_text_everywhere() {
+        for os in [Os::Mac, Os::Linux, Os::Other] {
+            for sp in SPECS {
+                if sp.row == Row::AppIcon && os == Os::Other {
+                    assert!(spec_on(os, sp.row).is_none());
+                    continue;
+                }
+                let e = spec_on(os, sp.row).unwrap_or_else(|| panic!("{:?} on {os:?}", sp.row));
+                assert!(!e.title.is_empty() && !e.note.is_empty(), "{:?} on {os:?}", sp.row);
+            }
+        }
+    }
+
+    /// Old labels still find their rows (people remember them).
+    #[test]
+    fn old_labels_still_find_their_rows() {
+        for (q, row) in [
+            ("streaming quality", Row::Quality),
+            ("lyrics highlight", Row::Lyrics),
+            ("start uzumaki when i log in", Row::StartAtLogin),
+            ("start in the background", Row::StartHidden),
+            ("close to tray", Row::CloseToTray),
+            ("notify on song change", Row::Notify),
+            ("show in status", Row::DiscordStatus),
+            ("show artwork", Row::DiscordArtwork),
+            ("show buttons", Row::DiscordButtons),
+            ("card page strength", Row::CardStrength),
+            ("fade toward the bottom", Row::Fade),
+            ("reconnect to last airplay device", Row::AirPlay),
+            ("check now", Row::CheckUpdates),
+            ("library cache", Row::LibraryCache),
+        ] {
+            assert!(finds(Os::Linux, q, row), "{q:?} finds {row:?}");
+        }
+        assert!(finds(Os::Mac, "close to the menu bar", Row::CloseToTray));
+        assert!(finds(Os::Mac, "show icon in the menu bar", Row::Tray));
+    }
+
+    /// The labels each system shows for the tray rows.
+    #[test]
+    fn tray_labels_per_system() {
+        let t = |os, row| spec_on(os, row).unwrap().title;
+        assert_eq!(t(Os::Mac, Row::Tray), "Menu bar icon");
+        assert_eq!(t(Os::Linux, Row::Tray), "Tray icon");
+        assert_eq!(t(Os::Other, Row::Tray), "Tray icon");
+        for os in [Os::Mac, Os::Linux, Os::Other] {
+            assert_eq!(t(os, Row::CloseToTray), "Keep playing when the window closes");
+            assert_eq!(t(os, Row::StartAtLogin), "Open at login");
+        }
+        assert!(spec_on(Os::Other, Row::Tray).unwrap().note.contains("notification area"));
+        assert!(spec_on(Os::Other, Row::StartAtLogin).unwrap().note.contains("Windows Settings"));
     }
 }

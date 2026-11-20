@@ -93,7 +93,7 @@ impl State {
             .filter(|n| n.required || dismissed.is_none_or(|(v, b)| *v != n.version || *b != n.build));
     }
 
-    /// Settings → General → Check for updates. On: check now (still at most once a day). Off:
+    /// Settings → Advanced → Check for updates daily. On: check now (still at most once a day). Off:
     /// the notice goes.
     pub fn set_check_updates(&mut self, on: bool) {
         if self.settings.check_updates == on {
@@ -322,16 +322,16 @@ mod tests {
     #[test]
     fn settings_shows_check_now_with_the_answer_in_place() {
         let mut rt = window("home");
-        rt.update(|s, _| crate::ui::settings::open_tab(s, crate::ui::settings::Tab::General));
+        rt.update(|s, _| crate::ui::settings::open_tab(s, crate::ui::settings::Tab::Advanced));
         settle(&mut rt);
-        rt.update(|_, tx| tx.scroll_center(crate::ui::settings_search::Row::CheckNow.key()));
+        rt.update(|_, tx| tx.scroll_center(crate::ui::settings_search::Row::CheckUpdates.key()));
         settle(&mut rt);
         assert!(rt.presented("settings/check-now").is_some());
         rt.update(|s, _| s.manual_answer(Ok(latest(crate::VERSION)), None, Install::Direct));
         settle(&mut rt);
         assert!(rt.state.toast.is_none(), "Settings is open: the answer shows in the row");
         let texts: Vec<String> = rt.elements().into_iter().filter_map(|e| e.text).collect();
-        assert!(texts.iter().any(|t| t.starts_with("Uzumaki is up to date.")), "{texts:?}");
+        assert!(texts.iter().any(|t| t.contains("Uzumaki is up to date.")), "{texts:?}");
     }
 
     #[test]

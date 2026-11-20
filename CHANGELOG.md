@@ -5,6 +5,17 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Changed
+
+- **Settings, reorganised:** 11 shorter pages instead of 7. General (start, tray or menu bar icon, sidebar),
+  Account, Playback, **Speakers** (reconnect to the last speaker, Chromecast; only where there is one),
+  Appearance (theme, player bar, app icon, then the background), **Now Playing** (lyrics, animated artwork,
+  its background), **Notifications** (song notifications and Discord), Local Files, Keyboard, **Advanced**
+  (updates, the welcome tour, storage) and About. Rows that only matter when another switch is on (Discord's
+  choices, the background's, Open in the background, Keep playing when the window closes) hide until it is.
+  Shorter labels and notes, the same on every system where they can be; search finds the old labels too.
+  Nothing was removed and your settings stay as they are.
+
 ## [0.3.1] - 2026-11-18
 
 A small update for Discord. You need an Apple Music subscription.

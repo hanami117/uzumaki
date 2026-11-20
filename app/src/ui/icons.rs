@@ -218,6 +218,23 @@ line_icon!(
     "M15.2 9.2a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"
 );
 
+// Settings → Speakers: a hi-fi speaker, woofer and tweeter.
+line_icon!(
+    SPEAKER,
+    "cad-speaker",
+    "M7.5 3.5h9A1.5 1.5 0 0 1 18 5v14a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5z",
+    "M12 11.2a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4z",
+    "M12 7.2h.01"
+);
+// Settings → Notifications: a bell.
+line_icon!(BELL, "cad-bell", "M7 16.5v-5a5 5 0 0 1 10 0v5l1.5 1.8h-13z", "M10.2 20.6a1.9 1.9 0 0 0 3.6 0", "M12 4.2v2.3");
+// Settings → Advanced: an open-end wrench.
+line_icon!(
+    WRENCH,
+    "cad-wrench",
+    "M14.2 4.4a4.8 4.8 0 0 0-3.9 6.4l-5.6 5.6a2 2 0 0 0 2.9 2.9l5.6-5.6a4.8 4.8 0 0 0 6.4-3.9l-3-.5-1.9-1.9z"
+);
+
 line_icon!(INFO, "cad-info", "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z", "M12 11v5.2", "M12 8h.01");
 line_icon!(
     KEYBOARD,

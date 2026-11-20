@@ -59,7 +59,7 @@ impl MotionArt {
 /// What decides whether the clip moves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Facts {
-    /// Settings → Appearance → Animated artwork lets Now Playing play (Always, Now Playing only).
+    /// Settings → Now Playing → Animated artwork lets Now Playing play (Always, Now Playing only).
     pub enabled: bool,
     /// The OS asks for reduced motion.
     pub reduced_motion: bool,
@@ -96,7 +96,7 @@ pub fn want(f: &Facts) -> Want {
 /// What decides whether an album page's cover moves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PageFacts {
-    /// Settings → Appearance → Animated artwork lets album pages play (Always).
+    /// Settings → Now Playing → Animated artwork lets album pages play (Always).
     pub enabled: bool,
     pub reduced_motion: bool,
     /// Local only mode: no Apple requests at all.

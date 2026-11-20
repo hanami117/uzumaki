@@ -535,7 +535,7 @@ impl State {
         }
     }
 
-    /// Settings → Appearance → Animated artwork. A loop where the choice no longer lets it play
+    /// Settings → Now Playing → Animated artwork. A loop where the choice no longer lets it play
     /// stops at once (the player and decoder go, the still cover shows); where it still may, it
     /// plays on. Choosing a place back starts its loop the normal way, from `poll`.
     pub fn set_animated_artwork(&mut self, mode: AnimatedArtwork) {
@@ -1289,7 +1289,7 @@ mod tests {
         assert_eq!(api::album_with("42", false).1["include"], "artists", "the page itself is the same");
     }
 
-    // ---- Settings → Appearance → Animated artwork: Always, Now Playing only, Off ----
+    // ---- Settings → Now Playing → Animated artwork: Always, Now Playing only, Off ----
 
     #[test]
     fn the_setting_stops_a_loop_only_where_it_no_longer_belongs() {
