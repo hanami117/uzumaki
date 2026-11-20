@@ -160,6 +160,8 @@ pub fn build(snap: Option<&Snapshot>, prefs: &Prefs, now: u64) -> Option<Activit
     // The artist is already in the title line, so the card's second line is the album (the artist
     // again only when there is no album to show).
     let state = if both { large_text.clone().or_else(|| line(&snap.artist)) } else { line(&snap.artist) };
+    // Discord prints the cover's text as a line of the card too: the album once, not twice.
+    let large_text = if both { None } else { large_text };
     let cover = if prefs.artwork { https(&snap.artwork_url, MAX_IMAGE_URL) } else { None };
     // The icon is the big picture when there is no cover, and then needs no small copy of itself.
     let (large_image, small_image) = match cover {
@@ -253,6 +255,7 @@ mod tests {
         let j = build(Some(&song()), &p, 1000).unwrap().to_json();
         assert_eq!(j["details"], "Redbone \u{2013} Childish Gambino");
         assert_eq!(j["state"], "\"Awaken, My Love!\"");
+        assert!(j["assets"].get("large_text").is_none(), "the album is on the card once, not also as the cover's text");
         assert_eq!(j["status_display_type"], 2);
         // No album (or only a stand-in folder name): the artist is the second line.
         let fallback = Snapshot { album_is_fallback: true, ..song() };
