@@ -259,10 +259,10 @@ pub fn open_nav(s: &mut State, id: &'static str, label: &'static str, at: [f32; 
     let items = vec![
         it(format!("Hide “{label}” from Sidebar"), move |s| {
             s.set_nav_hidden(id, true);
-            s.toast = Some(format!("“{label}” is hidden. Settings → Appearance shows it again."));
+            s.toast = Some(format!("“{label}” is hidden. Settings → General → Sidebar shows it again."));
         }),
         sep(),
-        it("Edit Sidebar\u{2026}", |s| super::settings::open_tab(s, super::settings::Tab::Appearance)),
+        it("Edit Sidebar\u{2026}", |s| super::settings::open_tab(s, super::settings::Tab::General)),
     ];
     open(s, at, items);
 }

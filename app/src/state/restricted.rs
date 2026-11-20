@@ -15,9 +15,6 @@ pub const NOTICE: &str = "This song is explicit and your Apple account doesn't a
 /// The toast's second line, under `NOTICE`: where the setting is.
 pub const NOTICE_HINT: &str = "Allow explicit content on music.apple.com, then restart Uzumaki.";
 
-/// The Settings → Account paragraph.
-pub const SETTINGS_TEXT: &str = "Uzumaki plays through Apple Music on the web, so the explicit content setting that counts is the one on music.apple.com (signed in with the same Apple Account: account menu \u{2192} Settings). A change made in Screen Time on an iPhone or Mac may not reach the web player. If songs are still refused, change it on music.apple.com itself, try another browser if it does not stick, then restart Uzumaki. An Apple Account for a child under 18 can't turn it on.";
-
 /// Said when a run of songs ends playback: no `NOTICE` repeat, the reason it stopped.
 const STOPPED: &str = "Stopped: the next songs are explicit too, and your Apple account doesn't allow explicit content.";
 
