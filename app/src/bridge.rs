@@ -75,6 +75,9 @@ pub enum Event {
     /// AirPlay: the page's capture taps MusicKit's player (`ready`), or doesn't (yet, or any
     /// more; `error` says why). Sent only while capturing, on every change.
     AirPlayCapture { ready: bool, error: Option<String> },
+    /// While capturing: the playing song's file comes from another host without CORS (an uploaded
+    /// song whose CORS load failed), so the tap gets silence for it.
+    AirPlayTainted,
     /// Whether the account has content restrictions on, as MusicKit knows it (newer bridges). A
     /// hint only: the player's CONTENT_RESTRICTED error is what the app can rely on.
     Restricted(bool),
@@ -747,6 +750,7 @@ fn parse_event(name: &str, msg: &Value) -> Option<Event> {
         "volume" => Event::Volume(msg["value"].as_f64()?),
         "window" => Event::Window { visible: flag("visible"), closed: msg["reason"].as_str() == Some("closed") },
         "airplayCapture" => Event::AirPlayCapture { ready: flag("ready"), error: msg["error"].as_str().map(String::from) },
+        "airplayTainted" => Event::AirPlayTainted,
         "restricted" => Event::Restricted(msg["value"].as_bool()?),
         "error" => Event::Error(msg["message"].as_str().unwrap_or("unknown error").to_string()),
         _ => return None,
@@ -791,6 +795,7 @@ mod protocol_tests {
         assert!(matches!(event(r#"{"event":"airplayCapture","ready":true}"#), Some(Event::AirPlayCapture { ready: true, error: None })));
         let not = event(r#"{"event":"airplayCapture","ready":false,"error":"audio context suspended"}"#);
         assert!(matches!(not, Some(Event::AirPlayCapture { ready: false, error: Some(ref e) }) if e == "audio context suspended"));
+        assert!(matches!(event(r#"{"event":"airplayTainted","host":"store-032.blobstore.apple.com"}"#), Some(Event::AirPlayTainted)));
     }
 
     #[test]

@@ -12,6 +12,10 @@ takes each release's notes from its section here.
   (see "AirPlay on Linux" in the README). When no speaker shows up after a few seconds, the AirPlay menu says so.
 
 ### Fixed
+- **AirPlay and Chromecast:** songs you uploaded to your iCloud Music Library (not in Apple's catalog) were silent on
+  the speaker. Their audio comes from another Apple server, and the browser engine hid it from Uzumaki; it is now
+  read like the others. If that ever fails, the song still plays on this computer and a message says why the
+  speaker is silent.
 - **AirPlay:** going back to This Computer, the song goes on from where you were listening, instead of about a
   second further on (the speakers play a little behind the app; the app now steps back by their actual delay).
 

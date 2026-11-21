@@ -310,6 +310,20 @@ impl State {
         }
     }
 
+    /// The bridge can't read this song's audio (an uploaded song served without CORS): the speakers
+    /// get silence for it, so the user is told why, and where it can be heard.
+    pub(super) fn airplay_tainted(&mut self) -> bool {
+        if !self.airplay.active() && !self.cast.active() {
+            return false;
+        }
+        let song = self.playback.song.as_ref().map_or_else(|| "This song".to_string(), |s| format!("“{}”", s.title));
+        self.toast = Some(format!(
+            "{song} can't be sent to the speaker (an uploaded song Apple didn't let Uzumaki read), so it plays silently there. Pick {} to hear it.",
+            crate::ui::this_computer()
+        ));
+        true
+    }
+
     /// The bridge's capture ends: its player goes back to the spot `airplay_leave` kept, if the
     /// same song is still on.
     fn airplay_rewind_bridge(&mut self) {
@@ -687,6 +701,18 @@ mod tests {
         s.playback.position = 0.5;
         s.airplay_event(Event::Capture(false));
         assert!(near(s.playback.position, 0.5), "the other song stays where it is");
+    }
+
+    #[test]
+    fn an_uploaded_song_the_tap_cannot_read_says_why_the_speaker_is_silent() {
+        let mut s = State::offline();
+        s.playback.song = Some(crate::state::tests::song("i.up"));
+        assert!(!s.apply_msg(crate::state::Msg::Bridge(crate::bridge::Event::AirPlayTainted)), "nothing casts: nothing to say");
+        assert!(s.toast.is_none());
+        casting_at_42(&mut s, false);
+        assert!(s.apply_msg(crate::state::Msg::Bridge(crate::bridge::Event::AirPlayTainted)));
+        let toast = s.toast.clone().unwrap();
+        assert!(toast.contains("“Song x”") && toast.contains("silently") && toast.contains(crate::ui::this_computer()), "{toast}");
     }
 
     #[test]

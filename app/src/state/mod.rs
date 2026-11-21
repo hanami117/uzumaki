@@ -1258,6 +1258,7 @@ impl State {
                 self.cast_capture_ready(ready, error.as_deref());
                 return false;
             }
+            Event::AirPlayTainted => return self.airplay_tainted(),
             Event::Exited => {
                 self.session.bridge_up = false;
                 if self.session.error.is_none() {

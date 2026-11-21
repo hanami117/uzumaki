@@ -377,6 +377,15 @@ function createWindow(show) {
     const ms = Date.now() - r.at;
     note(`${r.label} -> ${what} in ${ms} ms`, r.at, r.label, ms);
   };
+  // Songs uploaded to iCloud Music Library play from a plain file on *.blobstore.apple.com, not from
+  // MusicKit's same-origin MSE stream. A cross-origin file without CORS taints the element, and Web
+  // Audio (the AirPlay/Chromecast tap) then gets only zeros: the speaker would be silent. The page
+  // loads those files in CORS mode (uploadCorsHook in preload.js) and this answers for the server,
+  // which sends no CORS headers itself. Only the player window's media requests to that host.
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ['https://*.blobstore.apple.com/*'] }, (d, cb) => {
+    const ours = win && !win.isDestroyed() && d.webContentsId === win.webContents.id && d.resourceType === 'media';
+    cb(ours ? { responseHeaders: withCors(d.responseHeaders, pageOrigin()) } : {});
+  });
   session.defaultSession.webRequest.onCompleted({ urls: ['*://*/*'] }, (d) => reqDone(d, d.statusCode));
   session.defaultSession.webRequest.onErrorOccurred({ urls: ['*://*/*'] }, (d) => reqDone(d, d.error));
   win.webContents.on('dom-ready', () => {
@@ -417,6 +426,29 @@ function preconnect(why) {
 // sends PCM chunks here; they go to the app's PCM socket (UZUMAKI_AIRPLAY_PCM_SOCKET). While that
 // socket is connected the local output is muted in the page's graph (UZUMAKI_AIRPLAY_LOCAL=1 keeps
 // it on); MusicKit's volume is never touched. The log gets the level now and then, never the audio.
+// ---- uploadCors:begin
+// Response headers that let `origin` read the response with credentials (the element asks with
+// crossorigin=use-credentials, which sends the same cookies as before). Any CORS headers the server
+// sent are replaced.
+function withCors(headers, origin) {
+  const out = {};
+  for (const [k, v] of Object.entries(headers || {})) {
+    if (!/^access-control-allow-(origin|credentials)$/i.test(k)) out[k] = v;
+  }
+  out['Access-Control-Allow-Origin'] = [origin];
+  out['Access-Control-Allow-Credentials'] = ['true'];
+  return out;
+}
+// ---- uploadCors:end
+
+function pageOrigin() {
+  try {
+    return new URL(win.webContents.getURL()).origin;
+  } catch {
+    return 'https://music.apple.com';
+  }
+}
+
 let airplay = null; // bridge/airplay.js, loaded at the first cast
 const AIRPLAY_KEEP_LOCAL = process.env.UZUMAKI_AIRPLAY_LOCAL === '1';
 const AIRPLAY_VERBOSE = !!process.env.UZUMAKI_AIRPLAY_DEBUG;
@@ -527,6 +559,11 @@ ipcMain.on('uzumaki:airplay-status', (e, st) => {
   if (st.note) return log(`airplay capture: ${String(st.note).slice(0, 300)}`);
   if (st.capture) {
     if (capturing) captureReady(!!st.capture.ready, st.capture.error);
+    return;
+  }
+  if (st.tainted) {
+    // The app says why the speaker is silent for this song (an uploaded song that couldn't be read).
+    if (capturing) send({ event: 'airplayTainted', host: String(st.tainted).slice(0, 100) });
     return;
   }
   meter.status = st;
