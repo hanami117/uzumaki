@@ -192,6 +192,8 @@ pub fn card_subtitle(c: &Collection) -> String {
             Some(y) if !c.subtitle.is_empty() => format!("{} \u{b7} {y}", c.subtitle),
             _ => c.subtitle.clone(),
         },
+        // The corner icon says it; the long subtitle would be cut off on a card.
+        CollectionKind::Playlist if crate::mixed::is_uzu_id(&c.id) => "On this computer".into(),
         CollectionKind::Playlist => c.subtitle.clone(),
     }
 }
@@ -204,12 +206,26 @@ pub fn card(s: &State, c: &Collection, w: f32) -> El {
         .cursor(Cursor::Pointer)
         .on_press(move |s: &mut State| s.open_collection(&c2))
         .on_secondary_press(move |s: &mut State, p, _tx: &mut Tx| super::ctx_menu::open_collection(s, &c3, [p.x, p.y]))
-        .child(art(s, s.cover_of(c), &c.title, Size::Fill, 8.0, 22.0))
+        .child(card_art(s, c))
         .child(
             col().gap(2.0).min_w(0.0)
                 .child(text(c.title.clone()).font(CARD_TITLE).color(PAL.text).truncate())
                 .child(text(card_subtitle(c)).font(SMALL13).color(PAL.muted).truncate()),
         )
+}
+
+/// A card's picture; an Uzumaki playlist (kept on this computer) carries the sidebar's small icon
+/// in a corner, so it reads apart from Apple's.
+fn card_art(s: &State, c: &Collection) -> El {
+    let pic = art(s, s.cover_of(c), &c.title, Size::Fill, 8.0, 22.0);
+    if !crate::mixed::is_uzu_id(&c.id) {
+        return pic;
+    }
+    pic.child(
+        el().size(24.0, 24.0).radius(12.0).center().fill(rune::Color::BLACK.alpha(0.55))
+            .pin(Some(8.0), Some(8.0), None, None)
+            .child(icon(&icons::UZU_PLAYLIST, 14.0).color(rune::Color::WHITE)),
+    )
 }
 
 /// Card grid geometry for a content width (min card 160, gap 12), like CSS auto-fill.

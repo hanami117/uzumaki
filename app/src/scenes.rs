@@ -232,6 +232,9 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("uzu-playlist", uzu_playlist),
     ("uzu-playlist-menu", uzu_playlist_menu),
     ("new-playlist-here", new_playlist_here),
+    ("all-playlists", all_playlists),
+    ("all-playlists-menu", all_playlists_menu),
+    ("all-playlists-local-only", all_playlists_local_only),
     ("local-files-empty", local_files_empty),
     ("local-files-scanning", local_files_scanning),
     ("settings-local", settings_local),
@@ -1746,6 +1749,30 @@ fn uzu_playlist_menu(s: &mut State) {
     let Route::Collection { id, .. } = s.route.clone() else { return };
     let c = s.collections[&id].ready().unwrap().clone();
     crate::ui::scene_menu_collection(s, &c, [700.0, 300.0]);
+}
+
+/// All Playlists: Apple's (Favourite Songs first), then the Uzumaki ones with their small icon.
+fn all_playlists(s: &mut State) {
+    base(s);
+    s.create_uzu_playlist("Late night mix", "Apple Music and my own rips, together.", &[song(0, 1), song(3, 2)]);
+    s.create_uzu_playlist("Road trip", "", &[song(5, 1)]);
+    s.create_uzu_playlist("Ripped CDs", "", &[]);
+    s.toast = None;
+    s.route = Route::Library(LibraryTab::Playlists);
+}
+
+/// The card menu of an Uzumaki playlist on that page.
+fn all_playlists_menu(s: &mut State) {
+    all_playlists(s);
+    let c = s.mixed.cards[0].clone();
+    crate::ui::scene_menu_collection(s, &c, [330.0, 300.0]);
+}
+
+/// Signed out (or local only mode): Apple's list is empty, the Uzumaki playlists still show.
+fn all_playlists_local_only(s: &mut State) {
+    all_playlists(s);
+    s.session.authorized = false;
+    s.library_playlists = Paged::default();
 }
 
 /// The New Playlist dialog from local files, set to "This computer".

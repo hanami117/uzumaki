@@ -15,6 +15,9 @@ takes each release's notes from its section here.
 - **Uzumaki playlists:** New Playlist can make a playlist kept in Uzumaki on this computer ("This computer"), which
   holds Apple Music songs and local files together. It sits in the sidebar with its own icon; rename it, give it a
   picture, reorder its songs or delete it from its menu. It also works in local files only mode.
+- Uzumaki playlists now also show on the All Playlists page, after your Apple Music ones, with the same small icon as
+  in the sidebar ("On this computer") and the same card menu (play, edit for name and picture, pin, delete). That
+  also works signed out and in local files only mode.
 - `uzu playlist add-local <playlist> <file>`, and `uzu playlist` marks local songs ("local", or "missing").
 - **AirPlay on Linux:** the AUR packages (`uzumaki` and `uzumaki-bin`), the AppImage and `install.sh` now include
   the AirPlay helper, so HomePods and other AirPlay speakers, one or several in sync, work as on macOS. Speakers
