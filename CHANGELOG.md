@@ -16,6 +16,19 @@ takes each release's notes from its section here.
   holds Apple Music songs and local files together. It sits in the sidebar with its own icon; rename it, give it a
   picture, reorder its songs or delete it from its menu. It also works in local files only mode.
 - `uzu playlist add-local <playlist> <file>`, and `uzu playlist` marks local songs ("local", or "missing").
+- **AirPlay on Linux:** the AUR packages (`uzumaki` and `uzumaki-bin`), the AppImage and `install.sh` now include
+  the AirPlay helper, so HomePods and other AirPlay speakers, one or several in sync, work as on macOS. Speakers
+  are found with mDNS: a VPN kill switch or a firewall must let multicast to `224.0.0.251` (UDP 5353) through
+  (see "AirPlay on Linux" in the README). When no speaker shows up after a few seconds, the AirPlay menu says so.
+
+### Fixed
+- **AirPlay and Chromecast:** songs you uploaded to your iCloud Music Library (not in Apple's catalog) were silent on
+  the speaker. Their audio comes from another Apple server, and the browser engine hid it from Uzumaki; it is now
+  read like the others. If that ever fails, the song still plays on this computer and a message says why the
+  speaker is silent.
+- **AirPlay:** going back to This Computer, the song goes on from where you were listening, instead of about a
+  second further on (the speakers play a little behind the app; the app now steps back by their actual delay),
+  and without a stutter: this computer stays silent until the player is there, then fades in.
 
 ## [0.4.0] - 2026-11-20
 

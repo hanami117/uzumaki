@@ -377,6 +377,15 @@ function createWindow(show) {
     const ms = Date.now() - r.at;
     note(`${r.label} -> ${what} in ${ms} ms`, r.at, r.label, ms);
   };
+  // Songs uploaded to iCloud Music Library play from a plain file on *.blobstore.apple.com, not from
+  // MusicKit's same-origin MSE stream. A cross-origin file without CORS taints the element, and Web
+  // Audio (the AirPlay/Chromecast tap) then gets only zeros: the speaker would be silent. The page
+  // loads those files in CORS mode (uploadCorsHook in preload.js) and this answers for the server,
+  // which sends no CORS headers itself. Only the player window's media requests to that host.
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ['https://*.blobstore.apple.com/*'] }, (d, cb) => {
+    const ours = win && !win.isDestroyed() && d.webContentsId === win.webContents.id && d.resourceType === 'media';
+    cb(ours ? { responseHeaders: withCors(d.responseHeaders, pageOrigin()) } : {});
+  });
   session.defaultSession.webRequest.onCompleted({ urls: ['*://*/*'] }, (d) => reqDone(d, d.statusCode));
   session.defaultSession.webRequest.onErrorOccurred({ urls: ['*://*/*'] }, (d) => reqDone(d, d.error));
   win.webContents.on('dom-ready', () => {
@@ -417,6 +426,29 @@ function preconnect(why) {
 // sends PCM chunks here; they go to the app's PCM socket (UZUMAKI_AIRPLAY_PCM_SOCKET). While that
 // socket is connected the local output is muted in the page's graph (UZUMAKI_AIRPLAY_LOCAL=1 keeps
 // it on); MusicKit's volume is never touched. The log gets the level now and then, never the audio.
+// ---- uploadCors:begin
+// Response headers that let `origin` read the response with credentials (the element asks with
+// crossorigin=use-credentials, which sends the same cookies as before). Any CORS headers the server
+// sent are replaced.
+function withCors(headers, origin) {
+  const out = {};
+  for (const [k, v] of Object.entries(headers || {})) {
+    if (!/^access-control-allow-(origin|credentials)$/i.test(k)) out[k] = v;
+  }
+  out['Access-Control-Allow-Origin'] = [origin];
+  out['Access-Control-Allow-Credentials'] = ['true'];
+  return out;
+}
+// ---- uploadCors:end
+
+function pageOrigin() {
+  try {
+    return new URL(win.webContents.getURL()).origin;
+  } catch {
+    return 'https://music.apple.com';
+  }
+}
+
 let airplay = null; // bridge/airplay.js, loaded at the first cast
 const AIRPLAY_KEEP_LOCAL = process.env.UZUMAKI_AIRPLAY_LOCAL === '1';
 const AIRPLAY_VERBOSE = !!process.env.UZUMAKI_AIRPLAY_DEBUG;
@@ -425,6 +457,17 @@ let pcmLink = null;
 let casting = false; // the PCM socket is connected
 let meterTimer = null;
 let readySent = null; // the last `airplayCapture` told to the app
+// The app closed the PCM socket: the cast is ending. The local output stays muted until the app's
+// "capture off" comes (it says where the player steps back to), at most HOLD_MS.
+const HOLD_MS = 1500;
+let holding = false;
+let holdTimer = null;
+let resumeAt = null; // capture off: the page unmutes once the player is there (seconds), then fades in
+function stopHold() {
+  clearTimeout(holdTimer);
+  holdTimer = null;
+  holding = false;
+}
 const meter = { chunks: 0, frames: 0, sum: 0, n: 0, peak: 0, status: null, silent: false, lastLog: 0 };
 
 function airplayToPage() {
@@ -432,7 +475,8 @@ function airplayToPage() {
   win.webContents.send('uzumaki:airplay', {
     source: airplay.workletSource(),
     capture: capturing,
-    localMuted: casting && !AIRPLAY_KEEP_LOCAL,
+    localMuted: (casting || holding) && !AIRPLAY_KEEP_LOCAL,
+    resumeAt,
     previewCors: process.env.UZUMAKI_AIRPLAY_PREVIEW_CORS === '1', // tests: measurable signed-out previews
   });
 }
@@ -450,10 +494,12 @@ function captureReady(ready, error) {
 
 let captureSocket = null; // the socket named by the app (the Chromecast session's), else the env's
 
-function airplaySet(on, socket) {
+function airplaySet(on, socket, at) {
   on = !!on;
   socket = on && typeof socket === 'string' && socket ? socket : null;
   if (on === capturing && socket === captureSocket) return;
+  resumeAt = !on && Number.isFinite(at) && at >= 0 ? at : null;
+  stopHold();
   if (on && capturing) airplaySet(false); // another socket: start over on the new one
   captureSocket = socket;
   capturing = on;
@@ -464,7 +510,7 @@ function airplaySet(on, socket) {
     casting = false;
     clearInterval(meterTimer);
     meterTimer = null;
-    log('airplay: capture off, local output on');
+    log(`airplay: capture off, local output on${resumeAt !== null ? ` once the player is at ${resumeAt.toFixed(2)} s` : ''} (fading in)`);
     return airplayToPage();
   }
   airplay ??= require('./airplay.js');
@@ -476,8 +522,18 @@ function airplaySet(on, socket) {
       log,
       retryMs: 250,
       onState: (connected) => {
+        if (casting && !connected && capturing) {
+          // Ending: wait for the app's capture off (with its step back) before unmuting.
+          holding = true;
+          holdTimer = setTimeout(() => {
+            stopHold();
+            log('airplay: no capture off from the app: local output back on');
+            airplayToPage();
+          }, HOLD_MS);
+          holdTimer.unref?.();
+        }
         casting = connected;
-        log(`airplay: ${connected ? 'sending to the speaker: local output muted in the page graph' : 'not sending: local output back on'}` +
+        log(`airplay: ${connected ? 'sending to the speaker: local output muted in the page graph' : holding ? 'not sending: local output held muted until the capture ends' : 'not sending: local output back on'}` +
           (connected && AIRPLAY_KEEP_LOCAL ? ' (kept on: UZUMAKI_AIRPLAY_LOCAL=1)' : ''));
         airplayToPage();
       },
@@ -527,6 +583,11 @@ ipcMain.on('uzumaki:airplay-status', (e, st) => {
   if (st.note) return log(`airplay capture: ${String(st.note).slice(0, 300)}`);
   if (st.capture) {
     if (capturing) captureReady(!!st.capture.ready, st.capture.error);
+    return;
+  }
+  if (st.tainted) {
+    // The app says why the speaker is silent for this song (an uploaded song that couldn't be read).
+    if (capturing) send({ event: 'airplayTainted', host: String(st.tainted).slice(0, 100) });
     return;
   }
   meter.status = st;
@@ -649,7 +710,7 @@ function handle(msg) {
       win.webContents.reload();
       return reply(true, { result: null });
     case 'airplay':
-      airplaySet(msg.on, msg.socket);
+      airplaySet(msg.on, msg.socket, msg.resumeAt);
       return reply(true, { result: null });
     case 'quit':
       reply(true, { result: null });

@@ -56,17 +56,21 @@ pub enum Cmd {
 pub struct LocalPlayer {
     tx: Sender<Cmd>,
     active: Arc<AtomicBool>,
+    /// The tap's gain: its hold is set here, on the caller's thread, before a quiet seek is sent.
+    gain: Gain,
 }
 
 impl LocalPlayer {
     /// Starts the thread (it sleeps until the first command). `active` is shared with `main.rs`.
     pub fn spawn(on_event: impl Fn(u64, Event) + Send + 'static, active: Arc<AtomicBool>) -> Self {
         let (tx, rx) = mpsc::channel::<Cmd>();
+        let gain = Gain::new(1.0);
+        let g = gain.clone();
         std::thread::Builder::new()
             .name("local-player".into())
-            .spawn(move || run(rx, on_event))
+            .spawn(move || run(rx, on_event, g))
             .expect("spawn local-player thread");
-        Self { tx, active }
+        Self { tx, active, gain }
     }
 
     pub fn play(&self, generation: u64, song: &Song, start_at: f64, volume: f64) {
@@ -85,6 +89,15 @@ impl LocalPlayer {
 
     pub fn seek(&self, seconds: f64) {
         let _ = self.tx.send(Cmd::Seek(seconds));
+    }
+
+    /// A seek nobody may hear on its way: this computer stays silent from now until it has landed
+    /// (then fades in). Back from the speakers, the old place would be heard for a moment otherwise.
+    pub fn seek_quiet(&self, seconds: f64) {
+        self.gain.hold(true);
+        if self.tx.send(Cmd::Seek(seconds)).is_err() {
+            self.gain.hold(false);
+        }
     }
 
     pub fn set_volume(&self, volume: f64) {
@@ -207,6 +220,8 @@ impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
                         s.offset = 0.0;
                     }
                 }
+                // `try_seek` returns once the audio thread has taken the seek: a quiet seek is over.
+                self.tap_gain.hold(false);
                 self.send_time();
             }
             Cmd::Volume(v) => {
@@ -316,7 +331,7 @@ impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
 }
 
 /// The player thread.
-fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(u64, Event)) {
+fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(u64, Event), gain: Gain) {
     let mute = ["UZUMAKI_MUTE", "CADENCE_MUTE"].iter().any(|k| std::env::var(k).is_ok_and(|v| v == "1"));
     // AirPlay: the way to the speaker (None in tests; it carries nothing until one is connected).
     let tap: Option<Arc<dyn CastSink>> = match (crate::airplay::local_feed(), crate::cast::local_feed()) {
@@ -325,7 +340,9 @@ fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(u64, Event)) {
         (None, Some(c)) => Some(Arc::new(c)),
         (None, None) => None,
     };
-    Engine::new(DeviceOutput::default(), on_event, mute).with_tap(tap).run(rx);
+    let mut engine = Engine::new(DeviceOutput::default(), on_event, mute).with_tap(tap);
+    engine.tap_gain = gain;
+    engine.run(rx);
 }
 
 #[cfg(test)]
@@ -556,7 +573,9 @@ mod tests {
             }
         });
         let before = log.lock().unwrap().len();
+        e.tap_gain.hold(true); // a quiet seek (LocalPlayer::seek_quiet sets it before sending)
         e.handle(Cmd::Seek(3.0));
+        assert!(!e.tap_gain.held(), "the seek has landed: this computer may fade in");
         stop.store(true, Ordering::SeqCst);
         feeder.join().unwrap();
         let l = log.lock().unwrap();

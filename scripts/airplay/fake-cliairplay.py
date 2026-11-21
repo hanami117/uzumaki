@@ -180,6 +180,10 @@ def commands():
                     status("content_cut requested_ms=%d cut_ms=%d cut_bytes=%d drain_ms=0" % (at - req, at - req, frames * 4))
                 state["head"] = at
                 state["start_ms"], state["join"] = 0, False
+                if "reanchor" in mode and not state.get("reanchored"):
+                    # Once: a gap in the input, padded with 2 s of silence (heard 2 s later).
+                    state["reanchored"] = True
+                    status("REANCHOR shifted_frames=88200 total_shifted_frames=88200 sample_rate=44100")
             elif line == "ACTION=FLUSH":
                 with lock:
                     state["flush"] += 1

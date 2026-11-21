@@ -900,17 +900,29 @@ impl State {
         }
         self.playback.seek_preview = None;
         let target = seconds.clamp(0.0, self.playback.duration.max(0.0));
+        self.airplay_flush(); // the seek is heard at once
+        self.cast_seeked();
+        self.seek_player(target);
+    }
+
+    /// Moves the player (the local one or the bridge's) to `target` seconds, and the clock with it.
+    /// No speaker is told: `seek_seconds` does that.
+    pub(super) fn seek_player(&mut self, target: f64) {
+        self.seek_player_as(target, false);
+    }
+
+    /// `seek_player`; `quiet`: the local player stays silent until the seek has landed (back from
+    /// the speakers: the old place must not be heard). The bridge's quiet seek is `airplay_capture`'s.
+    pub(super) fn seek_player_as(&mut self, target: f64, quiet: bool) {
         self.playback.position = target;
         self.playback.position_at = Some(crate::clock::now());
         self.playback.slew = 0.0;
         self.playback.seek_target = Some((target, crate::clock::now()));
-        self.airplay_flush(); // the seek is heard at once
-        self.cast_seeked();
         if self.playback.local {
             #[cfg(test)]
-            self.local_sent.borrow_mut().push(format!("seek {target}"));
+            self.local_sent.borrow_mut().push(format!("{} {target}", if quiet { "seek quietly" } else { "seek" }));
             if let Some(p) = &self.local {
-                p.seek(target);
+                if quiet { p.seek_quiet(target) } else { p.seek(target) }
             }
         } else if let Some(b) = &self.bridge {
             b.seek(target);

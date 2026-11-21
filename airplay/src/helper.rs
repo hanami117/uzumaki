@@ -17,6 +17,9 @@ pub enum Status {
     Flushed { head_ms: u64 },
     /// The receiver's queue depth (native AirPlay 2): how late a seek is heard.
     Latency { warm_lead_ms: u64 },
+    /// The helper padded its timeline with silence after a gap in its input: everything after it
+    /// is heard this much later. `total_frames`: since the last START (44.1 kHz frames).
+    Reanchor { total_frames: u64 },
     Error { code: String, http: u64, detail: String },
     Eof,
     IdleTimeout,
@@ -56,6 +59,7 @@ pub fn parse_status(line: &str) -> Option<Status> {
         "started" => Status::Started { requested_ms: num("requested_unix_ms"), at_ms: num("at_unix_ms") },
         "flushed" => Status::Flushed { head_ms: num("head_unix_ms") },
         "latency" => Status::Latency { warm_lead_ms: num("warm_lead_ms") },
+        "REANCHOR" => Status::Reanchor { total_frames: num("total_shifted_frames") },
         "error" => Status::Error {
             code: field(rest, "code").unwrap_or("").into(),
             http: num("http"),
@@ -230,10 +234,7 @@ pub fn find(env_path: Option<PathBuf>) -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
-        candidates.push(dir.join("cliairplay"));
-        candidates.push(dir.join("../Resources/cliairplay"));
-        candidates.push(dir.join("../share/uzumaki/cliairplay"));
-        candidates.push(dir.join("../lib/uzumaki/cliairplay"));
+        candidates.extend(beside(dir));
     }
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/cliairplay/cliairplay"));
     if let Some(path) = std::env::var_os("PATH") {
@@ -242,9 +243,35 @@ pub fn find(env_path: Option<PathBuf>) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file()).map(|p| p.canonicalize().unwrap_or(p))
 }
 
+/// Where the packages put the helper, from the folder of the app's binary: beside it (AUR and
+/// AppImage: `/usr/lib/uzumaki`), in the macOS bundle's Resources, and for install.sh's
+/// `<prefix>/bin/uzumaki` in `<prefix>/share/uzumaki` (or `<prefix>/lib/uzumaki`).
+fn beside(dir: &Path) -> [PathBuf; 4] {
+    [dir.join("cliairplay"), dir.join("../Resources/cliairplay"), dir.join("../share/uzumaki/cliairplay"), dir.join("../lib/uzumaki/cliairplay")]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_package_layout_finds_its_own_helper() {
+        let root = std::env::temp_dir().join(format!("uzu-helper-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let first = |bin: &str| beside(&root.join(bin)).into_iter().find(|p| p.is_file()).map(|p| p.canonicalize().unwrap());
+        for (bin, helper) in [
+            ("home/.local/bin", "home/.local/share/uzumaki/cliairplay"), // install.sh
+            ("usr/lib/uzumaki", "usr/lib/uzumaki/cliairplay"),           // AUR, uzumaki-bin, AppImage
+            ("Uzumaki.app/Contents/MacOS", "Uzumaki.app/Contents/Resources/cliairplay"),
+        ] {
+            std::fs::create_dir_all(root.join(bin)).unwrap();
+            assert_eq!(first(bin), None, "{bin}: nothing installed yet");
+            std::fs::create_dir_all(root.join(helper).parent().unwrap()).unwrap();
+            std::fs::write(root.join(helper), "").unwrap();
+            assert_eq!(first(bin), Some(root.join(helper).canonicalize().unwrap()), "{bin}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
     use crate::discover::homepod;
 
     #[test]
@@ -266,6 +293,10 @@ mod tests {
         assert_eq!(parse_status("[STATUS] route protocol=airplay2 flow=native timing=ptp buffered=0"), Some(Status::Route("protocol=airplay2 flow=native timing=ptp buffered=0".into())));
         assert_eq!(parse_status("[STATUS] eof"), Some(Status::Eof));
         assert_eq!(parse_status("[STATUS] latency warm_lead_ms=600 render_lead_ms=250"), Some(Status::Latency { warm_lead_ms: 600 }));
+        assert_eq!(
+            parse_status("[STATUS] REANCHOR shifted_frames=20970 total_shifted_frames=41940 sample_rate=44100"),
+            Some(Status::Reanchor { total_frames: 41940 })
+        );
         assert_eq!(parse_status("[STATUS] flushed head_unix_ms=5"), Some(Status::Flushed { head_ms: 5 }));
         assert_eq!(parse_status("[STATUS] flushed"), Some(Status::Flushed { head_ms: 0 }));
         assert_eq!(parse_status("[STATUS] capabilities requested=0x0"), None);

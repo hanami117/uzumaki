@@ -780,3 +780,24 @@ fn the_group_shares_one_clock_that_ends_with_it() {
     wait_for("every process to end", || pids.iter().all(|&p| !alive(p)));
     r.end();
 }
+
+#[test]
+fn how_far_behind_the_speaker_is_follows_its_start_its_padding_and_a_flush() {
+    let mut r = rig("behind", "reanchor", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
+    assert_eq!(r.ctl.behind(), None, "nothing casts");
+    r.ctl.connect_named("Bedroom", opts());
+    r.on();
+    // Started ~250 ms ahead (as the real helper), then 2 s of padding after a gap: everything
+    // written since is heard 2 s later than it would have been.
+    wait_for("the padding", || r.ctl.behind().is_some_and(|b| b >= Duration::from_millis(2000)));
+    let b = r.ctl.behind().unwrap();
+    assert!(b <= Duration::from_millis(3000), "{b:?}");
+    // A flush starts the speaker again: no padding since that start.
+    r.ctl.flush();
+    wait_for("the second start", || r.journal().matches("status started").count() == 2);
+    wait_for("the new start's delay", || r.ctl.behind().is_some_and(|b| b < Duration::from_millis(1500)));
+    r.ctl.disconnect();
+    r.wait("off", |e| *e == Event::State(Cast::Off));
+    assert_eq!(r.ctl.behind(), None, "back on this computer");
+    r.end();
+}

@@ -32,7 +32,7 @@ gain node in the page's graph).
 ## Run it
 
 ```sh
-scripts/airplay-spike/build-cliairplay.sh     # once: cliairplay v0.5.10 into target/cliairplay/
+scripts/airplay/build-cliairplay.sh           # once: cliairplay v0.5.10 into target/cliairplay/
 cargo run -p uzumaki-airplay -- list          # speakers on the network (browse only)
 cargo run -p uzumaki-airplay -- plan Bedroom  # the cliairplay command the app would run (runs nothing)
 scripts/airplay-spike/run.sh --dry-run        # no speaker: a stand-in prints the level it receives

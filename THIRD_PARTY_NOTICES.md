@@ -282,6 +282,15 @@ The bridge's other npm packages (install tooling for Electron only): `@electron/
 `@electron-internal/extract-zip`, `debug`, `env-paths`, `ms`, `progress`, `undici`, `@types/node`,
 `undici-types` (MIT); `graceful-fs`, `semver` (ISC); `sumchecker` (Apache-2.0).
 
+## cliairplay (AirPlay helper)
+
+https://github.com/music-assistant/airplay-cli (Music Assistant), GPL-3.0. A separate program that Uzumaki
+starts to send audio to AirPlay speakers; the macOS app, the AppImage, the AUR packages and `install.sh`
+ship it, built from source at the tag named in `scripts/airplay/build-cliairplay.sh`, with its licence note
+(`packaging/CLIAIRPLAY_LICENSE.txt`). It is statically linked with OpenSSL 3 (Apache-2.0) and libraop's codec
+and mDNS libraries (their own licences, see its source tree), and on Linux with GCC's libstdc++ and libatomic
+(GPL-3.0 with the GCC Runtime Library Exception).
+
 ## Rust crates
 
 About 550 crates from crates.io, under MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib, BSL-1.0, Unlicense, CC0-1.0,

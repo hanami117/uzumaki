@@ -23,7 +23,66 @@ ipcRenderer.on('cadence:cmd', async (_e, msg) => {
   ipcRenderer.send('cadence:out', { id: msg.id ?? null, ...reply });
 });
 
+webFrame.executeJavaScript(`(${uploadCorsHook})(window);`);
 webFrame.executeJavaScript(`(${pageBridge})();`);
+
+// ---- Uploaded songs (iCloud Music Library) and the AirPlay/Chromecast tap. MusicKit plays a song
+// uploaded to the library as a plain file from *.blobstore.apple.com, in its own <audio>, instead of
+// its same-origin MSE stream. Loaded without CORS, that cross-origin file taints the element and
+// Web Audio gets zeros, so a speaker would play silence (live test 2026-11-21, "Malo tebya").
+// This runs in the page's world before MusicKit: an <audio> whose src is such a file gets
+// crossorigin=use-credentials first (same cookies as before), and main adds the CORS headers the
+// server doesn't send (onHeadersReceived). If that load fails anyway, the element loads it once more
+// the old way, at the same place, and MusicKit never sees the error (the song plays here as before,
+// and the tap reports the taint). Self-contained (`w` is the window) for bridge/airplay.test.js.
+// ---- uploadCorsHook:begin
+function uploadCorsHook(w) {
+  if (w.__uzumakiUploadCors) return;
+  w.__uzumakiUploadCors = true;
+  const UPLOAD = /^https:\/\/[^/]*\.blobstore\.apple\.com\//i;
+  const Media = w.HTMLMediaElement;
+  const desc = Object.getOwnPropertyDescriptor(Media.prototype, 'src');
+  const setAttribute = w.Element.prototype.setAttribute;
+  const asked = new WeakSet(); // loading in CORS mode because of us
+  const gaveUp = new WeakSet(); // CORS failed once on this element: never again
+  const log = (message) => {
+    try {
+      w.__cadenceNative?.emit({ event: 'log', message: `upload audio: ${message}` });
+    } catch {}
+  };
+  const prepare = (el, url) => {
+    if (!UPLOAD.test(String(url)) || gaveUp.has(el) || el.hasAttribute('crossorigin')) return;
+    setAttribute.call(el, 'crossorigin', 'use-credentials');
+    asked.add(el);
+  };
+  Object.defineProperty(Media.prototype, 'src', {
+    ...desc,
+    set(v) {
+      prepare(this, v);
+      desc.set.call(this, v);
+    },
+  });
+  w.Element.prototype.setAttribute = function (name, value) {
+    if (this instanceof Media && String(name).toLowerCase() === 'src') prepare(this, value);
+    return setAttribute.call(this, name, value);
+  };
+  // Capture phase on the window: runs before the element's own listeners (MusicKit's).
+  w.addEventListener('error', (e) => {
+    const el = e.target;
+    if (!(el instanceof Media) || !asked.has(el)) return;
+    e.stopImmediatePropagation();
+    asked.delete(el);
+    gaveUp.add(el);
+    const src = el.currentSrc || el.src;
+    const at = el.currentTime || 0;
+    log(`loading it in CORS mode failed (media error ${el.error?.code ?? '?'}); loading it as before (a speaker gets silence for it)`);
+    el.removeAttribute('crossorigin');
+    desc.set.call(el, src);
+    if (at) el.currentTime = at;
+    el.play?.()?.catch?.(() => {});
+  }, true);
+}
+// ---- uploadCorsHook:end
 
 // ---- the sign-in window's CSS layer (bridge/signin.js)
 // While the window shows for `signIn`, main sends the CSS and the sign-in hosts. This marks
@@ -172,6 +231,25 @@ function createTap(io) {
 
   const label = (el) => `<audio${el.id ? ' id=' + el.id : ''}>`;
 
+  // The element that sounds: a tapped one that is not paused (MusicKit keeps its old <audio>, paused,
+  // when it switches players, e.g. to an uploaded song's), else the page's player.
+  function playing() {
+    for (const el of io.elements()) if (tap.elements.has(el) && !el.paused) return el;
+    return io.player() || tap.lastEl;
+  }
+
+  // An https: file from another origin without CORS: Chromium hands Web Audio zeros for it.
+  function tainted(el) {
+    const src = el.currentSrc || el.src || '';
+    if (!/^https?:/.test(src) || el.crossOrigin) return null;
+    try {
+      const u = new URL(src);
+      return u.origin === io.origin() ? null : u.host;
+    } catch {
+      return null;
+    }
+  }
+
   // MusicKit creates its <audio> when it first plays (or primes a restored song), and may replace
   // it later: every element not tapped yet is tapped, at once when it is added (`io.watch`) and on
   // a timer as a fallback. A tapped element stays tapped across src changes.
@@ -195,7 +273,7 @@ function createTap(io) {
         tap.failed = { el, why };
       }
     }
-    tap.lastEl = io.player() || tap.lastEl;
+    tap.lastEl = playing();
     if (tap.ctx.state !== 'running') tap.ctx.resume?.()?.catch?.(() => {});
     report();
   }
@@ -227,7 +305,7 @@ function createTap(io) {
   // Widevine when mediaKeys is set); an https: file from another host (previews) taints the tap
   // unless the element asked for CORS, and Chromium then hands Web Audio zeros. Host only, no path.
   function meter() {
-    const el = tap.lastEl;
+    const el = (tap.lastEl = playing());
     let source = 'none';
     if (el) {
       const src = el.currentSrc || el.src || '';
@@ -242,10 +320,65 @@ function createTap(io) {
       tap.lastSource = source;
       io.note(`element source: ${source}`);
     }
+    // Said once per file: the app tells the user why the speaker is silent for this song.
+    const host = el && !el.paused ? tainted(el) : null;
+    const key = host && (el.currentSrc || el.src);
+    if (key && key !== tap.lastTainted) {
+      io.note(`the playing file comes from ${host} without CORS: the tap gets silence for it`);
+      io.tainted(host);
+    }
+    if (el && !el.paused) tap.lastTainted = key || null; // a pause and play of the same file says nothing new
     io.meter({
       ctxState: tap.ctx.state, elements: tap.count, path: tap.path,
       elementVolume: el ? Number(el.volume).toFixed(2) : 'none',
     });
+  }
+
+  // The local output (gain) comes back gently: a cast that ends must not cut in mid-wave, and when
+  // the player steps back to where the listener was (`resumeAt`), it stays muted until the element
+  // is there (or LAND_MAX_MS), so the old position is never heard. Muting is quick (20 ms).
+  const FADE_S = 0.12;
+  const LAND_POLL_MS = 50;
+  const LAND_MAX_MS = 1500;
+  const LAND_SLACK_S = 0.35;
+  let fadeGen = 0;
+  let stopLand = null;
+
+  function fadeIn() {
+    const g = tap.local.gain;
+    const t = tap.ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(1, t + FADE_S);
+    tap.localOn = true;
+  }
+
+  function setLocal(muted, at) {
+    const gen = ++fadeGen;
+    stopLand?.();
+    stopLand = null;
+    if (muted) {
+      tap.localOn = false;
+      tap.local.gain.cancelScheduledValues(tap.ctx.currentTime);
+      tap.local.gain.setTargetAtTime(0, tap.ctx.currentTime, 0.02);
+      return;
+    }
+    if (tap.localOn) return;
+    if (typeof at !== 'number') return fadeIn();
+    const began = Date.now();
+    const check = () => {
+      if (gen !== fadeGen) return;
+      const el = playing();
+      const there = el && !el.seeking && Math.abs((el.currentTime || 0) - at) < LAND_SLACK_S;
+      const late = Date.now() - began >= LAND_MAX_MS;
+      if (!there && !late) return;
+      stopLand?.();
+      stopLand = null;
+      io.note(there ? `back at ${at.toFixed(2)} s after ${Date.now() - began} ms: fading in` : `the player didn't get to ${at.toFixed(2)} s in ${LAND_MAX_MS} ms: fading in anyway`);
+      fadeIn();
+    };
+    stopLand = io.every(check, LAND_POLL_MS);
+    check();
   }
 
   async function apply(msg) {
@@ -281,7 +414,8 @@ function createTap(io) {
       io.note('capture off (tap disconnected)');
     }
     const muted = capture && tap.linked && !!msg.localMuted;
-    tap.local.gain.setTargetAtTime(muted ? 0 : 1, tap.ctx.currentTime, 0.02);
+    if (tap.localOn === undefined) tap.localOn = true; // a new graph starts at full gain
+    setLocal(muted, capture ? null : msg.resumeAt);
     if (capture) scan();
     report();
   }
@@ -314,6 +448,8 @@ const airplayTap = createTap({
     channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
   }),
   elements: () => document.querySelectorAll('audio'),
+  origin: () => location.origin,
+  tainted: (host) => ipcRenderer.send('uzumaki:airplay-status', { tainted: host }),
   player: () => document.getElementById('apple-music-player') || document.querySelector('audio'),
   watch: (fn) => {
     const hasAudio = (n) => n.nodeType === 1 && (n.nodeName === 'AUDIO' || (n.querySelector && n.querySelector('audio')));

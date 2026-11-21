@@ -8,6 +8,9 @@
 #   bin/uzumaki                                    the app (release build)
 #   bin/uzu                                        the mpc-style command line
 #   share/uzumaki/bridge/                          the castLabs Electron playback bridge
+#   share/uzumaki/cliairplay                       the AirPlay helper (GPL-3.0, built from source at
+#                                                  a pinned tag; needs gcc, g++, make) and its licence
+#                                                  note CLIAIRPLAY_LICENSE.txt
 #   share/applications/io.github.hanami117.uzumaki.desktop
 #   share/icons/hicolor/<size>/apps/io.github.hanami117.uzumaki.png   (the default, dark icon)
 #   share/uzumaki/icons/{dark,light,coral}/<size>.png                   (the app swaps hicolor to
@@ -45,6 +48,7 @@ uninstall() {
     rm -f "$BIN" "$UZU"
     # The program only: playlist pictures (share/uzumaki/playlist-art) stay, as settings do.
     rm -rf "$SHARE/bridge" "$SHARE/icons"
+    rm -f "$SHARE/cliairplay" "$SHARE/CLIAIRPLAY_LICENSE.txt"
     rmdir "$SHARE" 2>/dev/null || true
     rm -f "$ICONS"/*/apps/"$APP_ID".png
     # Only remove the menu entry if it is ours (it may point at a build in a source checkout).
@@ -60,7 +64,7 @@ uninstall() {
 
 case "${1:-}" in
     --uninstall) uninstall; exit ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit ;;
+    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit ;;
     "") ;;
     *) die "unknown option '$1' (try --help)" ;;
 esac
@@ -103,6 +107,19 @@ if [[ ! -x bridge/node_modules/electron/dist/electron ]]; then
 fi
 [[ -x bridge/node_modules/electron/dist/electron ]] || die "the Electron download failed (see above)"
 
+# The AirPlay helper (Music Assistant's cliairplay, built at the tag pinned in the script; one
+# already built at that tag in target/cliairplay is reused). Without it Uzumaki works as before,
+# only without AirPlay, so a failed build is a warning.
+helper=
+say "Building the AirPlay helper (cliairplay)"
+if ! command -v make >/dev/null || ! command -v g++ >/dev/null; then
+    say "Warning: no make/g++ (Arch: sudo pacman -S --needed base-devel): installing without AirPlay"
+elif scripts/airplay/build-cliairplay.sh --reuse; then
+    helper=target/cliairplay/cliairplay
+else
+    say "Warning: cliairplay did not build (see above): installing without AirPlay"
+fi
+
 # --- Install ------------------------------------------------------------------------------------
 say "Installing into $PREFIX"
 install -Dm755 "$target" "$BIN"
@@ -115,6 +132,14 @@ cp bridge/main.js bridge/preload.js bridge/signin.js bridge/airplay.js bridge/pa
 cp -a --reflink=auto bridge/node_modules/. "$stage/node_modules/"
 rm -rf "$SHARE/bridge"
 mv "$stage" "$SHARE/bridge"
+
+# airplay/src/helper.rs finds it from bin/uzumaki as ../share/uzumaki/cliairplay.
+if [[ -n $helper ]]; then
+    install -Dm755 "$helper" "$SHARE/cliairplay"
+    install -Dm644 packaging/CLIAIRPLAY_LICENSE.txt "$SHARE/CLIAIRPLAY_LICENSE.txt"
+else
+    rm -f "$SHARE/cliairplay" "$SHARE/CLIAIRPLAY_LICENSE.txt"
+fi
 
 for icon in assets/icons/hicolor/*/apps/"$APP_ID".png; do
     size=$(basename "$(dirname "$(dirname "$icon")")")
@@ -144,5 +169,9 @@ case ":$PATH:" in
     *":$PREFIX/bin:"*) ;;
     *) say "Note: $PREFIX/bin is not on your PATH, so plain \`uzumaki\` won't work in a terminal." ;;
 esac
+if [[ -n $helper ]]; then
+    say "AirPlay: speakers show up in the player bar's AirPlay button. It needs mDNS on your network:"
+    say "a VPN kill switch or firewall must let multicast 224.0.0.251 (UDP 5353) out to the LAN (README, FAQ)."
+fi
 say "First start: sign in to Apple Music from the banner (the Widevine module downloads by itself)."
 say "To update later: git pull && ./install.sh"

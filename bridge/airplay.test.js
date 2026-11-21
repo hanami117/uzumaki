@@ -19,7 +19,7 @@ test('nothing of AirPlay runs in the bridge until the app asks', () => {
   // airplay.js is loaded lazily, at the first `airplay` command, and nowhere else.
   assert.equal(main.match(/require\('\.\/airplay\.js'\)/g).length, 1);
   assert.match(main, /airplay \?\?= require\('\.\/airplay\.js'\)/);
-  assert.match(main, /case 'airplay':\s+airplaySet\(msg\.on, msg\.socket\)/);
+  assert.match(main, /case 'airplay':\s+airplaySet\(msg\.on, msg\.socket, msg\.resumeAt\)/);
   // The app may name the socket (the Chromecast session's); otherwise the env's.
   assert.match(main, /const path = captureSocket \|\| airplay\.socketPath\(\);/);
   // The page gets its graph only on a capture request.
@@ -112,7 +112,13 @@ function fakeAudio({ state = 'running', workletDelay = 20 } = {}) {
     constructor(name) {
       this.name = name;
       this.outs = new Set();
-      this.gain = { value: 1, target: 1, setTargetAtTime: (v) => { this.gain.target = v; } };
+      this.gain = {
+        value: 1, target: 1, ramps: [],
+        setTargetAtTime: (v) => { this.gain.target = v; this.gain.ramps.push(`target ${v}`); },
+        cancelScheduledValues: () => {},
+        setValueAtTime: (v) => { this.gain.value = v; },
+        linearRampToValueAtTime: (v, t) => { this.gain.target = v; this.gain.ramps.push(`ramp ${v} over ${t}`); },
+      };
     }
     connect(n) {
       if (!n || !(n instanceof Node)) throw new TypeError("Failed to execute 'connect' on 'AudioNode': Overload resolution failed.");
@@ -147,6 +153,7 @@ function fakeAudio({ state = 'running', workletDelay = 20 } = {}) {
   };
   const doc = { audio: [], watchers: new Set(), timers: new Set() };
   const statuses = [];
+  const tainted = [];
   const io = {
     newContext: () => ctx,
     loadWorklet: () => new Promise((r) => setTimeout(r, workletDelay)),
@@ -159,6 +166,8 @@ function fakeAudio({ state = 'running', workletDelay = 20 } = {}) {
     note: (n) => log.push(n),
     status: (st) => statuses.push(st),
     meter: () => {},
+    origin: () => 'https://music.apple.com',
+    tainted: (host) => tainted.push(host),
   };
   const add = (id, extra = {}) => {
     const el = { id, src: '', paused: true, volume: 1, ...extra };
@@ -173,7 +182,7 @@ function fakeAudio({ state = 'running', workletDelay = 20 } = {}) {
     const walk = (n) => n && !seen.has(n) && (seen.add(n), n.name === name || [...n.outs].some(walk));
     return walk(el.source);
   };
-  return { ctx, io, doc, add, tick, log, statuses, reaches, last: () => statuses[statuses.length - 1] };
+  return { ctx, io, doc, add, tick, log, statuses, tainted, reaches, last: () => statuses[statuses.length - 1] };
 }
 
 const START = { source: '', capture: true, localMuted: false };
@@ -265,4 +274,210 @@ test('a page that never cast builds nothing when capture is off', async () => {
   await tap.set({ source: '', capture: false });
   assert.equal(built, 0);
   assert.equal(tap.state, null);
+});
+
+test('an uploaded song in a second <audio>: the playing element is the one watched, and a taint is reported once', async () => {
+  const createTap = loadCreateTap();
+  const f = fakeAudio();
+  // A catalog song made MusicKit's first player (MSE, now paused); the upload plays in a new one.
+  const old = f.add('apple-music-player', { src: 'blob:https://music.apple.com/1', mediaKeys: {} });
+  const tap = createTap(f.io);
+  await tap.set(MUTED);
+  const upload = f.add('apple-music-player', { src: 'https://store-032.blobstore.apple.com/x/audio', paused: false });
+  assert.ok(f.reaches(upload, 'worklet'));
+  f.tick(); // the scan and the meter
+  assert.ok(f.log.some((l) => /element source: store-032\.blobstore\.apple\.com, crossOrigin unset, mediaKeys no, playing/.test(l)), f.log.join('\n'));
+  assert.deepEqual(f.tainted, ['store-032.blobstore.apple.com']);
+  f.tick();
+  upload.paused = true;
+  f.tick();
+  upload.paused = false;
+  f.tick();
+  assert.equal(f.tainted.length, 1, 'once per file, a pause and play included');
+  // Loaded in CORS mode (the page hook did its job): nothing to report.
+  const next = f.add('apple-music-player', { src: 'https://store-032.blobstore.apple.com/y/audio', crossOrigin: 'use-credentials', paused: false });
+  upload.paused = true;
+  f.tick();
+  assert.equal(f.tainted.length, 1);
+  assert.ok(f.log.some((l) => /crossOrigin use-credentials/.test(l)));
+  // MusicKit's own same-origin stream is never a taint.
+  next.paused = true;
+  old.paused = false;
+  f.tick();
+  assert.equal(f.tainted.length, 1);
+});
+
+// ---- uploadCorsHook (preload.js, page world) against a fake window.
+function loadUploadHook() {
+  const src = fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8');
+  const m = src.match(/\/\/ ---- uploadCorsHook:begin\n([\s\S]*?)\/\/ ---- uploadCorsHook:end/);
+  assert.ok(m, 'uploadCorsHook markers in preload.js');
+  return vm.runInNewContext(`${m[1]}; uploadCorsHook`, { Object, String, WeakSet });
+}
+
+function fakeWindow() {
+  const loads = [];
+  const logs = [];
+  let errorListener = null;
+  class Element {
+    constructor() { this.attrs = {}; }
+    setAttribute(n, v) { this.attrs[n.toLowerCase()] = String(v); if (n.toLowerCase() === 'src') this.load(String(v)); }
+    hasAttribute(n) { return n in this.attrs; }
+    removeAttribute(n) { delete this.attrs[n]; }
+    get crossOrigin() { return this.attrs.crossorigin ?? null; }
+  }
+  class HTMLMediaElement extends Element {
+    constructor() { super(); this.currentTime = 0; this.paused = true; this.played = 0; }
+    load(url) { loads.push({ url, cors: this.attrs.crossorigin ?? null }); this.currentSrc = url; }
+    play() { this.played++; this.paused = false; return Promise.resolve(); }
+  }
+  Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+    configurable: true, enumerable: true,
+    get() { return this.currentSrc || ''; },
+    set(v) { this.load(String(v)); },
+  });
+  const w = {
+    HTMLMediaElement, Element,
+    __cadenceNative: { emit: (m) => logs.push(m.message) },
+    addEventListener: (type, fn, capture) => { if (type === 'error' && capture) errorListener = fn; },
+  };
+  // An error event at `el`: the window's capture listener first, then the element's own (MusicKit).
+  const fail = (el, code = 4) => {
+    el.error = { code };
+    let stopped = false;
+    errorListener({ target: el, stopImmediatePropagation: () => { stopped = true; } });
+    return stopped ? 'stopped' : 'reached MusicKit';
+  };
+  return { w, loads, logs, fail };
+}
+
+test("an uploaded file loads in CORS mode; MusicKit's own stream and other hosts are untouched", () => {
+  const hook = loadUploadHook();
+  const { w, loads } = fakeWindow();
+  hook(w);
+  hook(w); // twice: wraps once
+  const el = new w.HTMLMediaElement();
+  el.src = 'https://store-032.blobstore.apple.com/sq/audio?sig=1';
+  el.src = 'blob:https://music.apple.com/abc';
+  const other = new w.HTMLMediaElement();
+  other.src = 'https://audio-ssl.itunes.apple.com/preview.m4a';
+  const attr = new w.HTMLMediaElement();
+  attr.setAttribute('src', 'https://store-001.blobstore.apple.com/a');
+  assert.deepEqual(loads.map((l) => l.cors), ['use-credentials', 'use-credentials', null, 'use-credentials']);
+  assert.equal(w.HTMLMediaElement.prototype.hasOwnProperty('src'), true);
+});
+
+test('when the CORS load fails, it loads again the old way at the same place, and MusicKit never sees the error', () => {
+  const hook = loadUploadHook();
+  const { w, loads, logs, fail } = fakeWindow();
+  hook(w);
+  const el = new w.HTMLMediaElement();
+  el.src = 'https://store-032.blobstore.apple.com/sq/audio';
+  el.currentTime = 12.5;
+  assert.equal(fail(el), 'stopped');
+  assert.deepEqual(loads.map((l) => l.cors), ['use-credentials', null]);
+  assert.equal(loads[1].url, 'https://store-032.blobstore.apple.com/sq/audio');
+  assert.equal(el.currentTime, 12.5);
+  assert.equal(el.played, 1);
+  assert.match(logs.join('\n'), /loading it in CORS mode failed/);
+  // That element never asks for CORS again, and its later errors are MusicKit's.
+  el.src = 'https://store-032.blobstore.apple.com/next/audio';
+  assert.equal(loads[2].cors, null);
+  assert.equal(fail(el), 'reached MusicKit');
+  // An error on an element we didn't change is MusicKit's too.
+  const mine = new w.HTMLMediaElement();
+  mine.src = 'blob:https://music.apple.com/x';
+  assert.equal(fail(mine), 'reached MusicKit');
+});
+
+test("main answers CORS for upload files: the page origin with credentials, the server's own CORS headers replaced", () => {
+  const src = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+  const m = src.match(/\/\/ ---- uploadCors:begin\n([\s\S]*?)\/\/ ---- uploadCors:end/);
+  assert.ok(m, 'uploadCors markers in main.js');
+  const withCors = vm.runInNewContext(`${m[1]}; withCors`, { Object });
+  const out = withCors({ 'Content-Range': ['bytes 0-1/2'], 'access-control-allow-origin': ['*'] }, 'https://music.apple.com');
+  assert.deepEqual(JSON.parse(JSON.stringify(out)), {
+    'Content-Range': ['bytes 0-1/2'],
+    'Access-Control-Allow-Origin': ['https://music.apple.com'],
+    'Access-Control-Allow-Credentials': ['true'],
+  });
+  // Only the player window's media requests to the upload host.
+  assert.match(src, /onHeadersReceived\(\{ urls: \['https:\/\/\*\.blobstore\.apple\.com\/\*'\] \}/);
+  assert.match(src, /d\.webContentsId === win\.webContents\.id && d\.resourceType === 'media'/);
+  // The hook runs in the page's world before the page bridge (and MusicKit).
+  const preload = fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8');
+  assert.ok(preload.indexOf('(${uploadCorsHook})(window)') < preload.indexOf('(${pageBridge})()'));
+});
+
+// The local gain node: input -> local -> destination (the first gain created after input).
+function localGainOf(f, el) {
+  return [...el.source.outs][0] && [...[...el.source.outs][0].outs].find((n) => n.outs.has(f.ctx.destination));
+}
+
+test('a cast that ends with a step back: the local output stays muted until the player is there, then fades in', async () => {
+  const createTap = loadCreateTap();
+  const f = fakeAudio();
+  const el = f.add('apple-music-player', { src: 'blob:x', paused: false, currentTime: 42.4 });
+  const tap = createTap(f.io);
+  await tap.set(START);
+  await tap.set(MUTED);
+  const g = localGainOf(f, el).gain;
+  assert.equal(g.target, 0, 'muted while casting');
+  // main held the mute when the socket closed, then the app's capture off says: back to 42.0 s.
+  await tap.set({ source: '', capture: false, localMuted: false, resumeAt: 42.0 });
+  assert.equal(g.target, 0, 'still muted: the player is still at the old place');
+  f.tick();
+  assert.equal(g.target, 0);
+  el.seeking = true;
+  el.currentTime = 42.0;
+  f.tick();
+  assert.equal(g.target, 0, 'not while seeking');
+  el.seeking = false;
+  f.tick();
+  assert.equal(g.target, 1);
+  assert.match(g.ramps[g.ramps.length - 1], /^ramp 1 over 0\.12/);
+  assert.ok(f.log.some((l) => /back at 42\.00 s after \d+ ms: fading in/.test(l)), f.log.join('\n'));
+  f.tick();
+  assert.equal(g.ramps.filter((r) => r.startsWith('ramp')).length, 1, 'one fade');
+});
+
+test('a cast that ends without a step back fades in at once; a new cast cancels a pending fade', async () => {
+  const createTap = loadCreateTap();
+  const f = fakeAudio();
+  const el = f.add('apple-music-player', { src: 'blob:x', paused: false, currentTime: 10 });
+  const tap = createTap(f.io);
+  await tap.set(MUTED);
+  const g = localGainOf(f, el).gain;
+  await tap.set({ source: '', capture: false, localMuted: false });
+  assert.match(g.ramps[g.ramps.length - 1], /^ramp 1 over 0\.12/, 'a fade, not a jump');
+  assert.ok(!g.ramps.includes('target 1'));
+  // Waiting for a step back that a new cast overtakes: no fade in the middle of it.
+  await tap.set(MUTED);
+  await tap.set({ source: '', capture: false, localMuted: false, resumeAt: 3 });
+  await tap.set(START);
+  await tap.set(MUTED);
+  el.currentTime = 3;
+  f.tick();
+  assert.equal(g.target, 0, 'the new cast keeps it muted');
+});
+
+test('a step back that never lands fades in anyway after 1.5 s', async () => {
+  const createTap = loadCreateTap();
+  const f = fakeAudio();
+  const el = f.add('apple-music-player', { src: 'blob:x', paused: false, currentTime: 50 });
+  const tap = createTap(f.io);
+  await tap.set(MUTED);
+  const g = localGainOf(f, el).gain;
+  await tap.set({ source: '', capture: false, localMuted: false, resumeAt: 20 });
+  await new Promise((r) => setTimeout(r, 1550));
+  f.tick();
+  assert.equal(g.target, 1);
+  assert.ok(f.log.some((l) => /didn't get to 20\.00 s in 1500 ms: fading in anyway/.test(l)));
+});
+
+test("main keeps the local output muted from the socket closing until the app's capture off", () => {
+  const main = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+  assert.match(main, /localMuted: \(casting \|\| holding\) && !AIRPLAY_KEEP_LOCAL,\s+resumeAt,/);
+  assert.match(main, /if \(casting && !connected && capturing\) \{[\s\S]*?holding = true;[\s\S]*?HOLD_MS\);/);
+  assert.match(main, /airplaySet\(msg\.on, msg\.socket, msg\.resumeAt\)/);
 });

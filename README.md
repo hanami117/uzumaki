@@ -58,8 +58,9 @@ The screenshots use made-up albums and artists.
   own picture or the current cover) with dither, ASCII, halftone, scanline or blur effects.
 - **Desktop integration:** media keys and desktop widgets (MPRIS on Linux, Now Playing on macOS, the media overlay on Windows), a tray or
   menu bar icon, close to tray, and song notifications.
-- **Speakers:** AirPlay on macOS, and **Chromecast (Beta)** on macOS and Linux: Google TVs and Cast speakers on
-  your network, a few seconds behind (Settings → Speakers → Chromecast; off by default, not on Windows).
+- **Speakers:** AirPlay on macOS and Linux (HomePods and other AirPlay speakers, one or several in sync), and
+  **Chromecast (Beta)** on macOS and Linux: Google TVs and Cast speakers on your network, a few seconds behind
+  (Settings → Speakers → Chromecast; off by default, not on Windows). See [AirPlay on Linux](#airplay-on-linux).
 - **Keyboard first:** you can change every shortcut in Settings → Keyboard.
 - **`uzu`:** a command line and terminal player for the running app (see below).
 - **Hooks:** your own scripts run on every song change or play/pause.
@@ -189,6 +190,8 @@ user, with no sudo, into `~/.local` (set `PREFIX=...` for a different place):
 
 - `~/.local/bin/uzumaki` and `~/.local/bin/uzu`;
 - `~/.local/share/uzumaki/bridge/`, the hidden player (castLabs Electron, about 290 MB);
+- `~/.local/share/uzumaki/cliairplay`, the AirPlay helper (built from source; it needs `gcc`, `g++` and `make`,
+  on Arch `sudo pacman -S --needed base-devel`; without them Uzumaki installs without AirPlay);
 - the app-menu entry and icons.
 
 The first build takes a few minutes. To remove it: `./install.sh --uninstall`.
@@ -261,6 +264,25 @@ Playlists and albums work offline from the disk cache.
 You can change the keys, the colours, the layout and a one-line status for a bar (`uzu status --line`)
 with an optional file, `~/.config/uzumaki/uzu.toml`. `uzu config --default` prints a commented one to start
 from. See [docs/UZU-CONFIG.md](docs/UZU-CONFIG.md).
+
+## AirPlay on Linux
+
+AirPlay sends what Uzumaki plays to AirPlay speakers on your network (HomePod, HomePod mini, Apple TV, AirPlay 2
+speakers), through Music Assistant's [cliairplay](https://github.com/music-assistant/airplay-cli) (GPL-3.0),
+which every Linux package installs beside the app. Pick a speaker with the AirPlay button in the player bar.
+
+- **Finding speakers needs mDNS:** your computer must be on the same network as the speakers (not a guest
+  network) and able to send multicast to the LAN: `224.0.0.251`, UDP port 5353. A **VPN kill switch** or a
+  **firewall** often blocks that, and then the speaker list stays empty (after a few seconds the AirPlay menu
+  says so). Allow it in your VPN's LAN or exceptions setting (the address `224.0.0.251/32`; some VPNs also want
+  `224.0.1.129/32`, the PTP clock), or in ufw/firewalld. Playing also needs the speakers to reach your computer:
+  allow incoming connections from your LAN (the speakers' audio, control and timing ports).
+- **Precise timing (optional):** AirPlay 2 prefers PTP timing, which binds UDP ports 319 and 320, and Linux lets
+  only privileged programs do that. Without it the helper uses NTP timing, which works for one speaker and for
+  several in sync. To allow PTP:
+  `sudo setcap cap_net_bind_service=+ep /usr/lib/uzumaki/cliairplay` (AUR; for install.sh:
+  `~/.local/share/uzumaki/cliairplay`). An update replaces the file, so run it again after updating.
+  The AppImage can't take it (its files are read-only).
 
 ## How it works
 
