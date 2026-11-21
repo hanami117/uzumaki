@@ -5,14 +5,15 @@
 //! `PATCH /v1/me/library/playlists/{id}` with `{"attributes": {"name", "description",
 //! "isPublic"}}`, adding `?with=shared` for a public playlist.
 //!
-//! Apple's web API can't change a playlist's artwork. A chosen picture is turned upright, cropped
-//! to its centred square, scaled down and saved under `settings::playlist_art_dir()`.
+//! Apple's web API can't change a playlist's artwork. A chosen picture (PNG, JPEG or JPEG XL,
+//! see `picture.rs`) is turned upright,
+//! cropped to its centred square, scaled down and saved under `settings::playlist_art_dir()`.
 //! `Settings::playlist_art` points at that file, and every playlist cover goes through
 //! `State::cover_of`.
 
 use std::path::{Path, PathBuf};
 
-use image::{DynamicImage, ImageDecoder, ImageReader};
+use image::DynamicImage;
 use serde_json::json;
 
 use super::*;
@@ -24,16 +25,9 @@ const PICTURE_PX: u32 = 800;
 /// Crops `src` to its centred square, scales it to at most `PICTURE_PX` and writes it as a
 /// JPEG in `dir`. The name carries `stamp`, so the artwork cache never serves an older picture.
 pub(crate) fn save_picture(src: &Path, dir: &Path, id: &str, stamp: u128) -> Result<PathBuf, String> {
-    let unreadable = |e: &dyn std::fmt::Display| format!("Uzumaki can't read it ({e})");
-    let mut decoder = ImageReader::open(src)
-        .map_err(|e| e.to_string())?
-        .with_guessed_format()
-        .map_err(|e| e.to_string())?
-        .into_decoder()
-        .map_err(|e| unreadable(&e))?;
-    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
-    let mut img = DynamicImage::from_decoder(decoder).map_err(|e| unreadable(&e))?;
-    img.apply_orientation(orientation); // phone photos are often stored sideways
+    let bytes = std::fs::read(src).map_err(|e| e.to_string())?;
+    let img = crate::picture::decode(&bytes, true)?;
+    drop(bytes);
     let (w, h) = (img.width(), img.height());
     let side = w.min(h);
     if side == 0 {
@@ -322,6 +316,33 @@ mod tests {
         std::fs::write(&junk, b"not an image").unwrap();
         s.set_playlist_picture("p.mix", junk);
         assert!(s.custom_art("p.mix").is_none());
+        assert!(s.toast.as_deref().unwrap().starts_with("Couldn't use that picture"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(s.picture_dir());
+    }
+
+    #[test]
+    fn a_jpeg_xl_picture_is_saved_as_a_jpeg_and_a_broken_one_toasts() {
+        let dir = std::env::temp_dir().join(format!("uzumaki-pic-jxl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jxl = include_bytes!("../../fixtures/pictures/gradient-48x32.jxl");
+        let src = dir.join("cover.jxl");
+        std::fs::write(&src, jxl).unwrap();
+        let mut s = signed_in_with(playlist("p.mix", true));
+        s.set_playlist_picture("p.mix", src);
+        let art = s.custom_art("p.mix").cloned().expect("saved");
+        let saved = PathBuf::from(art.template.strip_prefix("file://").unwrap());
+        assert_eq!(saved.extension().and_then(|e| e.to_str()), Some("jpg"), "stored as a JPEG: no JXL at draw time");
+        let bytes = std::fs::read(&saved).unwrap();
+        assert!(!crate::picture::is_jxl(&bytes) && bytes.starts_with(&[0xFF, 0xD8]));
+        let img = image::open(&saved).unwrap();
+        assert_eq!((img.width(), img.height()), (32, 32), "the centred square of 48x32");
+        // A cut-off file under a .jxl name: the usual error toast, the old picture stays.
+        let cut = dir.join("cut.jxl");
+        std::fs::write(&cut, &jxl[..40]).unwrap();
+        s.toast = None;
+        s.set_playlist_picture("p.mix", cut);
+        assert_eq!(s.custom_art("p.mix"), Some(&art));
         assert!(s.toast.as_deref().unwrap().starts_with("Couldn't use that picture"));
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(s.picture_dir());
