@@ -4,7 +4,8 @@
 #   packaging/appimage/build.sh
 #
 # Needs: cargo (stable), node + npm, git, pkg-config, the ALSA development files, patchelf, curl,
-# file. It downloads appimagetool (https://github.com/AppImage/appimagetool, "continuous") unless
+# file, and gcc, g++, make for the AirPlay helper (cliairplay, cloned from GitHub at a pinned tag by
+# scripts/airplay/build-cliairplay.sh). It downloads appimagetool (https://github.com/AppImage/appimagetool, "continuous") unless
 # $APPIMAGETOOL points at one; appimagetool in turn downloads the AppImage runtime
 # (https://github.com/AppImage/type2-runtime, "continuous") unless $APPIMAGE_RUNTIME points at one.
 # For a release, download both yourself and check them against the sha256 GitHub shows for the asset
@@ -34,7 +35,10 @@
 #   usr/lib/uzumaki/uzumaki, uzu              the binaries (RUNPATH $ORIGIN/lib)
 #   usr/lib/uzumaki/lib/                      the few libraries we bundle (below)
 #   usr/lib/uzumaki/bridge/                   the playback bridge with castLabs Electron
+#   usr/lib/uzumaki/cliairplay                the AirPlay helper (GPL-3.0; airplay/src/helper.rs finds
+#                                             it beside the binary; uzumaki-bin installs it from here)
 #   usr/share/applications, icons/hicolor, uzumaki/icons/<variant>, licenses/uzumaki
+#                                             (licenses/uzumaki/CLIAIRPLAY_LICENSE.txt: the helper's note)
 #
 # Tool choice: appimagetool with a hand-picked library list, not linuxdeploy. linuxdeploy copies
 # every library the binaries link (minus its exclude list) and is made for one binary; here most of
@@ -94,6 +98,10 @@ if [[ ! -x bridge/node_modules/electron/dist/electron ]]; then
 fi
 [[ -x bridge/node_modules/electron/dist/electron ]] || die "the Electron download failed"
 
+# Always built (not --reuse): a helper built elsewhere may link libraries the AppImage can't count on.
+say "Building the AirPlay helper (cliairplay)"
+scripts/airplay/build-cliairplay.sh || die "cliairplay did not build"
+
 # --- AppDir -------------------------------------------------------------------------------------
 say "Assembling $appdir"
 rm -rf "$appdir"
@@ -101,6 +109,8 @@ lib=$appdir/usr/lib/uzumaki
 install -Dm755 "$target/release/uzumaki" "$lib/uzumaki"
 install -Dm755 "$target/release/uzu" "$lib/uzu"
 strip --strip-unneeded "$lib/uzumaki" "$lib/uzu" 2>/dev/null || true
+# Already stripped (its Makefile links with -s); libstdc++/libatomic are static in it.
+install -m755 target/cliairplay/cliairplay "$lib/cliairplay"
 
 install -dm755 "$lib/bridge"
 install -m644 bridge/main.js bridge/preload.js bridge/signin.js bridge/airplay.js bridge/package.json \
@@ -136,7 +146,7 @@ patchelf --set-rpath '$ORIGIN' "$lib/lib/libxkbcommon-x11.so.0"
 patchelf --set-rpath '$ORIGIN/lib' "$lib/uzumaki"
 
 # Anything else the binaries link must be on every desktop.
-unexpected=$(for bin in "$lib/uzumaki" "$lib/uzu"; do patchelf --print-needed "$bin"; done | sort -u |
+unexpected=$(for bin in "$lib/uzumaki" "$lib/uzu" "$lib/cliairplay"; do patchelf --print-needed "$bin"; done | sort -u |
     grep -v -E '^(libc|libm|libdl|libpthread|librt|libgcc_s|libasound|ld-linux-x86-64)\.so' || true)
 [[ -z $unexpected ]] || die "the binaries link libraries that aren't bundled or guaranteed: $unexpected"
 
@@ -156,6 +166,7 @@ done
 lic=$appdir/usr/share/licenses/uzumaki
 install -Dm644 LICENSE "$lic/LICENSE"
 install -Dm644 THIRD_PARTY_NOTICES.md "$lic/THIRD_PARTY_NOTICES.md"
+install -Dm644 packaging/CLIAIRPLAY_LICENSE.txt "$lic/CLIAIRPLAY_LICENSE.txt"
 # Electron's and Chromium's notices are in usr/lib/uzumaki/bridge/node_modules/electron/dist/.
 for f in "$lib"/lib/*.so.*; do
     printf '%s: copied from the build machine (%s); MIT licence (libxkbcommon, libxcb)\n' \
