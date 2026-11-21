@@ -329,12 +329,27 @@ struct Shared {
     drop_until: AtomicU64,
     /// Wall-clock ms of the first audio written since the group started together (0: none yet).
     first_audio: AtomicU64,
+    /// Wall-clock ms at which frame 0 of `fan.frames` is heard (the group's start, as the helper
+    /// confirmed it: `started at_unix_ms` is the audible instant). 0: nothing heard yet.
+    audible_at: AtomicU64,
+    /// Silence the helpers padded in since that start (`REANCHOR`, frames): heard that much later.
+    shifted: AtomicU64,
     epoch: Option<Instant>,
 }
 
 impl Shared {
     fn now_ms(&self) -> u64 {
         self.epoch.map_or(0, |e| e.elapsed().as_millis() as u64)
+    }
+
+    /// How far behind the player the speakers are now: the audio written to them that nobody
+    /// has heard yet. None while no speaker takes audio.
+    fn behind(&self) -> Option<Duration> {
+        if !self.casting.load(Ordering::SeqCst) {
+            return None;
+        }
+        let frames = self.fan.lock().unwrap().frames;
+        Some(behind(frames, self.shifted.load(Ordering::SeqCst), self.audible_at.load(Ordering::SeqCst), unix_ms()))
     }
 
     fn dropping(&self) -> bool {
@@ -699,6 +714,13 @@ impl Controller {
         self.inner.shared.no_bridge.store(!present, Ordering::SeqCst);
     }
 
+    /// How far behind the player the speakers are right now (what was sent and not heard yet,
+    /// the receiver's queue included). Going back to this computer, the player steps back by
+    /// this much so the music goes on from where the listener was. None while nothing casts.
+    pub fn behind(&self) -> Option<Duration> {
+        self.inner.shared.behind()
+    }
+
     /// The user seeked or picked another song: drop the audio still on its way to the speakers.
     /// Nothing happens while no speaker plays.
     pub fn flush(&self) {
@@ -922,6 +944,18 @@ const GROUP_LEAD_MS: u64 = 400;
 const ALIGN_SLACK_MS: u64 = 20;
 
 /// The instant frame `first` is heard when frame 0 is heard at `anchor`.
+/// Longest delay `behind` reports: past it the numbers are wrong, not the speaker that late.
+const MAX_BEHIND: Duration = Duration::from_secs(5);
+
+/// How much of the audio written is not heard yet at `now_ms`: `frames` written since the start,
+/// whose frame 0 is heard at `audible_at` (0: not started, nothing heard), `shifted` frames of
+/// padding the helper added since. Capped at `MAX_BEHIND`.
+pub fn behind(frames: u64, shifted: u64, audible_at: u64, now_ms: u64) -> Duration {
+    let written = (frames + shifted) as f64 / 44.1;
+    let heard = if audible_at == 0 { 0.0 } else { now_ms.saturating_sub(audible_at) as f64 };
+    Duration::from_micros(((written - heard).max(0.0) * 1000.0) as u64).min(MAX_BEHIND)
+}
+
 fn instant_of(anchor: u64, first: u64) -> u64 {
     anchor + (first * 1000 + 22050) / 44100
 }
@@ -1424,6 +1458,8 @@ impl<'a> Group<'a> {
         // This group's capture says when it's ready (an earlier group's word doesn't count).
         shared.bridge_ready.store(false, Ordering::SeqCst);
         shared.first_audio.store(0, Ordering::Relaxed);
+        shared.audible_at.store(0, Ordering::SeqCst);
+        shared.shifted.store(0, Ordering::SeqCst);
         self.source_alive.store(true, Ordering::SeqCst);
         let (ltx, lrx) = mpsc::sync_channel::<Vec<i16>>(LOCAL_QUEUE);
         *shared.local_tx.lock().unwrap() = Some(ltx);
@@ -1468,6 +1504,10 @@ impl<'a> Group<'a> {
                 m.head_ms = head_ms;
             }
             Status::Latency { warm_lead_ms } => log(format!("\"{name}\" keeps {warm_lead_ms} ms of audio queued")),
+            Status::Reanchor { total_frames } => {
+                log(format!("\"{name}\" padded {} ms of silence after a gap: heard that much later", total_frames * 10 / 441));
+                self.shared().shifted.fetch_max(total_frames, Ordering::SeqCst);
+            }
             Status::ClockReady { mode, state } => {
                 log(format!("\"{name}\": clock {mode}: {state}"));
                 let m = &mut self.members[i];
@@ -1527,7 +1567,12 @@ impl<'a> Group<'a> {
             self.latency.map_or("?".into(), |l| l.to_string())
         ));
         match self.anchor {
-            None => self.anchor = Some(anchor),
+            None => {
+                self.anchor = Some(anchor);
+                let shared = self.shared();
+                shared.audible_at.store(anchor, Ordering::SeqCst);
+                shared.shifted.store(0, Ordering::SeqCst); // a START zeroes the helper's count too
+            }
             // Speakers started together that didn't get the instant asked for are out of step:
             // all start again together, further ahead.
             Some(a) if a.abs_diff(anchor) > ALIGN_SLACK_MS => {
@@ -1573,6 +1618,8 @@ impl<'a> Group<'a> {
         fan.frames = 0;
         drop(fan);
         shared.first_audio.store(0, Ordering::Relaxed);
+        shared.audible_at.store(0, Ordering::SeqCst);
+        shared.shifted.store(0, Ordering::SeqCst);
         self.anchor = None;
         self.epoch_start = None;
         self.gather = None;
@@ -1972,6 +2019,8 @@ impl<'a> Group<'a> {
         self.source_alive.store(false, Ordering::SeqCst);
         shared.casting.store(false, Ordering::SeqCst);
         shared.bridge_ready.store(false, Ordering::SeqCst);
+        shared.audible_at.store(0, Ordering::SeqCst);
+        shared.shifted.store(0, Ordering::SeqCst);
         *shared.local_tx.lock().unwrap() = None;
         {
             let mut fan = shared.fan.lock().unwrap();
@@ -2376,5 +2425,27 @@ mod tests {
         c.set_volume(140);
         assert_eq!(c.volume(), 100);
         assert!(!c.inner.cfg.socket().exists());
+    }
+}
+
+#[cfg(test)]
+mod behind_tests {
+    use super::*;
+
+    #[test]
+    fn behind_is_what_was_written_less_what_was_heard() {
+        let ms = |d: Duration| d.as_millis() as u64;
+        // 2 s written (88200 frames); frame 0 heard at t=1000; at t=2750, 1.75 s were heard.
+        assert_eq!(ms(behind(88_200, 0, 1000, 2750)), 250);
+        // The helper padded 600 ms of silence in: heard that much later.
+        assert_eq!(ms(behind(88_200, 26_460, 1000, 2750)), 850);
+        // Not started yet (or just flushed): nothing heard, everything written is behind.
+        assert_eq!(ms(behind(44_100, 0, 0, 5000)), 1000);
+        // The start is still ahead: nothing heard yet either.
+        assert_eq!(ms(behind(4410, 0, 3000, 2750)), 100);
+        // Heard more than written (the writer stalled): not ahead, just caught up.
+        assert_eq!(behind(44_100, 0, 1000, 9000), Duration::ZERO);
+        // Nonsense is capped.
+        assert_eq!(behind(44_100 * 60, 0, 0, 1), MAX_BEHIND);
     }
 }

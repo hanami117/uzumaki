@@ -6,6 +6,10 @@
 //! launch all go through the methods below. In headless runs and tests there is no controller:
 //! the methods only change state, and scenes fill in made-up speakers.
 
+use std::time::{Duration, Instant};
+
+use crate::clock;
+
 use uzumaki_airplay::discover::Output;
 use uzumaki_airplay::{Cast, Connect, Event, Need, Speaker};
 
@@ -37,6 +41,8 @@ pub struct AirPlay {
     pub browsing: bool,
     /// `uzu airplay` is looking: the picker closing doesn't end the search.
     pub ctl_browsing: bool,
+    /// Since when speakers are looked for (the picker's "none found" hint comes after a while).
+    pub browsing_since: Option<Instant>,
     /// The helper program is installed. False: no AirPlay button, no speaker search, `uzu airplay` says so.
     pub available: bool,
     /// The bridge's last word on its capture (`Event::AirPlayCapture`): it taps MusicKit's player.
@@ -45,10 +51,29 @@ pub struct AirPlay {
     pub prefs: Prefs,
     /// How late the speaker plays, from the last start (for a later lyrics and progress offset).
     pub latency_ms: Option<u32>,
+    /// Back to this computer: where the listener was, for the bridge's player to go back to when
+    /// its own output comes back (`Event::Capture(false)`).
+    pub rewind: Option<Rewind>,
     /// Tests: how many flushes were asked for (there is no controller to count them).
     #[cfg(test)]
     pub flushes: std::cell::Cell<u32>,
 }
+
+/// Leaving the speakers: the spot in the song the listener had reached. The player is ahead of
+/// it by the speakers' delay (the audio on its way and queued in the receiver).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rewind {
+    /// Seconds into the song.
+    pub to: f64,
+    /// The song it is a spot in (None: no id).
+    pub song: Option<String>,
+    pub at: Instant,
+}
+
+/// A step back shorter than this isn't worth a seek (a seek has its own hiccup).
+const MIN_REWIND: Duration = Duration::from_millis(40);
+/// A rewind not used by then is stale (the bridge's output came back long ago, or never will).
+const REWIND_TTL: Duration = Duration::from_secs(5);
 
 /// What `uzu airplay` says when this install has no cliairplay helper.
 pub const AIRPLAY_UNAVAILABLE: &str = "AirPlay is not available (this install has no cliairplay helper)";
@@ -104,6 +129,7 @@ impl State {
                 if cast == Cast::Off {
                     self.airplay.latency_ms = None;
                     self.airplay.speakers.clear();
+                    self.airplay.rewind = None; // the capture's end (just before) used it, or nothing will
                 }
                 let on = matches!(cast, Cast::On { .. });
                 self.airplay.cast = cast;
@@ -119,6 +145,10 @@ impl State {
                 }
             }
             Event::Capture(on) => {
+                if !on {
+                    // Before the bridge's output comes back: it then plays on from the heard spot.
+                    self.airplay_rewind_bridge();
+                }
                 self.airplay.capture = on;
                 self.airplay_capture();
                 return false;
@@ -202,6 +232,7 @@ impl State {
             return;
         }
         self.airplay.browsing = on;
+        self.airplay.browsing_since = on.then(clock::now);
         if let Some(c) = crate::airplay::controller() {
             c.browse(on);
         }
@@ -229,9 +260,13 @@ impl State {
             if self.airplay.prefs.last.take().is_some() | !std::mem::take(&mut self.airplay.prefs.group).is_empty() {
                 self.airplay_save();
             }
-            if let Some(c) = crate::airplay::controller() {
+            let controller = crate::airplay::controller();
+            let behind = controller.as_ref().and_then(|c| c.behind());
+            if let Some(c) = controller {
                 c.disconnect();
-            } else {
+            }
+            self.airplay_leave(behind);
+            if crate::airplay::controller().is_none() {
                 self.airplay.cast = Cast::Off;
                 self.airplay.speakers.clear();
             }
@@ -254,6 +289,36 @@ impl State {
                 self.airplay.cast = Cast::Connecting { id: out.id, name: out.name };
             }
         }
+    }
+
+    /// Back to this computer from speakers `behind` the player: the music goes on from where the
+    /// listener was, not from where the player got to. The local player steps back at once (its
+    /// output comes back as soon as the speakers stop); the bridge's when its capture ends, which
+    /// is when its own output comes back (`airplay_rewind_bridge`). Only while a song plays.
+    pub(super) fn airplay_leave(&mut self, behind: Option<Duration>) {
+        self.airplay.rewind = None;
+        let Some(behind) = behind.filter(|b| *b >= MIN_REWIND) else { return };
+        if !self.airplay.active() || self.resume.is_some() || self.playback.state != crate::bridge::PlayState::Playing {
+            return;
+        }
+        let to = (self.playback.position_now() - behind.as_secs_f64()).max(0.0);
+        eprintln!("airplay: back to this computer {} ms before the player, where the listener was ({to:.2} s)", behind.as_millis());
+        if self.playback.local {
+            self.seek_player(to);
+        } else {
+            self.airplay.rewind = Some(Rewind { to, song: self.playback.song.as_ref().map(|s| s.id.clone()), at: clock::now() });
+        }
+    }
+
+    /// The bridge's capture ends: its player goes back to the spot `airplay_leave` kept, if the
+    /// same song is still on.
+    fn airplay_rewind_bridge(&mut self) {
+        let Some(r) = self.airplay.rewind.take() else { return };
+        let song = self.playback.song.as_ref().map(|s| s.id.clone());
+        if self.playback.local || clock::since(r.at) > REWIND_TTL || r.song != song {
+            return;
+        }
+        self.seek_player(r.to);
     }
 
     /// The picker's checkbox: the speaker joins the ones that play, or leaves them (the last one
@@ -550,6 +615,100 @@ mod tests {
         s.airplay_event(Event::Capture(false));
         s.airplay_event(Event::Capture(true));
         assert!(!s.airplay.capture_ready, "the next session waits for its own word");
+    }
+
+    /// A song plays at 42 s on a speaker 850 ms behind the player.
+    fn casting_at_42(s: &mut State, local: bool) {
+        on(s);
+        playing(s, 42.0);
+        s.playback.song = Some(crate::state::tests::song("x"));
+        s.playback.local = local;
+    }
+
+    const BEHIND: Option<Duration> = Some(Duration::from_millis(850));
+
+    fn near(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    #[test]
+    fn back_to_this_computer_a_local_file_goes_on_from_where_the_listener_was() {
+        let mut s = State::offline();
+        casting_at_42(&mut s, true);
+        s.airplay_leave(BEHIND);
+        // At once: the local player's output comes back as soon as the speakers stop.
+        assert!(near(s.playback.position, 41.15), "{}", s.playback.position);
+        assert_eq!(s.local_sent.borrow().last().map(String::as_str), Some("seek 41.15"));
+        assert_eq!(s.airplay.flushes.get(), 0, "the speakers are leaving: nothing to flush");
+        assert!(s.airplay.rewind.is_none());
+    }
+
+    #[test]
+    fn back_to_this_computer_an_apple_song_steps_back_when_the_bridge_plays_here_again() {
+        let mut s = State::offline();
+        casting_at_42(&mut s, false);
+        s.airplay_leave(BEHIND);
+        assert!(near(s.playback.position, 42.0), "not yet: the bridge's output is still muted");
+        assert!(s.airplay.rewind.as_ref().is_some_and(|r| near(r.to, 41.15)));
+        // The capture ends (the bridge's output comes back): the player goes back first.
+        s.airplay_event(Event::Capture(false));
+        assert!(near(s.playback.position, 41.15), "{}", s.playback.position);
+        assert!(s.playback.seek_target.is_some_and(|(t, _)| near(t, 41.15)));
+        assert!(s.airplay.rewind.is_none());
+        s.airplay_event(Event::State(Cast::Off));
+        assert!(near(s.playback.position, 41.15));
+    }
+
+    #[test]
+    fn no_step_back_when_paused_without_a_delay_or_after_the_song_changed() {
+        // Paused: the player isn't ahead of anything.
+        let mut s = State::offline();
+        casting_at_42(&mut s, true);
+        s.playback.state = PlayState::Paused;
+        s.airplay_leave(BEHIND);
+        assert!(near(s.playback.position, 42.0) && s.local_sent.borrow().is_empty());
+        // No speaker had started, or a step too small to be worth a seek.
+        for behind in [None, Some(Duration::from_millis(10))] {
+            let mut s = State::offline();
+            casting_at_42(&mut s, false);
+            s.airplay_leave(behind);
+            assert!(s.airplay.rewind.is_none(), "{behind:?}");
+        }
+        // Nothing was casting.
+        let mut s = State::offline();
+        playing(&mut s, 42.0);
+        s.airplay_leave(BEHIND);
+        assert!(near(s.playback.position, 42.0) && s.airplay.rewind.is_none());
+        // Another song started before the bridge's output came back.
+        let mut s = State::offline();
+        casting_at_42(&mut s, false);
+        s.airplay_leave(BEHIND);
+        s.playback.song = Some(crate::state::tests::song("y"));
+        s.playback.position = 0.5;
+        s.airplay_event(Event::Capture(false));
+        assert!(near(s.playback.position, 0.5), "the other song stays where it is");
+    }
+
+    #[test]
+    fn a_step_back_kept_too_long_is_dropped() {
+        clock::freeze();
+        let mut s = State::offline();
+        casting_at_42(&mut s, false);
+        s.playback.position_at = Some(clock::now());
+        s.airplay_leave(BEHIND);
+        clock::advance(REWIND_TTL + Duration::from_millis(1));
+        let before = s.playback.position_now();
+        s.airplay_event(Event::Capture(false));
+        assert!(near(s.playback.position_now(), before), "stale: no seek");
+    }
+
+    #[test]
+    fn picking_this_computer_without_a_controller_changes_only_the_state() {
+        let mut s = State::offline();
+        casting_at_42(&mut s, false);
+        s.airplay_pick(None);
+        assert!(!s.airplay.active() && s.airplay.rewind.is_none());
+        assert!(near(s.playback.position, 42.0), "no delay known: no step back");
     }
 
     #[test]

@@ -884,12 +884,18 @@ impl State {
         }
         self.playback.seek_preview = None;
         let target = seconds.clamp(0.0, self.playback.duration.max(0.0));
+        self.airplay_flush(); // the seek is heard at once
+        self.cast_seeked();
+        self.seek_player(target);
+    }
+
+    /// Moves the player (the local one or the bridge's) to `target` seconds, and the clock with it.
+    /// No speaker is told: `seek_seconds` does that.
+    pub(super) fn seek_player(&mut self, target: f64) {
         self.playback.position = target;
         self.playback.position_at = Some(crate::clock::now());
         self.playback.slew = 0.0;
         self.playback.seek_target = Some((target, crate::clock::now()));
-        self.airplay_flush(); // the seek is heard at once
-        self.cast_seeked();
         if self.playback.local {
             #[cfg(test)]
             self.local_sent.borrow_mut().push(format!("seek {target}"));
