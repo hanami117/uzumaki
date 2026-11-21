@@ -5,6 +5,18 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **Mixed playlists.** "Add to Playlist" now works on local files (the song menu, Local Files, several songs at
+  once, or a drag onto a playlist). In your Apple Music playlists they are kept on this computer only, marked with
+  a small icon: Apple Music can't hold your own files and nothing is sent to it. They keep their place next to the
+  songs around them when the playlist changes on your iPhone or Mac. Remove from Playlist takes them out again, and
+  Move Up / Move Down moves them. A file you moved or renamed is found again by its tags; one that is gone shows
+  greyed as "File not found".
+- **Uzumaki playlists:** New Playlist can make a playlist kept in Uzumaki on this computer ("This computer"), which
+  holds Apple Music songs and local files together. It sits in the sidebar with its own icon; rename it, give it a
+  picture, reorder its songs or delete it from its menu. It also works in local files only mode.
+- `uzu playlist add-local <playlist> <file>`, and `uzu playlist` marks local songs ("local", or "missing").
+
 ## [0.4.0] - 2026-11-20
 
 Reorganised Settings and, as a Beta, Chromecast. You need an Apple Music subscription.

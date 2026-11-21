@@ -51,6 +51,9 @@ The screenshots use made-up albums and artists.
 - **Resume where you left off.** The last song, its position and Up Next come back, paused, at the next start.
 - **Your own music files:** FLAC, MP3, AAC/ALAC, Ogg Vorbis and WAV play inside the app, in the same queue as
   Apple Music. You can also use Uzumaki with local files only, without an Apple Music subscription.
+- **Mixed playlists:** put your own files into your Apple Music playlists (they stay on this computer and are
+  marked with a small icon; Apple Music never gets them), or make Uzumaki playlists that mix both and live only
+  on this computer.
 - **Make it yours:** dark, light or system theme, three app icons, and backgrounds (the built-in swirl, your
   own picture or the current cover) with dither, ASCII, halftone, scanline or blur effects.
 - **Desktop integration:** media keys and desktop widgets (MPRIS on Linux, Now Playing on macOS, the media overlay on Windows), a tray or
@@ -245,6 +248,7 @@ uzu seek +10 | vol 60    # seek, volume
 uzu shuffle | repeat     # shuffle on/off, cycle repeat
 uzu autoplay [on|off]    # AutoPlay (∞): similar songs after the queue; prints the new state
 uzu playlists            # a numbered list; `uzu play <n|name>` plays one
+uzu playlist add-local <n|name> <file>   # a local file into a playlist (on this computer only)
 uzu albums [filter]      # `uzu play -a <n|name>` plays an album
 uzu search <words>       # then `uzu pick <n>`, `uzu insert <n>` (play next), `uzu add <n>`
 uzu queue                # Up Next; `uzu jump <n>`, `uzu move <from> <to>`, `uzu del <n>`
