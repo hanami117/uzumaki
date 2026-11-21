@@ -742,11 +742,6 @@ Juniper Vale - Small Rooms
   </details>
 
   <details class="reveal">
-    <summary>AirPlay on Linux finds no speakers. What can I do?</summary>
-    <p>Speakers are found with mDNS, so your computer must be on the same network as them and able to send multicast to it: <code>224.0.0.251</code>, UDP port 5353. A VPN kill switch or a firewall often blocks that. Allow it in your VPN&rsquo;s LAN or exceptions setting (<code>224.0.0.251/32</code>, and <code>224.0.1.129/32</code> for the PTP clock) or in ufw/firewalld, and allow incoming connections from your LAN. Precise PTP timing is optional: <code>sudo setcap cap_net_bind_service=+ep /usr/lib/uzumaki/cliairplay</code> (without it, NTP timing works fine, also for several speakers).</p>
-  </details>
-
-  <details class="reveal">
     <summary>How can I support Uzumaki?</summary>
     <p>Uzumaki is free and open source, made by one person. If you enjoy it, you can <a href="https://ko-fi.com/hanami117" target="_blank" rel="noopener">buy me a coffee on Ko-fi</a>: it buys time for bug fixes and new features. Reporting bugs and starring the project on <a href="https://github.com/hanami117/uzumaki">GitHub</a> help too.</p>
   </details>
