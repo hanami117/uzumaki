@@ -233,6 +233,10 @@ pub enum Request {
     Move { from: usize, to: usize },
     /// Removes entries of `Queue::up_next` (0-based, any order, repeats ignored). Replies `Queue`.
     Remove { indices: Vec<usize> },
+    /// Adds the local file `path` (absolute, in the music folders) to playlist `id`: one of the
+    /// user's Apple playlists (the file joins it on this computer only) or an Uzumaki playlist.
+    /// Replies `Tracks` (the playlist with its local songs). Older apps answer "bad request".
+    PlaylistAddLocal { id: String, path: String },
     /// Searches Apple Music's catalog for songs. The app remembers the results for `Pick`.
     /// Replies `Songs`.
     Search { query: String },

@@ -132,8 +132,12 @@ impl Ctl {
             R::Albums => self.read(|s| Reply::Collections { items: s.ctl_albums() }),
             R::Tracks { kind, id } => {
                 let c = self.collection(kind, &id)?;
-                Ok(Reply::Tracks { collection: collection_info(&c), songs: c.tracks.iter().map(song_info).collect() })
+                // With the local songs of its overlay, as its page lists them (`state/mixed.rs`).
+                let info = collection_info(&c);
+                let songs = self.on_ui(false, move |s| s.playlist_songs(&c))?;
+                Ok(Reply::Tracks { collection: info, songs: songs.iter().map(song_info).collect() })
             }
+            R::PlaylistAddLocal { id, path } => self.on_ui(true, move |s| s.ctl_add_local(&id, &path))?.map(|(collection, songs)| Reply::Tracks { collection, songs }),
             R::PlayCollection { kind, id, index, order } => {
                 let c = self.collection(kind, &id)?;
                 self.try_act(move |s| s.ctl_play_collection(&c, index, order.as_deref()))
@@ -340,7 +344,9 @@ fn local_answers(req: &Request) -> bool {
     use crate::local::view::is_album_id;
     match req {
         Request::Albums => true,
-        Request::Tracks { id, .. } | Request::PlayCollection { id, .. } => is_album_id(id),
+        // Uzumaki playlists are kept on this computer: local only mode has them too.
+        Request::Tracks { id, .. } | Request::PlayCollection { id, .. } => is_album_id(id) || crate::mixed::is_uzu_id(id),
+        Request::PlaylistAddLocal { id, .. } => crate::mixed::is_uzu_id(id),
         _ => false,
     }
 }

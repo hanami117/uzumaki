@@ -336,6 +336,21 @@ fn list_collections(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, kind: 
     put_all(out, &list::rows(&list::collection_rows(&shown), env.term.width, env.term.color))
 }
 
+/// `playlist add-local`: the file goes into the playlist (on this computer only for an Apple one),
+/// then the playlist is listed as `playlist` lists it.
+fn add_local(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, playlist: &str, file: &str) -> Result<(), Fail> {
+    let path = std::fs::canonicalize(file).map_err(|e| Fail::err(format!("{file}: {e}")))?;
+    let found = find(be, env, Kind::Playlist, playlist)?;
+    let (collection, songs) = match call(be, Request::PlaylistAddLocal { id: found.id.clone(), path: path.display().to_string() })? {
+        Reply::Tracks { collection, songs } => (collection, songs),
+        _ => return Err(unexpected()),
+    };
+    env.record(Last::Songs { kind: Kind::Playlist, id: found.id });
+    let Term { width, color } = env.term;
+    put(out, &list::tracks_header(&collection, &songs, width, color))?;
+    put_all(out, &list::rows(&list::song_rows(&songs, None), width, color))
+}
+
 fn show_tracks(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, kind: Kind, query: &str) -> Result<(), Fail> {
     let found = find(be, env, kind, query)?;
     let (collection, songs) = match call(be, Request::Tracks { kind, id: found.id.clone() })? {
@@ -584,6 +599,7 @@ pub fn run(inv: &Invocation, be: &mut dyn Backend, env: &Env, out: &mut dyn Writ
         Command::Playlists => list_collections(be, env, out, Kind::Playlist, ""),
         Command::Albums(filter) => list_collections(be, env, out, Kind::Album, filter),
         Command::Playlist(query) => show_tracks(be, env, out, Kind::Playlist, query),
+        Command::PlaylistAddLocal { playlist, file } => add_local(be, env, out, playlist, file),
         Command::Album(query) => show_tracks(be, env, out, Kind::Album, query),
         Command::History(index) => act(be, env, out, Request::History { index: *index }, true, q),
         Command::Queue { all } => show_queue(be, env, out, *all),

@@ -78,7 +78,15 @@ pub fn song_rows(songs: &[SongInfo], playing_id: Option<&str>) -> Vec<Row> {
             playing: playing_id == Some(s.id.as_str()),
             title: s.title.clone(),
             artist: s.artist.clone(),
-            extra: if s.duration > 0.0 { fmt_time(s.duration) } else { String::new() },
+            // Local files say so (plain text, so it survives a pipe); one whose file is gone too.
+            extra: {
+                let time = if s.duration > 0.0 { fmt_time(s.duration) } else { String::new() };
+                match (s.local, s.playable) {
+                    (true, true) => format!("local {time}").trim_end().to_string(),
+                    (true, false) => "missing".to_string(),
+                    _ => time,
+                }
+            },
             dim: !s.playable,
         })
         .collect()
@@ -127,6 +135,17 @@ mod tests {
 
     fn song(id: &str, title: &str, artist: &str, dur: f64, playable: bool) -> SongInfo {
         SongInfo { id: id.into(), title: title.into(), artist: artist.into(), duration: dur, playable, ..Default::default() }
+    }
+
+    #[test]
+    fn local_songs_say_so_and_a_missing_one_too() {
+        let mut here = song("file:///a.flac", "Mine", "Me", 65.0, true);
+        here.local = true;
+        let mut gone = here.clone();
+        gone.playable = false;
+        let lines = rows(&song_rows(&[here, gone], None), 80, false);
+        assert_eq!(lines[0], "  1  Mine  Me  local 1:05");
+        assert_eq!(lines[1], "  2  Mine  Me     missing");
     }
 
     #[test]

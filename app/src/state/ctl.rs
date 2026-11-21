@@ -212,8 +212,36 @@ impl State {
                 (info, c.modified.clone())
             })
             .collect();
+        // Uzumaki playlists (kept on this computer) after Apple's.
+        out.extend(self.mixed.cards.iter().map(|c| {
+            let mut info = collection_info(c);
+            info.editable = true;
+            info.pinned = ranks.get(c.id.as_str()).copied();
+            (info, None)
+        }));
         out.sort_by_key(|(c, _)| c.pinned.unwrap_or(u32::MAX)); // stable
         out
+    }
+
+    /// `uzu playlist add-local`: adds the music folders' file at `path` to playlist `id` (one of
+    /// the user's Apple playlists, on this computer only, or an Uzumaki playlist). The playlist
+    /// with its songs afterwards.
+    pub fn ctl_add_local(&mut self, id: &str, path: &str) -> Result<(ctl::CollectionInfo, Vec<ctl::SongInfo>), String> {
+        let Some(c) = self.add_target(id) else {
+            return Err("only your own playlists and Uzumaki playlists can take songs".into());
+        };
+        let want = Song::local_id(std::path::Path::new(path));
+        let Some(song) = self.local_lib.songs.iter().find(|s| s.id == want).cloned() else {
+            return Err(format!("{path} isn't in your music folders (Settings \u{2192} Local Files)"));
+        };
+        self.add_to_playlist(&c, std::slice::from_ref(&song));
+        let full = if crate::mixed::is_uzu_id(id) {
+            self.uzu_collection(id).unwrap_or(c)
+        } else {
+            self.collections.get(id).and_then(Load::ready).cloned().unwrap_or(c)
+        };
+        let songs = self.playlist_songs(&full);
+        Ok((collection_info(&full), songs.iter().map(song_info).collect()))
     }
 
     pub fn ctl_albums(&self) -> Vec<ctl::CollectionInfo> {
@@ -237,6 +265,9 @@ impl State {
     /// An album or playlist with its songs, when they're in memory; else the library list's
     /// entry for it (its `modified` date tells whether the disk copy is current).
     pub fn ctl_lookup(&self, id: &str) -> (Option<Collection>, Option<Collection>) {
+        if crate::mixed::is_uzu_id(id) {
+            return (self.uzu_collection(id), None);
+        }
         if crate::local::view::is_album_id(id) {
             return (self.local_album(id), None);
         }
@@ -280,16 +311,18 @@ impl State {
     /// position within it; an index past the songs is an error (the list changed since the
     /// client loaded it). An empty `order` is the same as none.
     pub fn ctl_play_collection(&mut self, c: &Collection, index: Option<usize>, order: Option<&[usize]>) -> Result<(), String> {
+        // With the local songs of its overlay: `Tracks` listed them so (`mixed.rs`).
+        let all = self.playlist_songs(c);
         let reordered: Vec<Song>;
         let tracks: &[Song] = match order.filter(|o| !o.is_empty()) {
             Some(o) => {
-                if o.iter().any(|&i| i >= c.tracks.len()) {
+                if o.iter().any(|&i| i >= all.len()) {
                     return Err("this list changed since it was loaded; press R to reload".into());
                 }
-                reordered = o.iter().map(|&i| c.tracks[i].clone()).collect();
+                reordered = o.iter().map(|&i| all[i].clone()).collect();
                 &reordered
             }
-            None => &c.tracks,
+            None => &all,
         };
         if tracks.is_empty() {
             if self.bridge.is_none() {

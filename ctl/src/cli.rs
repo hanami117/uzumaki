@@ -31,6 +31,8 @@ pub enum Command {
     Autoplay(Option<bool>),
     Playlists,
     Playlist(String),
+    /// `playlist add-local <playlist> <file>`.
+    PlaylistAddLocal { playlist: String, file: String },
     Albums(String),
     Album(String),
     Queue { all: bool },
@@ -233,7 +235,13 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             _ => return Err("'autoplay' takes on, off or toggle".into()),
         }),
         "playlists" => none(name, p).map(|_| Command::Playlists)?,
-        "playlist" => Command::Playlist(target(name, p, "a playlist (number or name)")?),
+        "playlist" => match p {
+            [a, rest @ ..] if a == "add-local" => match rest {
+                [words @ .., file] if !words.is_empty() => Command::PlaylistAddLocal { playlist: words.join(" "), file: file.clone() },
+                _ => return Err("'playlist add-local' needs a playlist (number or name) and a file".into()),
+            },
+            _ => Command::Playlist(target(name, p, "a playlist (number or name)")?),
+        },
         "albums" => Command::Albums(p.join(" ")),
         "album" => Command::Album(target(name, p, "an album (number or name)")?),
         "queue" => match p {
@@ -310,6 +318,7 @@ In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (
   repeat [off|all|one]        no argument: off -> all -> one (also: toggle repeat)
   autoplay [on|off|toggle]    AutoPlay (∞): similar songs after the queue; prints the new state
   playlists                   playlist <playlist>
+  playlist add-local <playlist> <file>   add a local file (local songs are marked in listings)
   albums [<filter>]           album <album>
   history <n>                 replay a History entry (oldest first)
   queue [-a]                  jump <n|title>  move <from> <to>  del <n...>  (n: numbers from queue)
@@ -336,6 +345,15 @@ mod tests {
     fn p(s: &str) -> Result<Command, String> {
         let args: Vec<String> = s.split_whitespace().map(String::from).collect();
         parse(&args).map(|i| i.cmd)
+    }
+
+    #[test]
+    fn playlist_add_local_takes_a_playlist_then_a_file() {
+        assert_eq!(p("playlist add-local road trip /m/a.flac"), Ok(Command::PlaylistAddLocal { playlist: "road trip".into(), file: "/m/a.flac".into() }));
+        assert_eq!(p("playlist add-local 3 a.flac"), Ok(Command::PlaylistAddLocal { playlist: "3".into(), file: "a.flac".into() }));
+        assert!(p("playlist add-local a.flac").is_err());
+        assert!(p("playlist add-local").is_err());
+        assert_eq!(p("playlist road trip"), Ok(Command::Playlist("road trip".into())));
     }
 
     #[test]

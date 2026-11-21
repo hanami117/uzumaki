@@ -565,6 +565,18 @@ mod tests {
     }
 
     #[test]
+    fn uzu_add_local_needs_a_file_of_the_music_folders_and_lists_it() {
+        let c = playlist("p.1", vec![song("i.1", "One")]);
+        let mut s = signed_in_with(c, vec![local("x")]);
+        let (info, songs) = s.ctl_add_local("p.1", "/music/x.flac").unwrap();
+        assert_eq!(info.id, "p.1");
+        assert_eq!(songs.iter().map(|x| (x.title.as_str(), x.local)).collect::<Vec<_>>(), [("One", false), ("x", true)]);
+        assert!(s.ctl_add_local("p.1", "/elsewhere/y.flac").unwrap_err().contains("music folders"));
+        assert!(s.ctl_add_local("pl.catalog", "/music/x.flac").is_err(), "not the user's playlist");
+        assert!(s.sent.borrow().is_empty());
+    }
+
+    #[test]
     fn uzumaki_playlists_hold_both_kinds_and_play_as_one_queue() {
         let mut s = State::offline();
         s.local_lib.songs = vec![local("x")];
