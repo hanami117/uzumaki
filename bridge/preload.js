@@ -334,6 +334,53 @@ function createTap(io) {
     });
   }
 
+  // The local output (gain) comes back gently: a cast that ends must not cut in mid-wave, and when
+  // the player steps back to where the listener was (`resumeAt`), it stays muted until the element
+  // is there (or LAND_MAX_MS), so the old position is never heard. Muting is quick (20 ms).
+  const FADE_S = 0.12;
+  const LAND_POLL_MS = 50;
+  const LAND_MAX_MS = 1500;
+  const LAND_SLACK_S = 0.35;
+  let fadeGen = 0;
+  let stopLand = null;
+
+  function fadeIn() {
+    const g = tap.local.gain;
+    const t = tap.ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(1, t + FADE_S);
+    tap.localOn = true;
+  }
+
+  function setLocal(muted, at) {
+    const gen = ++fadeGen;
+    stopLand?.();
+    stopLand = null;
+    if (muted) {
+      tap.localOn = false;
+      tap.local.gain.cancelScheduledValues(tap.ctx.currentTime);
+      tap.local.gain.setTargetAtTime(0, tap.ctx.currentTime, 0.02);
+      return;
+    }
+    if (tap.localOn) return;
+    if (typeof at !== 'number') return fadeIn();
+    const began = Date.now();
+    const check = () => {
+      if (gen !== fadeGen) return;
+      const el = playing();
+      const there = el && !el.seeking && Math.abs((el.currentTime || 0) - at) < LAND_SLACK_S;
+      const late = Date.now() - began >= LAND_MAX_MS;
+      if (!there && !late) return;
+      stopLand?.();
+      stopLand = null;
+      io.note(there ? `back at ${at.toFixed(2)} s after ${Date.now() - began} ms: fading in` : `the player didn't get to ${at.toFixed(2)} s in ${LAND_MAX_MS} ms: fading in anyway`);
+      fadeIn();
+    };
+    stopLand = io.every(check, LAND_POLL_MS);
+    check();
+  }
+
   async function apply(msg) {
     if (!msg) return;
     want = msg;
@@ -367,7 +414,8 @@ function createTap(io) {
       io.note('capture off (tap disconnected)');
     }
     const muted = capture && tap.linked && !!msg.localMuted;
-    tap.local.gain.setTargetAtTime(muted ? 0 : 1, tap.ctx.currentTime, 0.02);
+    if (tap.localOn === undefined) tap.localOn = true; // a new graph starts at full gain
+    setLocal(muted, capture ? null : msg.resumeAt);
     if (capture) scan();
     report();
   }

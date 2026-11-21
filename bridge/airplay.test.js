@@ -19,7 +19,7 @@ test('nothing of AirPlay runs in the bridge until the app asks', () => {
   // airplay.js is loaded lazily, at the first `airplay` command, and nowhere else.
   assert.equal(main.match(/require\('\.\/airplay\.js'\)/g).length, 1);
   assert.match(main, /airplay \?\?= require\('\.\/airplay\.js'\)/);
-  assert.match(main, /case 'airplay':\s+airplaySet\(msg\.on, msg\.socket\)/);
+  assert.match(main, /case 'airplay':\s+airplaySet\(msg\.on, msg\.socket, msg\.resumeAt\)/);
   // The app may name the socket (the Chromecast session's); otherwise the env's.
   assert.match(main, /const path = captureSocket \|\| airplay\.socketPath\(\);/);
   // The page gets its graph only on a capture request.
@@ -112,7 +112,13 @@ function fakeAudio({ state = 'running', workletDelay = 20 } = {}) {
     constructor(name) {
       this.name = name;
       this.outs = new Set();
-      this.gain = { value: 1, target: 1, setTargetAtTime: (v) => { this.gain.target = v; } };
+      this.gain = {
+        value: 1, target: 1, ramps: [],
+        setTargetAtTime: (v) => { this.gain.target = v; this.gain.ramps.push(`target ${v}`); },
+        cancelScheduledValues: () => {},
+        setValueAtTime: (v) => { this.gain.value = v; },
+        linearRampToValueAtTime: (v, t) => { this.gain.target = v; this.gain.ramps.push(`ramp ${v} over ${t}`); },
+      };
     }
     connect(n) {
       if (!n || !(n instanceof Node)) throw new TypeError("Failed to execute 'connect' on 'AudioNode': Overload resolution failed.");
@@ -401,4 +407,77 @@ test("main answers CORS for upload files: the page origin with credentials, the 
   // The hook runs in the page's world before the page bridge (and MusicKit).
   const preload = fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8');
   assert.ok(preload.indexOf('(${uploadCorsHook})(window)') < preload.indexOf('(${pageBridge})()'));
+});
+
+// The local gain node: input -> local -> destination (the first gain created after input).
+function localGainOf(f, el) {
+  return [...el.source.outs][0] && [...[...el.source.outs][0].outs].find((n) => n.outs.has(f.ctx.destination));
+}
+
+test('a cast that ends with a step back: the local output stays muted until the player is there, then fades in', async () => {
+  const createTap = loadCreateTap();
+  const f = fakeAudio();
+  const el = f.add('apple-music-player', { src: 'blob:x', paused: false, currentTime: 42.4 });
+  const tap = createTap(f.io);
+  await tap.set(START);
+  await tap.set(MUTED);
+  const g = localGainOf(f, el).gain;
+  assert.equal(g.target, 0, 'muted while casting');
+  // main held the mute when the socket closed, then the app's capture off says: back to 42.0 s.
+  await tap.set({ source: '', capture: false, localMuted: false, resumeAt: 42.0 });
+  assert.equal(g.target, 0, 'still muted: the player is still at the old place');
+  f.tick();
+  assert.equal(g.target, 0);
+  el.seeking = true;
+  el.currentTime = 42.0;
+  f.tick();
+  assert.equal(g.target, 0, 'not while seeking');
+  el.seeking = false;
+  f.tick();
+  assert.equal(g.target, 1);
+  assert.match(g.ramps[g.ramps.length - 1], /^ramp 1 over 0\.12/);
+  assert.ok(f.log.some((l) => /back at 42\.00 s after \d+ ms: fading in/.test(l)), f.log.join('\n'));
+  f.tick();
+  assert.equal(g.ramps.filter((r) => r.startsWith('ramp')).length, 1, 'one fade');
+});
+
+test('a cast that ends without a step back fades in at once; a new cast cancels a pending fade', async () => {
+  const createTap = loadCreateTap();
+  const f = fakeAudio();
+  const el = f.add('apple-music-player', { src: 'blob:x', paused: false, currentTime: 10 });
+  const tap = createTap(f.io);
+  await tap.set(MUTED);
+  const g = localGainOf(f, el).gain;
+  await tap.set({ source: '', capture: false, localMuted: false });
+  assert.match(g.ramps[g.ramps.length - 1], /^ramp 1 over 0\.12/, 'a fade, not a jump');
+  assert.ok(!g.ramps.includes('target 1'));
+  // Waiting for a step back that a new cast overtakes: no fade in the middle of it.
+  await tap.set(MUTED);
+  await tap.set({ source: '', capture: false, localMuted: false, resumeAt: 3 });
+  await tap.set(START);
+  await tap.set(MUTED);
+  el.currentTime = 3;
+  f.tick();
+  assert.equal(g.target, 0, 'the new cast keeps it muted');
+});
+
+test('a step back that never lands fades in anyway after 1.5 s', async () => {
+  const createTap = loadCreateTap();
+  const f = fakeAudio();
+  const el = f.add('apple-music-player', { src: 'blob:x', paused: false, currentTime: 50 });
+  const tap = createTap(f.io);
+  await tap.set(MUTED);
+  const g = localGainOf(f, el).gain;
+  await tap.set({ source: '', capture: false, localMuted: false, resumeAt: 20 });
+  await new Promise((r) => setTimeout(r, 1550));
+  f.tick();
+  assert.equal(g.target, 1);
+  assert.ok(f.log.some((l) => /didn't get to 20\.00 s in 1500 ms: fading in anyway/.test(l)));
+});
+
+test("main keeps the local output muted from the socket closing until the app's capture off", () => {
+  const main = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+  assert.match(main, /localMuted: \(casting \|\| holding\) && !AIRPLAY_KEEP_LOCAL,\s+resumeAt,/);
+  assert.match(main, /if \(casting && !connected && capturing\) \{[\s\S]*?holding = true;[\s\S]*?HOLD_MS\);/);
+  assert.match(main, /airplaySet\(msg\.on, msg\.socket, msg\.resumeAt\)/);
 });

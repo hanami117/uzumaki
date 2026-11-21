@@ -57,6 +57,9 @@ pub struct AirPlay {
     /// Tests: how many flushes were asked for (there is no controller to count them).
     #[cfg(test)]
     pub flushes: std::cell::Cell<u32>,
+    /// Tests: the capture messages for the bridge (on, resume_at).
+    #[cfg(test)]
+    pub capture_sent: std::cell::RefCell<Vec<(bool, Option<f64>)>>,
 }
 
 /// Leaving the speakers: the spot in the song the listener had reached. The player is ahead of
@@ -70,8 +73,9 @@ pub struct Rewind {
     pub at: Instant,
 }
 
-/// A step back shorter than this isn't worth a seek (a seek has its own hiccup).
-const MIN_REWIND: Duration = Duration::from_millis(40);
+/// A step back shorter than this isn't worth a seek (a seek has its own hiccup): the output only
+/// fades in, a quarter second on.
+const MIN_REWIND: Duration = Duration::from_millis(250);
 /// A rewind not used by then is stale (the bridge's output came back long ago, or never will).
 const REWIND_TTL: Duration = Duration::from_secs(5);
 
@@ -145,12 +149,11 @@ impl State {
                 }
             }
             Event::Capture(on) => {
-                if !on {
-                    // Before the bridge's output comes back: it then plays on from the heard spot.
-                    self.airplay_rewind_bridge();
-                }
+                // Off: the bridge's player steps back first, and its output stays muted until it is
+                // there (the page waits for it), then fades in.
+                let resume_at = if on { None } else { self.airplay_rewind_bridge() };
                 self.airplay.capture = on;
-                self.airplay_capture();
+                self.airplay_capture_at(resume_at);
                 return false;
             }
             Event::Failed { name, why, still } => {
@@ -199,10 +202,17 @@ impl State {
 
     /// Tells the bridge whether to capture (when there is one; a later one is told at `Ready`).
     pub(super) fn airplay_capture(&mut self) {
+        self.airplay_capture_at(None);
+    }
+
+    /// `airplay_capture`; capture off with `resume_at`: the page unmutes once its player is there.
+    fn airplay_capture_at(&mut self, resume_at: Option<f64>) {
         self.airplay.capture_ready = false; // the (new) capture says when it is ready
         self.airplay_bridge_changed();
+        #[cfg(test)]
+        self.airplay.capture_sent.borrow_mut().push((self.airplay.capture, resume_at));
         if let Some(b) = &self.bridge {
-            b.airplay(self.airplay.capture);
+            if self.airplay.capture { b.airplay(true) } else { b.airplay_off_at(resume_at) }
         }
     }
 
@@ -302,9 +312,9 @@ impl State {
             return;
         }
         let to = (self.playback.position_now() - behind.as_secs_f64()).max(0.0);
-        eprintln!("airplay: back to this computer {} ms before the player, where the listener was ({to:.2} s)", behind.as_millis());
+        eprintln!("airplay: back to this computer {} ms before the player, where the listener was ({to:.2} s); muted until it lands, then a fade", behind.as_millis());
         if self.playback.local {
-            self.seek_player(to);
+            self.seek_player_as(to, true);
         } else {
             self.airplay.rewind = Some(Rewind { to, song: self.playback.song.as_ref().map(|s| s.id.clone()), at: clock::now() });
         }
@@ -325,14 +335,15 @@ impl State {
     }
 
     /// The bridge's capture ends: its player goes back to the spot `airplay_leave` kept, if the
-    /// same song is still on.
-    fn airplay_rewind_bridge(&mut self) {
-        let Some(r) = self.airplay.rewind.take() else { return };
+    /// same song is still on. Returns that spot (the page unmutes once the player is there).
+    fn airplay_rewind_bridge(&mut self) -> Option<f64> {
+        let r = self.airplay.rewind.take()?;
         let song = self.playback.song.as_ref().map(|s| s.id.clone());
         if self.playback.local || clock::since(r.at) > REWIND_TTL || r.song != song {
-            return;
+            return None;
         }
         self.seek_player(r.to);
+        Some(r.to)
     }
 
     /// The picker's checkbox: the speaker joins the ones that play, or leaves them (the last one
@@ -652,7 +663,7 @@ mod tests {
         s.airplay_leave(BEHIND);
         // At once: the local player's output comes back as soon as the speakers stop.
         assert!(near(s.playback.position, 41.15), "{}", s.playback.position);
-        assert_eq!(s.local_sent.borrow().last().map(String::as_str), Some("seek 41.15"));
+        assert_eq!(s.local_sent.borrow().last().map(String::as_str), Some("seek quietly 41.15"), "silent until it lands");
         assert_eq!(s.airplay.flushes.get(), 0, "the speakers are leaving: nothing to flush");
         assert!(s.airplay.rewind.is_none());
     }
@@ -664,9 +675,11 @@ mod tests {
         s.airplay_leave(BEHIND);
         assert!(near(s.playback.position, 42.0), "not yet: the bridge's output is still muted");
         assert!(s.airplay.rewind.as_ref().is_some_and(|r| near(r.to, 41.15)));
-        // The capture ends (the bridge's output comes back): the player goes back first.
+        // The capture ends (the bridge's output comes back): the player goes back first, and the
+        // bridge is told to unmute only once its player is there.
         s.airplay_event(Event::Capture(false));
         assert!(near(s.playback.position, 41.15), "{}", s.playback.position);
+        assert_eq!(s.airplay.capture_sent.borrow().last(), Some(&(false, Some(41.15))));
         assert!(s.playback.seek_target.is_some_and(|(t, _)| near(t, 41.15)));
         assert!(s.airplay.rewind.is_none());
         s.airplay_event(Event::State(Cast::Off));
@@ -681,13 +694,20 @@ mod tests {
         s.playback.state = PlayState::Paused;
         s.airplay_leave(BEHIND);
         assert!(near(s.playback.position, 42.0) && s.local_sent.borrow().is_empty());
-        // No speaker had started, or a step too small to be worth a seek.
-        for behind in [None, Some(Duration::from_millis(10))] {
+        // No speaker had started, or a step too small to be worth a seek (it only fades in).
+        for behind in [None, Some(Duration::from_millis(10)), Some(Duration::from_millis(249))] {
             let mut s = State::offline();
             casting_at_42(&mut s, false);
             s.airplay_leave(behind);
             assert!(s.airplay.rewind.is_none(), "{behind:?}");
+            s.airplay_event(Event::Capture(false));
+            assert_eq!(s.airplay.capture_sent.borrow().last(), Some(&(false, None)), "plain fade, no wait");
+            assert!(near(s.playback.position, 42.0));
         }
+        let mut s = State::offline();
+        casting_at_42(&mut s, true);
+        s.airplay_leave(Some(Duration::from_millis(200)));
+        assert!(s.local_sent.borrow().is_empty(), "a local file doesn't seek either");
         // Nothing was casting.
         let mut s = State::offline();
         playing(&mut s, 42.0);

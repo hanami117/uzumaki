@@ -457,6 +457,17 @@ let pcmLink = null;
 let casting = false; // the PCM socket is connected
 let meterTimer = null;
 let readySent = null; // the last `airplayCapture` told to the app
+// The app closed the PCM socket: the cast is ending. The local output stays muted until the app's
+// "capture off" comes (it says where the player steps back to), at most HOLD_MS.
+const HOLD_MS = 1500;
+let holding = false;
+let holdTimer = null;
+let resumeAt = null; // capture off: the page unmutes once the player is there (seconds), then fades in
+function stopHold() {
+  clearTimeout(holdTimer);
+  holdTimer = null;
+  holding = false;
+}
 const meter = { chunks: 0, frames: 0, sum: 0, n: 0, peak: 0, status: null, silent: false, lastLog: 0 };
 
 function airplayToPage() {
@@ -464,7 +475,8 @@ function airplayToPage() {
   win.webContents.send('uzumaki:airplay', {
     source: airplay.workletSource(),
     capture: capturing,
-    localMuted: casting && !AIRPLAY_KEEP_LOCAL,
+    localMuted: (casting || holding) && !AIRPLAY_KEEP_LOCAL,
+    resumeAt,
     previewCors: process.env.UZUMAKI_AIRPLAY_PREVIEW_CORS === '1', // tests: measurable signed-out previews
   });
 }
@@ -482,10 +494,12 @@ function captureReady(ready, error) {
 
 let captureSocket = null; // the socket named by the app (the Chromecast session's), else the env's
 
-function airplaySet(on, socket) {
+function airplaySet(on, socket, at) {
   on = !!on;
   socket = on && typeof socket === 'string' && socket ? socket : null;
   if (on === capturing && socket === captureSocket) return;
+  resumeAt = !on && Number.isFinite(at) && at >= 0 ? at : null;
+  stopHold();
   if (on && capturing) airplaySet(false); // another socket: start over on the new one
   captureSocket = socket;
   capturing = on;
@@ -496,7 +510,7 @@ function airplaySet(on, socket) {
     casting = false;
     clearInterval(meterTimer);
     meterTimer = null;
-    log('airplay: capture off, local output on');
+    log(`airplay: capture off, local output on${resumeAt !== null ? ` once the player is at ${resumeAt.toFixed(2)} s` : ''} (fading in)`);
     return airplayToPage();
   }
   airplay ??= require('./airplay.js');
@@ -508,8 +522,18 @@ function airplaySet(on, socket) {
       log,
       retryMs: 250,
       onState: (connected) => {
+        if (casting && !connected && capturing) {
+          // Ending: wait for the app's capture off (with its step back) before unmuting.
+          holding = true;
+          holdTimer = setTimeout(() => {
+            stopHold();
+            log('airplay: no capture off from the app: local output back on');
+            airplayToPage();
+          }, HOLD_MS);
+          holdTimer.unref?.();
+        }
         casting = connected;
-        log(`airplay: ${connected ? 'sending to the speaker: local output muted in the page graph' : 'not sending: local output back on'}` +
+        log(`airplay: ${connected ? 'sending to the speaker: local output muted in the page graph' : holding ? 'not sending: local output held muted until the capture ends' : 'not sending: local output back on'}` +
           (connected && AIRPLAY_KEEP_LOCAL ? ' (kept on: UZUMAKI_AIRPLAY_LOCAL=1)' : ''));
         airplayToPage();
       },
@@ -686,7 +710,7 @@ function handle(msg) {
       win.webContents.reload();
       return reply(true, { result: null });
     case 'airplay':
-      airplaySet(msg.on, msg.socket);
+      airplaySet(msg.on, msg.socket, msg.resumeAt);
       return reply(true, { result: null });
     case 'quit':
       reply(true, { result: null });

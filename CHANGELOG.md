@@ -17,7 +17,8 @@ takes each release's notes from its section here.
   read like the others. If that ever fails, the song still plays on this computer and a message says why the
   speaker is silent.
 - **AirPlay:** going back to This Computer, the song goes on from where you were listening, instead of about a
-  second further on (the speakers play a little behind the app; the app now steps back by their actual delay).
+  second further on (the speakers play a little behind the app; the app now steps back by their actual delay),
+  and without a stutter: this computer stays silent until the player is there, then fades in.
 
 ## [0.4.0] - 2026-11-20
 

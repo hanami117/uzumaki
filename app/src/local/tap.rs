@@ -9,7 +9,7 @@
 //! player doesn't build a `Tap` at all.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use rodio::source::SeekError;
@@ -22,6 +22,8 @@ const CHUNK_FRAMES: usize = 4096;
 /// Frames between two looks at the sink's switches (~5 ms at 48 kHz): picking a speaker takes
 /// effect well within a chunk, and playing with none costs a counter.
 const CHECK_EVERY: u16 = 256;
+/// This computer's output comes back over this long (seconds) when a speaker stops taking it.
+pub const FADE_IN_S: f32 = 0.12;
 
 /// Where the tapped audio goes (the AirPlay session; a recorder in tests).
 pub trait CastSink: Send + Sync {
@@ -92,19 +94,27 @@ impl<A: CastSink, B: CastSink> CastSink for Both<A, B> {
     }
 }
 
-/// A linear gain shared with the player thread (f32 bits), the app's volume.
+/// A linear gain shared with the player thread (f32 bits), the app's volume; and the hold: this
+/// computer stays silent while a seek is on its way (back from the speakers, the player steps back
+/// to where the listener was; the old place must not be heard meanwhile).
 #[derive(Clone)]
-pub struct Gain(Arc<AtomicU32>);
+pub struct Gain(Arc<AtomicU32>, Arc<AtomicBool>);
 
 impl Gain {
     pub fn new(v: f32) -> Self {
-        Self(Arc::new(AtomicU32::new(v.to_bits())))
+        Self(Arc::new(AtomicU32::new(v.to_bits())), Arc::new(AtomicBool::new(false)))
     }
     pub fn set(&self, v: f32) {
         self.0.store(v.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
     pub fn get(&self) -> f32 {
         f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+    pub fn hold(&self, on: bool) {
+        self.1.store(on, Ordering::SeqCst);
+    }
+    pub fn held(&self) -> bool {
+        self.1.load(Ordering::SeqCst)
     }
 }
 
@@ -154,6 +164,10 @@ pub struct Tap<S: Source> {
     /// Read every `CHECK_EVERY` frames: copy for the speaker / silence for this computer.
     copying: bool,
     muted: bool,
+    /// This computer's level, 0..1: 0 at once when muted, back to 1 over `FADE_IN_S`.
+    level: f32,
+    /// How much `level` rises per frame (from the frame's rate).
+    rise: f32,
     /// Frames until the next look at the sink's switches.
     check_in: u16,
 }
@@ -174,6 +188,8 @@ impl<S: Source> Tap<S> {
             frame: [0.0; 2],
             copying: false,
             muted: false,
+            level: 1.0,
+            rise: 1.0,
             check_in: 0,
         }
     }
@@ -188,6 +204,11 @@ impl<S: Source> Tap<S> {
     fn frame_start(&mut self) {
         self.channels = self.inner.channels().max(1);
         self.rate = self.inner.sample_rate();
+        if self.muted {
+            self.level = 0.0;
+        } else if self.level < 1.0 {
+            self.level = (self.level + self.rise).min(1.0);
+        }
         if self.check_in > 0 {
             self.check_in -= 1;
             return;
@@ -199,7 +220,8 @@ impl<S: Source> Tap<S> {
             self.resampler.reset();
             self.chunk.clear();
         }
-        self.muted = self.sink.mute_local();
+        self.muted = self.sink.mute_local() || self.gain.held();
+        self.rise = 1.0 / (FADE_IN_S * self.rate.max(1) as f32);
     }
 }
 
@@ -230,7 +252,7 @@ impl<S: Source> Iterator for Tap<S> {
                 }
             }
         }
-        Some(if self.muted { 0.0 } else { s })
+        Some(if self.muted { 0.0 } else { s * self.level })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -413,6 +435,48 @@ pub mod tests {
         let _switching: Vec<f32> = tap.by_ref().take(usize::from(CHECK_EVERY) * 2).collect();
         let back: Vec<f32> = tap.by_ref().take(8820).collect();
         assert!(back.iter().any(|&s| s.abs() > 0.4));
+    }
+
+    /// Samples until the switches have been read again (every `CHECK_EVERY` frames).
+    fn settle<S: Source>(tap: &mut Tap<S>) {
+        let _: Vec<f32> = tap.by_ref().take(usize::from(CHECK_EVERY) * 4).collect();
+    }
+
+    #[test]
+    fn back_from_the_speaker_this_computer_fades_in_instead_of_cutting_in() {
+        let rec = Recorder::casting();
+        // A constant signal, so the level is the sample.
+        let dc = SamplesBuffer::new(1, 48000, vec![0.5f32; 48000 * 2]);
+        let mut tap = Tap::new(dc, rec.clone(), Gain::new(1.0));
+        settle(&mut tap);
+        assert_eq!(tap.next(), Some(0.0), "muted while casting");
+        rec.casting.store(false, Ordering::SeqCst);
+        let back: Vec<f32> = tap.by_ref().take(48000 / 2).collect();
+        let first = back.iter().position(|&s| s > 0.0).expect("sound comes back");
+        assert!(back[first] < 0.05, "it starts quiet: {}", back[first]);
+        assert!(back.windows(2).all(|w| w[1] >= w[0] - 1e-6), "and only rises");
+        let full = back.iter().position(|&s| (s - 0.5).abs() < 1e-4).expect("full level") - first;
+        let ms = full as f32 / 48.0;
+        assert!((100.0..=140.0).contains(&ms), "full after {ms} ms (FADE_IN_S {FADE_IN_S})");
+    }
+
+    #[test]
+    fn a_quiet_seek_keeps_this_computer_silent_until_it_has_landed() {
+        let rec = Arc::new(Recorder::default());
+        let gain = Gain::new(1.0);
+        let dc = SamplesBuffer::new(1, 48000, vec![0.5f32; 48000 * 3]);
+        let mut tap = Tap::new(dc, rec, gain.clone());
+        settle(&mut tap);
+        assert_eq!(tap.next(), Some(0.5));
+        gain.hold(true); // LocalPlayer::seek_quiet, before the seek reaches the audio thread
+        settle(&mut tap);
+        let held: Vec<f32> = tap.by_ref().take(4800).collect();
+        assert!(held.iter().all(|&s| s == 0.0), "the old place is never heard");
+        tap.try_seek(Duration::from_secs(1)).unwrap();
+        gain.hold(false); // the player thread, once try_seek returned
+        let back: Vec<f32> = tap.by_ref().take(48000 / 4).collect();
+        assert!(back.iter().any(|&s| s > 0.0 && s < 0.05), "fades in");
+        assert!((back.last().unwrap() - 0.5).abs() < 1e-4);
     }
 
     #[test]

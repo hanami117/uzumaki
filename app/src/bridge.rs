@@ -570,6 +570,14 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
     pub fn airplay(&self, on: bool) {
         self.send(json!({"cmd": "airplay", "on": on}));
     }
+    /// Capture off after a cast: the page keeps the local output muted until the player is at
+    /// `resume_at` seconds (the step back to where the listener was), then fades it in.
+    pub fn airplay_off_at(&self, resume_at: Option<f64>) {
+        match resume_at {
+            Some(at) => self.send(json!({"cmd": "airplay", "on": false, "resumeAt": at})),
+            None => self.airplay(false),
+        }
+    }
     /// The same capture for another socket (the Chromecast session's).
     pub fn airplay_to(&self, on: bool, socket: Option<&std::path::Path>) {
         match socket {
