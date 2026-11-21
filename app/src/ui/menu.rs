@@ -64,18 +64,35 @@ pub fn open_song(s: &mut State, song: Song, context: MenuContext, at: [f32; 2]) 
     s.ui.menu = Some(MenuState { at, list: String::new(), id, rows: Vec::new(), songs: vec![song], sub: false, share: false, context, confirm: false });
 }
 
-/// The user's playlist whose page the menu's list `list` is, when songs can be removed from it.
+/// The user's playlist whose page the menu's list `list` is, when songs can be removed from it:
+/// their own Apple playlist, or an Uzumaki playlist.
 pub(super) fn editable_playlist_here(s: &State, list: &str) -> Option<Collection> {
     let crate::state::Route::Collection { kind: crate::models::CollectionKind::Playlist, id } = &s.route else { return None };
-    if super::lists::list_id(s).as_deref() != Some(list) || !id.starts_with("p.") {
+    let uzu = crate::mixed::is_uzu_id(id);
+    if super::lists::list_id(s).as_deref() != Some(list) || !(id.starts_with("p.") || uzu) {
         return None;
     }
-    s.collections.get(id).and_then(|l| l.ready()).filter(|c| c.editable).cloned()
+    s.collections.get(id).and_then(|l| l.ready()).filter(|c| c.editable || uzu).cloned()
 }
 
-/// The user's own playlists, which Add to Playlist can edit.
-fn playlists(s: &State) -> Vec<&Collection> {
-    s.library_playlists.items.iter().filter(|c| c.editable).collect()
+/// The row the menu was opened on, when it can move up or down in its playlist: one row, a
+/// playlist page in its own order (not sorted or filtered), and a row the user may move (any row
+/// of an Uzumaki playlist, a local row of an Apple playlist). Its position in the list.
+fn movable_row(s: &State, m: &MenuState) -> Option<(Collection, usize)> {
+    if m.context != MenuContext::List || m.rows.len() != 1 {
+        return None;
+    }
+    let c = editable_playlist_here(s, &m.list)?;
+    let order = super::lists::order(s);
+    if !super::lists::query(s).is_empty() || order.iter().enumerate().any(|(i, &k)| i != k) {
+        return None;
+    }
+    Some((c, m.rows[0].0))
+}
+
+/// Whether "Add to Playlist" lists any Apple playlist (a line then sets the Uzumaki ones apart).
+fn list_has_apple(s: &State) -> bool {
+    s.library_playlists.items.iter().any(|c| c.editable)
 }
 
 pub(super) fn item(key: String, label: &str, chevron: bool) -> El {
@@ -200,7 +217,7 @@ impl Panel {
 
 pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
     let m = s.ui.menu.as_ref()?;
-    let lists = playlists(s);
+    let lists = s.add_targets();
     let x = m.at[0].min(win[0] - W - 8.0).max(8.0);
 
     let closes = |e: El| {
@@ -271,9 +288,9 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
             })
         })));
     }
-    let mut sub_y = None;
-    if !local {
-        sub_y = Some(p.next_y());
+    // Local files too: into an Apple playlist they go on this computer only (`mixed.rs`).
+    let sub_y = Some(p.next_y());
+    {
         let add = item("menu-playlist".into(), "Add to Playlist", true).on_press(|s: &mut State| {
             if let Some(m) = &mut s.ui.menu {
                 m.sub = !m.sub;
@@ -303,10 +320,24 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
         p.add(closes(item("menu-remove".into(), "Remove from Playlist", false).on_press(|s: &mut State| {
             act(s, |s, m| {
                 if let Some(c) = editable_playlist_here(s, &m.list) {
-                    s.remove_from_playlist(&c, &m.rows);
+                    s.remove_playlist_rows(&c, &m.rows);
                 }
             })
         })));
+    }
+    if let Some((c, at)) = movable_row(s, m) {
+        for (key, label, delta) in [("menu-move-up", "Move Up", -1isize), ("menu-move-down", "Move Down", 1)] {
+            if s.can_move_row(&c, at, delta) {
+                let id = c.id.clone();
+                p.add(closes(item(key.into(), label, false).on_press(move |s: &mut State| {
+                    s.ui.menu = None;
+                    s.ui.sel.clear();
+                    if let Some(c) = s.collections.get(&id).and_then(|l| l.ready()).cloned() {
+                        s.move_playlist_row(&c, at, delta);
+                    }
+                })));
+            }
+        }
     }
     if m.songs.iter().any(|x| x.id.starts_with("i.")) {
         // Two clicks: the first turns the item into its own confirmation.
@@ -418,12 +449,24 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
         if lists.is_empty() {
             list = list.child(text("No playlists in your library").font(SMALL13).color(PAL.dim).px(12.0).py(8.0));
         }
+        let mut uzu_head = false;
         for c in lists {
             let id = c.id.clone();
-            list = list.child(item(format!("menu-pl-{}", c.id), &c.title, false).on_press(move |s: &mut State| {
+            let uzu = crate::mixed::is_uzu_id(&c.id);
+            // Uzumaki playlists after Apple's, marked with their icon.
+            let e = if uzu {
+                if !uzu_head && list_has_apple(s) {
+                    list = list.child(sep());
+                }
+                uzu_head = true;
+                let lead = el().size(16.0, 16.0).center().child(icon(&icons::UZU_PLAYLIST, 15.0).color(PAL.text2));
+                item_led(format!("menu-pl-{}", c.id), &c.title, false, Some(lead))
+            } else {
+                item(format!("menu-pl-{}", c.id), &c.title, false)
+            };
+            list = list.child(e.on_press(move |s: &mut State| {
                 act(s, |s, m| {
-                    let target = s.library_playlists.items.iter().find(|c| c.id == id).cloned();
-                    if let Some(c) = target {
+                    if let Some(c) = s.add_target(&id) {
                         s.add_to_playlist(&c, &m.songs);
                     }
                 })

@@ -224,6 +224,13 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("appearance-preview", appearance_preview),
     ("settings-keyboard", settings_keyboard),
     ("local-files", local_files),
+    ("mixed-playlist", mixed_playlist),
+    ("mixed-playlist-menu", mixed_playlist_menu),
+    ("mixed-missing", mixed_missing),
+    ("local-add-to-playlist", local_add_to_playlist),
+    ("uzu-playlist", uzu_playlist),
+    ("uzu-playlist-menu", uzu_playlist_menu),
+    ("new-playlist-here", new_playlist_here),
     ("local-files-empty", local_files_empty),
     ("local-files-scanning", local_files_scanning),
     ("settings-local", settings_local),
@@ -1648,6 +1655,104 @@ fn local_files(s: &mut State) {
     s.local_lib.songs = local_songs();
     s.local_lib.loaded = true;
     s.route = Route::LocalFiles;
+}
+
+// ---- mixed playlists (state/mixed.rs) ----
+
+/// A local song of the scenes whose file is gone (not in the music folders).
+fn gone_song() -> Song {
+    let mut t = local_songs()[0].clone();
+    t.id = "file:///music/Old Rips/Lantern Hymn.flac".into();
+    t.title = "Lantern Hymn".into();
+    t.artist = "Mara Quell".into();
+    t.album = "Old Rips".into();
+    t
+}
+
+/// "Morning commute" with three local songs in it: two after the third song (the second of them
+/// missing), one at the end.
+fn mixed_playlist(s: &mut State) {
+    playlist_page(s);
+    s.settings.music_folders = vec![home_dir().join("Music")];
+    s.local_lib.songs = local_songs();
+    s.local_lib.loaded = true;
+    s.local_lib.generation = 1;
+    let Route::Collection { id, .. } = s.route.clone() else { return };
+    // The user's own playlist (Remove from Playlist, Move Up/Down in its menus).
+    if let Some(Load::Ready(c)) = s.collections.get_mut(&id) {
+        c.editable = true;
+    }
+    let c = s.collections[&id].ready().unwrap().clone();
+    let files = vec![s.local_lib.songs[1].clone(), gone_song()];
+    s.add_local_to_playlist(&c, &files);
+    s.add_local_to_playlist(&c, &[s.local_lib.songs[6].clone()]);
+    // Both of the first two up after row 3 ("Harbor" lands at 3, the missing one at 4).
+    for (from, to) in [(14, 3), (15, 4)] {
+        for m in (to + 1..=from).rev() {
+            s.move_playlist_row(&c, m, -1);
+        }
+    }
+}
+
+/// The menu of a local row: Remove from Playlist (the overlay only), Move Up, Move Down.
+fn mixed_playlist_menu(s: &mut State) {
+    mixed_playlist(s);
+    let key = s.local_lib.songs[1].id.clone();
+    crate::ui::scene_select(s, &[key.as_str()], Some([420.0, 420.0]));
+}
+
+/// The Songs table of the mixed playlist: the missing file greyed with its hint.
+fn mixed_missing(s: &mut State) {
+    mixed_playlist(s);
+    s.ui.table.songs_view = true;
+    s.ui.table.pl_sort = Sort { col: None, asc: true }; // the playlist's own order
+}
+
+/// Add to Playlist on a local file: Apple playlists (on this computer only), then the Uzumaki ones.
+fn local_add_to_playlist(s: &mut State) {
+    local_files(s);
+    let picks = [s.local_lib.songs[0].clone(), s.local_lib.songs[4].clone()];
+    s.create_uzu_playlist("Late night mix", "", &picks);
+    s.create_uzu_playlist("Road trip", "", &picks);
+    s.route = Route::LocalFiles;
+    s.back_stack.clear();
+    s.toast = None;
+    let key = s.local_lib.songs[2].id.clone();
+    crate::ui::scene_select(s, &[key.as_str()], Some([440.0, 300.0]));
+    crate::ui::scene_submenu(s);
+}
+
+/// An Uzumaki playlist: Apple songs and local files in one list, in the sidebar with its icon.
+fn uzu_playlist(s: &mut State) {
+    base(s);
+    s.settings.music_folders = vec![home_dir().join("Music")];
+    s.local_lib.songs = local_songs();
+    s.local_lib.loaded = true;
+    s.local_lib.generation = 1;
+    let l = &s.local_lib.songs;
+    let mut songs = vec![song(0, 1), l[0].clone(), song(3, 2), l[5].clone(), l[9].clone(), song(5, 1), gone_song(), song(6, 3)];
+    for (i, t) in songs.iter_mut().enumerate().filter(|(_, t)| !t.is_local()) {
+        t.id = format!("uz-{i}");
+    }
+    s.create_uzu_playlist("Late night mix", "Apple Music and my own rips, together.", &songs);
+    s.toast = None;
+    s.playback.song = Some(s.local_lib.songs[0].clone());
+}
+
+/// An Uzumaki playlist's menu (its More button): Edit, Pin, Delete; no Share or Favourite.
+fn uzu_playlist_menu(s: &mut State) {
+    uzu_playlist(s);
+    let Route::Collection { id, .. } = s.route.clone() else { return };
+    let c = s.collections[&id].ready().unwrap().clone();
+    crate::ui::scene_menu_collection(s, &c, [700.0, 300.0]);
+}
+
+/// The New Playlist dialog from local files, set to "This computer".
+fn new_playlist_here(s: &mut State) {
+    local_files(s);
+    let picks = vec![s.local_lib.songs[0].clone(), s.local_lib.songs[1].clone(), s.local_lib.songs[2].clone()];
+    crate::ui::new_playlist_open(s, picks);
+    crate::ui::new_playlist_here(s, true);
 }
 
 fn local_files_empty(s: &mut State) {

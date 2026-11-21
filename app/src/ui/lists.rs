@@ -20,13 +20,14 @@ pub struct Filter {
     pub edit: TextEdit,
 }
 
-type OrderKey = (String, String, usize, String, Option<Sort>);
+/// (list, filter, length, first song, sort, mixed playlists' revision: a local row moved).
+type OrderKey = (String, String, usize, String, Option<Sort>, u64);
 
 /// Last computed display order (one list is on screen at a time).
 #[derive(Default)]
 pub struct OrderCache(RefCell<Option<(OrderKey, Rc<Vec<usize>>)>>);
 
-type RowKeysKey = (String, usize, String, String);
+type RowKeysKey = (String, usize, String, String, u64);
 
 /// Last computed row keys of the page's list, keyed by (list, length, first and last song id).
 #[derive(Default)]
@@ -123,10 +124,12 @@ pub fn matches(query: &str, fields: [&str; 3]) -> bool {
     query.is_empty() || fields.iter().any(|f| fold(f).contains(query))
 }
 
-/// The page's songs: borrowed from state, or the cached library-search matches.
+/// The page's songs: borrowed from state, the cached library-search matches, or a playlist
+/// merged with its local songs (`State::merged`, cached).
 pub enum Songs<'a> {
     Slice(&'a [Song]),
     Shared(Rc<Vec<Song>>),
+    Merged(Rc<crate::mixed::Merged>),
 }
 
 impl std::ops::Deref for Songs<'_> {
@@ -135,6 +138,7 @@ impl std::ops::Deref for Songs<'_> {
         match self {
             Songs::Slice(v) => v,
             Songs::Shared(v) => v,
+            Songs::Merged(m) => &m.tracks,
         }
     }
 }
@@ -142,7 +146,11 @@ impl std::ops::Deref for Songs<'_> {
 /// The page's songs, in the list's own order.
 pub fn songs(s: &State) -> Songs<'_> {
     Songs::Slice(match &s.route {
-        Route::Collection { id, .. } => s.collections.get(id).and_then(Load::ready).map_or(&[], |c| &c.tracks),
+        Route::Collection { id, .. } => match s.collections.get(id).and_then(Load::ready) {
+            Some(c) if s.mixed.has_overlay(id) => return Songs::Merged(s.merged(c)),
+            Some(c) => &c.tracks,
+            None => &[],
+        },
         Route::Library(LibraryTab::Songs) => &s.library_songs.items,
         Route::LocalFiles => &s.local_lib.songs,
         r if local_group(r) => s.local_lib.page_songs(r),
@@ -191,14 +199,14 @@ pub fn order(s: &State) -> Rc<Vec<usize>> {
     let q = query(s);
     let which = sorted_by(s);
     let first = list.first().map(|x| x.id.clone()).unwrap_or_default();
-    let key: OrderKey = (list_id(s).unwrap_or_default(), q.clone(), list.len(), first.clone(), which.map(|w| s.ui.table.sort(w)));
+    let key: OrderKey = (list_id(s).unwrap_or_default(), q.clone(), list.len(), first.clone(), which.map(|w| s.ui.table.sort(w)), s.mixed.rev);
     if let Some((k, o)) = s.ui.order.0.borrow().as_ref() {
         if *k == key {
             return o.clone();
         }
     }
     let base: Vec<usize> = match which {
-        Some(w) => (*s.ui.table.order(w, if w == Which::Playlist { &key.0 } else { &first }, &list)).clone(),
+        Some(w) => (*s.ui.table.order(w, &if w == Which::Playlist { format!("{}@{}", key.0, key.5) } else { first.clone() }, &list)).clone(),
         None => (0..list.len()).collect(),
     };
     let out: Vec<usize> = if q.is_empty() {
@@ -249,7 +257,7 @@ pub fn keys_of(list: &[Song]) -> Vec<String> {
 pub fn row_keys(s: &State) -> Rc<Vec<String>> {
     let list = songs(s);
     let id = |x: Option<&Song>| x.map(|x| x.id.clone()).unwrap_or_default();
-    let key: RowKeysKey = (list_id(s).unwrap_or_default(), list.len(), id(list.first()), id(list.last()));
+    let key: RowKeysKey = (list_id(s).unwrap_or_default(), list.len(), id(list.first()), id(list.last()), s.mixed.rev);
     if let Some((k, v)) = s.ui.row_keys.0.borrow().as_ref() {
         if *k == key {
             return v.clone();

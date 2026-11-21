@@ -85,8 +85,9 @@ fn row_with<const N: usize>(s: &State, song: &Song, key: String, list: &str, rk:
 /// exactly as before the markers existed; otherwise the markers follow it in a row of the title's height.
 pub fn title_line(song: &Song, cur: bool, local_mark: bool) -> El {
     let local = local_mark && song.is_local();
+    let missing = crate::mixed::is_missing(song);
     let title = text(song.title.clone()).font(TRACK_TITLE).color(if cur { PAL.accent } else { PAL.text2 }).truncate().min_w(0.0);
-    if !song.explicit && !local {
+    if !song.explicit && !local && !missing {
         return title;
     }
     let mut r = row().w_full().min_w(0.0).gap(6.0).center_y().child(title.shrink());
@@ -95,6 +96,9 @@ pub fn title_line(song: &Song, cur: bool, local_mark: bool) -> El {
     }
     if local {
         r = r.child(icon(&icons::LOCAL_MARK, 14.0).color(PAL.dim));
+    }
+    if missing {
+        r = r.child(text("File not found").font(SMALL12).color(PAL.dim));
     }
     r
 }
@@ -108,6 +112,10 @@ pub fn title_with_mark(song: &Song, cur: bool) -> El {
     }
     if song.is_local() {
         r = r.child(icon(&icons::LOCAL_MARK, 14.0).color(PAL.dim));
+    }
+    if crate::mixed::is_missing(song) {
+        // A local song of a mixed playlist whose file isn't in the music folders any more.
+        r = r.child(text("File not found").font(SMALL12).color(PAL.dim));
     }
     r
 }

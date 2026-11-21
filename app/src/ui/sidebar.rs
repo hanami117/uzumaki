@@ -73,6 +73,12 @@ pub const LOCAL_NAV: [&str; 5] = ["nav-search", "nav-local-artists", "nav-local-
 /// The entries only local only mode has.
 const LOCAL_ONLY_NAV: [&str; 3] = ["nav-local-artists", "nav-local-albums", "nav-folders"];
 
+/// How many Uzumaki playlists the sidebar lists (after Apple's): in both modes, unless "Your
+/// playlists" is hidden.
+fn uzu_count(s: &State) -> usize {
+    if s.nav_hidden("playlists") { 0 } else { s.mixed.cards.len() }
+}
+
 fn shown(s: &State, id: &str) -> bool {
     !s.nav_hidden(id) && if s.local_only() { LOCAL_NAV.contains(&id) } else { !LOCAL_ONLY_NAV.contains(&id) }
 }
@@ -253,11 +259,28 @@ fn playlist_item(s: &State, c: &Collection, active: bool, held: Option<&(rune::I
     let row = match playlist_cover(s, c) {
         // Same slot, size and radius as a pin's thumbnail.
         Some(_) => item_with(key, el().w(ICON).center().child(cover(held, &c.title, THUMB)), c.title.clone(), active),
-        None => item(key, if c.favorites { &icons::FAVORITES } else { &icons::PLAYLIST }, c.title.clone(), active),
+        None => item(key, playlist_icon(c), c.title.clone(), active),
     };
     dnd::playlist_target(s, row, &c.id)
         .on_press(move |s: &mut State| s.open_collection(&c1))
         .on_secondary_press(move |s: &mut State, p, _tx: &mut Tx| ctx_menu::open_collection(s, &c2, [p.x, p.y]))
+}
+
+/// A playlist's icon: Favourite Songs', an Uzumaki playlist's (kept on this computer), or the
+/// playlist one.
+fn playlist_icon(c: &Collection) -> &'static rune::Icon {
+    if c.favorites {
+        &icons::FAVORITES
+    } else if crate::mixed::is_uzu_id(&c.id) {
+        &icons::UZU_PLAYLIST
+    } else {
+        &icons::PLAYLIST
+    }
+}
+
+/// Whether songs can be dropped on (and added to) the playlist: the user's own, or an Uzumaki one.
+fn takes_songs(c: &Collection) -> bool {
+    c.editable || crate::mixed::is_uzu_id(&c.id)
 }
 
 fn playlist_active(c: &Collection, route: &Route) -> bool {
@@ -306,7 +329,7 @@ impl Rows {
             }
         }
         let playlists = shown(s, "playlists");
-        let others = if playlists { items.iter().filter(|c| !c.favorites).count() } else { 0 };
+        let others = if playlists { items.iter().filter(|c| !c.favorites).count() } else { 0 } + uzu_count(s);
         Rows {
             pins: if shown(s, "pins") { s.settings.pins.len() } else { 0 },
             pins_open: s.settings.pins_open,
@@ -401,9 +424,11 @@ impl Rows {
     }
 }
 
-/// The `k`-th library playlist other than Favourite Songs.
+/// The `k`-th playlist other than Favourite Songs: the library's (when shown), then the Uzumaki
+/// playlists.
 fn playlist_at(s: &State, k: usize) -> Option<&Collection> {
-    s.library_playlists.items.iter().filter(|c| !c.favorites).nth(k)
+    let apple = if shown(s, "playlists") { s.library_playlists.items.len() } else { 0 };
+    s.library_playlists.items[..apple].iter().filter(|c| !c.favorites).chain(s.mixed.cards.iter().take(uzu_count(s))).nth(k)
 }
 
 fn build_row(s: &State, r: &Rows, i: usize) -> El {
@@ -411,7 +436,7 @@ fn build_row(s: &State, r: &Rows, i: usize) -> El {
     let playlist = |c: &Collection| {
         let active = playlist_active(c, &s.route);
         // Rows rarely change: reuse the built row until its title or active state does.
-        let drag = dnd::row_state(s, &c.id, c.editable);
+        let drag = dnd::row_state(s, &c.id, takes_songs(c));
         // The thumbnail is part of the key: the picture shown (by content, so a re-signed link or
         // a reload of the same picture rebuilds nothing), and whether it is still fading in.
         // Asked for every view, not only when the row builds: that holds the cover in memory
@@ -484,6 +509,7 @@ pub fn sidebar(s: &State, rail: bool, chrome_top: f32, reduced: bool) -> El {
             s.settings.hidden_nav.len(),
             r.lib_n,
             s.local_only(),
+            s.mixed.rev,
         ));
     titlebar_band(col().key("sidebar").w(SIDEBAR_W).h_full().fill(PAL.sidebar), chrome_top)
         .child(
@@ -551,7 +577,7 @@ impl RailRows {
             head.push(RailRow::Sep);
             head.extend((0..s.settings.pins.len().min(8)).map(RailRow::Pin));
         }
-        let playlists = if shown(s, "playlists") { items.iter().filter(|c| !c.favorites).count() } else { 0 };
+        let playlists = if shown(s, "playlists") { items.iter().filter(|c| !c.favorites).count() } else { 0 } + uzu_count(s);
         if playlists > 0 {
             head.push(RailRow::Sep);
         }
@@ -588,7 +614,7 @@ fn rail_playlist(s: &State, c: &Collection, active: bool, held: Option<&(rune::I
     let (c1, c2) = (c.clone(), c.clone());
     let content = match playlist_cover(s, c) {
         Some(_) => cover(held, &c.title, 28.0),
-        None => icon(&icons::PLAYLIST, RAIL_ICON).color(PAL.accent),
+        None => icon(playlist_icon(c), RAIL_ICON).color(PAL.accent),
     };
     dnd::playlist_target(s, rail_item(format!("rail-pl-{}", c.id), &c.title, active, content), &c.id)
         .on_press(move |s: &mut State| s.open_collection(&c1))
@@ -624,7 +650,7 @@ fn build_rail_row(s: &State, r: &RailRows, i: usize) -> El {
             Some(c) => {
                 // As in the full sidebar: reuse the built row until what it draws changes.
                 let active = playlist_active(c, &s.route);
-                let drag = dnd::row_state(s, &c.id, c.editable);
+                let drag = dnd::row_state(s, &c.id, takes_songs(c));
                 let cover = playlist_cover(s, c);
                 let held = s.art.held(&c.id, cover, crate::art::SMALL_PX);
                 let pic = held.as_ref().map(|(img, fresh)| (img.id(), *fresh));
@@ -647,6 +673,7 @@ fn rail_view(s: &State, chrome_top: f32, reduced: bool) -> El {
         s.ui.dnd.version(),
         s.settings.hidden_nav.len(),
         s.local_only(),
+        s.mixed.rev,
     ));
     let rows = col().key("sb-rail-rows").growth(GrowthSpec::default())
         .virtual_rows(r.count(), 44.0, move |s: &State, i| kr.key(s, i).into(), move |s: &State, i| build_rail_row(s, &r, i))

@@ -48,7 +48,7 @@ fn fit(avail: f32, switch: bool, star: bool) -> Fit {
 /// Whether the page offers the favourite star: signed in, and not the Favourite Songs playlist
 /// itself.
 fn has_star(s: &State, c: &Collection) -> bool {
-    s.session.authorized && !c.favorites && !crate::local::view::is_album_id(&c.id)
+    s.session.authorized && !c.favorites && !crate::local::view::is_album_id(&c.id) && !crate::mixed::is_uzu_id(&c.id)
 }
 
 /// The round favourite button, as big as More: coral and filled when favourite.
@@ -148,15 +148,23 @@ pub fn poll(s: &mut State, tx: &mut Tx) -> bool {
 fn header(s: &State, c: &Collection, fit: Fit) -> El {
     let kind = match c.kind {
         CollectionKind::Album => "ALBUM",
+        CollectionKind::Playlist if crate::mixed::is_uzu_id(&c.id) => "UZUMAKI PLAYLIST",
         CollectionKind::Playlist => "PLAYLIST",
     };
-    let count = if c.tracks.is_empty() { c.track_count.unwrap_or(0) as usize } else { c.tracks.len() };
-    let total: f64 = c.tracks.iter().map(|t| t.duration).sum();
+    // With the local songs of its overlay (`mixed.rs`), as the rows show them.
+    let merged = s.mixed.has_overlay(&c.id).then(|| s.merged(c));
+    let tracks: &[Song] = merged.as_deref().map_or(&c.tracks, |m| &m.tracks);
+    let count = if tracks.is_empty() { c.track_count.unwrap_or(0) as usize } else { tracks.len() };
+    let total: f64 = tracks.iter().map(|t| t.duration).sum();
+    let locals = merged.as_ref().map_or(0, |m| m.tracks.len() - c.tracks.len());
     let mut meta: Vec<String> = Vec::new();
     meta.extend(c.year.clone());
     meta.extend(c.genre.clone());
     if count > 0 {
         meta.push(format!("{count} song{}", if count == 1 { "" } else { "s" }));
+    }
+    if locals > 0 {
+        meta.push(format!("{locals} on this computer only"));
     }
     if total > 0.0 {
         meta.push(fmt_total(total));
@@ -479,7 +487,8 @@ pub fn page(s: &State, id: &str, avail: f32) -> El {
                             };
                         }
                         let order = lists::order(s);
-                        match order.get(i - 2).and_then(|&k| c.tracks.get(k).map(|t| (k, t))) {
+                        let tracks = lists::songs(s);
+                        match order.get(i - 2).and_then(|&k| tracks.get(k).map(|t| (k, t))) {
                             Some((k, t)) => {
                                 let r = if songs_view {
                                     table::song_row_with(s, t, i - 1, cols, format!("t{k}-{}", t.id), &list, &lists::row_key(s, k), &row_artists(s, c, t))
@@ -488,7 +497,7 @@ pub fn page(s: &State, id: &str, avail: f32) -> El {
                                 };
                                 row().w_full().px(PAGE_PX - 12.0).py(1.0).child(r)
                             }
-                            None if i == 2 && !c.tracks.is_empty() => {
+                            None if i == 2 && !tracks.is_empty() => {
                                 col().w_full().px(PAGE_PX).child(status("No songs match your filter.", false))
                             }
                             None => col().h(40.0),
@@ -496,10 +505,10 @@ pub fn page(s: &State, id: &str, avail: f32) -> El {
                     }
                 },
             )
-            .virtual_rows_version((c.id.clone(), m, songs_view, sort, cols, query, s.ui.sel.rev, cur_id, fit, s.favourites_rev(), s.motion.page_rev())),
+            .virtual_rows_version((c.id.clone(), m, songs_view, sort, cols, query, s.ui.sel.rev, cur_id, fit, s.favourites_rev(), s.motion.page_rev(), s.mixed.rev)),
     );
     let mut page = col().grow(1.0).min_h(0.0).w_full();
-    if let Some(bar) = filter::bar(s, m, c.tracks.len()) {
+    if let Some(bar) = filter::bar(s, m, lists::songs(s).len()) {
         page = page.child(el().h(12.0)).child(bar);
     }
     page.child(body)

@@ -144,7 +144,7 @@ pub fn explicit_badge() -> El {
 
 /// `r` dimmed when the account refuses explicit songs and `song` is one (it will be skipped).
 pub fn dim_if_blocked(s: &State, song: &crate::models::Song, r: El) -> El {
-    if s.is_blocked(song) { r.opacity(0.45) } else { r }
+    if s.is_blocked(song) || crate::mixed::is_missing(song) { r.opacity(0.45) } else { r }
 }
 
 pub fn chip(key: String, label: &'static str, on: bool) -> El {

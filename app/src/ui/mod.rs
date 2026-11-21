@@ -162,7 +162,7 @@ pub use airplay::{scene as scene_airplay, this_computer};
 pub(crate) const MENU_W: f32 = menu::W;
 #[cfg(target_os = "macos")]
 pub(crate) const MENU_ITEM_H: f32 = menu::ITEM_H;
-pub use new_playlist::{open as new_playlist_open, open_edit as edit_playlist_open};
+pub use new_playlist::{open as new_playlist_open, open_edit as edit_playlist_open, set_here as new_playlist_here};
 pub use now_playing::{close as close_now_playing, open as open_now_playing};
 pub use now_playing::{scene_clip, scene_np_cover_only, scene_np_motion, scene_np_interlude, scene_np_intro, scene_np_lines_only, scene_np_unsynced, scene_np_words};
 

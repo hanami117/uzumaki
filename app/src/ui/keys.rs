@@ -460,7 +460,7 @@ pub fn perform(s: &mut State, action: Action, tx: &mut Tx) -> bool {
             if songs.is_empty() {
                 return false;
             }
-            s.remove_from_playlist(&c, &songs);
+            s.remove_playlist_rows(&c, &songs);
         }
         Action::SelectNext => return arrow(s, tx, Move::By(1), false),
         Action::SelectPrevious => return arrow(s, tx, Move::By(-1), false),

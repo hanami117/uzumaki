@@ -347,7 +347,7 @@ fn drop_on(s: &mut State, target: &Target, songs: &[Song]) {
     match target {
         Target::Queue => s.add_to_queue(songs),
         Target::Playlist(id) => {
-            if let Some(c) = s.library_playlists.items.iter().find(|c| c.id == *id && c.editable).cloned() {
+            if let Some(c) = s.add_target(id) {
                 #[cfg(test)]
                 s.ui.dnd.log.push((c.id.clone(), songs.len()));
                 s.add_to_playlist(&c, songs);
@@ -377,7 +377,7 @@ fn hover(target: Target, ok: bool) -> impl Fn(&mut State, PointerEvent, &mut Tx)
 
 /// Is `id` a library playlist songs can be added to?
 pub fn playlist_ok(s: &State, id: &str) -> bool {
-    s.library_playlists.items.iter().any(|c| c.id == id && c.editable)
+    s.add_targets().iter().any(|c| c.id == id)
 }
 
 /// 0 when no song drag, else 1 + 2 * (over this row) + (not allowed): the part of a row's look

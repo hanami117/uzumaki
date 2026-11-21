@@ -45,13 +45,23 @@ pub struct Dialog {
     route: Option<Route>,
     /// `creating_playlist` at the last poll.
     was_creating: bool,
+    /// New: an Uzumaki playlist, kept on this computer (it can hold local files), rather than an
+    /// Apple Music one.
+    here: bool,
 }
 
 /// Opens the dialog; `songs` go into the new playlist (empty for an empty playlist).
 pub fn open(s: &mut State, songs: Vec<Song>) {
+    // An Uzumaki playlist when Apple can't take one (signed out, local only mode).
+    let here = !s.session.authorized || s.local_only();
     // A fresh `Dialog` forgets the last open's mode, texts and picture.
-    s.ui.new_pl = Dialog { open: true, songs, ..Dialog::default() };
+    s.ui.new_pl = Dialog { open: true, songs, here, ..Dialog::default() };
     s.ui.new_pl.name.focused = true;
+}
+
+/// Scenes: New for an Uzumaki playlist (`here`) or an Apple Music one.
+pub fn set_here(s: &mut State, here: bool) {
+    s.ui.new_pl.here = here;
 }
 
 /// Opens the dialog on an existing playlist.
@@ -119,6 +129,15 @@ fn submit(s: &mut State) {
     };
     let picture = std::mem::take(&mut s.ui.new_pl.picture);
     match &s.ui.new_pl.mode {
+        Mode::New if s.ui.new_pl.here => {
+            let songs = s.ui.new_pl.songs.clone();
+            if let Some(id) = s.create_uzu_playlist(&name, &desc, &songs)
+                && let Picture::Set(p) = picture
+            {
+                s.set_playlist_picture(&id, p);
+            }
+            close(s);
+        }
         Mode::New => {
             let (route, songs) = (s.route.clone(), s.ui.new_pl.songs.clone());
             s.ui.new_pl.route = Some(route);
@@ -196,6 +215,32 @@ fn picture_part(s: &State) -> (El, El) {
     (preview, controls)
 }
 
+/// New only: where the playlist lives. Apple Music (synced, Apple songs only: local files join
+/// it on this computer) or this computer (an Uzumaki playlist, both kinds).
+fn place_part(s: &State) -> El {
+    let d = &s.ui.new_pl;
+    let apple_ok = s.session.authorized && !s.local_only();
+    let chip = |key: &'static str, label: &'static str, on: bool| {
+        let (bg, fg) = if on { (PAL.text, PAL.ink) } else { (PAL.chip, PAL.text2) };
+        let c = el().key(key).role("button").label(label).focusable(true).h(30.0).px(14.0).radius(15.0).center().fill(bg)
+            .cursor(Cursor::Pointer);
+        let c = if on { c } else { c.hover(PAL.chip_hover.alpha(0.9)) };
+        c.child(text(label).font(SMALL13).color(fg))
+    };
+    let mut apple = chip("new-playlist/apple", "Apple Music", !d.here);
+    apple = if apple_ok { apple.on_press(|s: &mut State| s.ui.new_pl.here = false) } else { apple.opacity(0.4).cursor(Cursor::NotAllowed) };
+    let here = chip("new-playlist/here", "This computer", d.here).on_press(|s: &mut State| s.ui.new_pl.here = true);
+    let locals = d.songs.iter().any(Song::is_local);
+    let note = match (d.here, locals) {
+        (true, _) => "Kept in Uzumaki on this computer. Holds Apple Music songs and local files; not synced.",
+        (false, true) => "Synced with Apple Music. Its local files stay on this computer only.",
+        (false, false) => "Synced with Apple Music to your other devices.",
+    };
+    col().key("new-playlist/place").w_full().gap(8.0)
+        .child(row().gap(8.0).child(apple).child(here))
+        .child(text(note).font(SMALL12).color(PAL.dim).wrap())
+}
+
 fn field(
     s: &State,
     key: &'static str,
@@ -257,6 +302,10 @@ pub fn overlay(s: &State, win: [f32; 2]) -> Option<El> {
         .on_press(|_: &mut State| {})
         .child(text(if editing { "Edit Playlist" } else { "New Playlist" }).font(H2).color(PAL.text))
         .child(top);
+
+    if !editing {
+        card = card.child(place_part(s));
+    }
 
     if !d.songs.is_empty() {
         let n = d.songs.len();

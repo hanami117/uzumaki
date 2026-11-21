@@ -261,6 +261,14 @@ line_icon!(
     "M11.4 15.4v-4l3-.8v3.2",
     "M11.4 15.4a1.1 1.1 0 1 1-2.2 0 1.1 1.1 0 0 1 2.2 0zM14.4 13.2a1.1 1.1 0 1 1-2.2 0 1.1 1.1 0 0 1 2.2 0z"
 );
+// An Uzumaki playlist (kept on this computer): the playlist lines beside a small drive.
+line_icon!(
+    UZU_PLAYLIST,
+    "cad-uzu-playlist",
+    "M4 7.5h10M4 12h7M4 16.5h5",
+    "M13 15l1.2-3.5h5.1l1.2 3.5",
+    "M13 15h7.5v3.5a1 1 0 0 1-1 1h-5.5a1 1 0 0 1-1-1z"
+);
 // Small "stored on this computer" marker (a drive) shown beside local songs.
 line_icon!(
     LOCAL_MARK,

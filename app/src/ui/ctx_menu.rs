@@ -150,10 +150,14 @@ fn items_of_collection(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
     if crate::local::view::is_album_id(&c.id) {
         return local_album_items(c);
     }
+    if crate::mixed::is_uzu_id(&c.id) {
+        return uzu_items(s, c, pin);
+    }
+    // With the local songs of its overlay (`mixed.rs`), as its page lists them.
     let tracks: Vec<Song> = if c.tracks.is_empty() {
-        s.collections.get(&c.id).and_then(|l| l.ready()).map(|x| x.tracks.clone()).unwrap_or_default()
+        s.collections.get(&c.id).and_then(|l| l.ready()).map(|x| s.playlist_songs(x)).unwrap_or_default()
     } else {
-        c.tracks.clone()
+        s.playlist_songs(c)
     };
     let c1 = c.clone();
     let c2 = c.clone();
@@ -195,6 +199,30 @@ fn items_of_collection(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
         v.push(sep());
         v.push(danger(label, confirm, move |s| s.remove_collection_from_library(&c5)));
     }
+    v
+}
+
+/// An Uzumaki playlist's menu: playing, Edit (name, description, picture), Pin, Delete. No
+/// Favourite, Add to Library or Share: Apple doesn't know it.
+fn uzu_items(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
+    let tracks = s.uzu_collection(&c.id).map(|x| x.tracks).unwrap_or_default();
+    let (c1, c2) = (c.clone(), c.clone());
+    let mut v = vec![it("Play", move |s| s.play_collection(&c1, 0)), it("Shuffle", move |s| s.shuffle_collection(&c2))];
+    if !tracks.is_empty() {
+        let t2 = tracks.clone();
+        v.push(it("Play Next", move |s| s.play_next(&tracks)));
+        v.push(it("Add to Queue", move |s| s.add_to_queue(&t2)));
+    }
+    v.push(sep());
+    let c3 = c.clone();
+    v.push(it("Edit Playlist\u{2026}", move |s| super::new_playlist::open_edit(s, &c3)));
+    if pin {
+        let c4 = c.clone();
+        v.push(pin_item(s, &c.id, move |s| s.pin_collection(&c4)));
+    }
+    let id = c.id.clone();
+    v.push(sep());
+    v.push(danger("Delete Playlist", "Click again to delete it", move |s| s.delete_uzu_playlist(&id)));
     v
 }
 
