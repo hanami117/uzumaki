@@ -200,7 +200,7 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
     let g = player_bar::poll(s, t, tx);
     let h = onboarding::poll(s, t, tx);
     let i = settings::poll(s, t, tx);
-    let l = airplay::poll(s);
+    let l = airplay::poll(s, tx);
     let j = caret::poll(s, t, tx);
     let k = collection::poll(s, tx);
     a || b || c || d || e || f || g || h || i || j || k || l

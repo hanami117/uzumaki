@@ -13,6 +13,7 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     // The AirPlay picker (`ui/airplay.rs`): the button idle, and the popover's states.
     ("airplay-idle", |s| airplay(s, "closed")),
     ("airplay-looking", |s| airplay(s, "looking")),
+    ("airplay-looking-none", |s| airplay(s, "looking-none")),
     ("airplay-list", |s| airplay(s, "list")),
     ("airplay-connecting", |s| airplay(s, "connecting")),
     ("airplay-on", |s| airplay(s, "on")),

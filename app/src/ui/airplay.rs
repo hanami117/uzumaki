@@ -16,6 +16,8 @@
 //! one more icon.
 
 use rune::{Cursor, Cx, El, Icon, Key, KeyEvent, LoopSpec, Phase, TextEdit, TextStyle, Transition, Tx, col, el, icon, row, text, text_input};
+use std::time::Duration;
+
 use uzumaki_airplay::discover::{Kind, Output};
 use uzumaki_airplay::{Cast, Need};
 use uzumaki_cast::{CastDevice, State as CastState};
@@ -103,6 +105,20 @@ pub struct Picker {
     asked: Option<Ask>,
     /// The speakers' volumes when the master slider's drag began.
     master_from: Option<Vec<(String, u8)>>,
+    /// The "no speaker found" hint was drawn (`poll` redraws once when it is due).
+    hinted: bool,
+}
+
+/// How long the picker looks before it says why no speaker may show up.
+pub const NO_SPEAKER_HINT_AFTER: Duration = Duration::from_secs(6);
+
+/// The hint under "Looking for speakers…" once nothing turned up for a while.
+pub const NO_SPEAKER_HINT: &str = "No speakers found yet. They must be on the same network as this computer. A VPN \
+     kill switch or a firewall can hide them: allow multicast to 224.0.0.251 (mDNS, UDP port 5353).";
+
+/// Nothing turned up for `NO_SPEAKER_HINT_AFTER` while the picker looks.
+fn no_speaker_hint(s: &State) -> bool {
+    s.ui.airplay.open && s.airplay.devices.is_empty() && s.airplay.browsing_since.is_some_and(|t| crate::clock::since(t) >= NO_SPEAKER_HINT_AFTER)
 }
 
 /// Opens the picker above the button `anchor` (or closes it, on a second press) and starts or
@@ -133,9 +149,9 @@ fn shown(s: &State) -> bool {
     s.airplay.available || s.cast_enabled()
 }
 
-/// The field of a question that just arrived gets the keyboard (and starts empty). Returns
-/// whether the view must run.
-pub fn poll(s: &mut State) -> bool {
+/// The field of a question that just arrived gets the keyboard (and starts empty), and the
+/// "no speaker found" hint shows when it is due. Returns whether the view must run.
+pub fn poll(s: &mut State, tx: &mut Tx) -> bool {
     // Closed by a change of page (`UiState::route_changed`): stop looking for speakers too.
     if !s.ui.airplay.open && s.airplay.browsing {
         s.airplay_browse(false);
@@ -143,8 +159,16 @@ pub fn poll(s: &mut State) -> bool {
     if !s.ui.airplay.open && s.cast.browsing {
         s.cast_browse(false);
     }
+    let hint = no_speaker_hint(s);
+    let hint_changed = hint != s.ui.airplay.hinted;
+    s.ui.airplay.hinted = hint;
+    if !hint && s.ui.airplay.open && s.airplay.devices.is_empty()
+        && let Some(t) = s.airplay.browsing_since
+    {
+        tx.wake_after(NO_SPEAKER_HINT_AFTER.saturating_sub(crate::clock::since(t)) + Duration::from_millis(20));
+    }
     if s.ui.airplay.asked == s.airplay.ask {
-        return false;
+        return hint_changed;
     }
     s.ui.airplay.asked = s.airplay.ask.clone();
     s.ui.airplay.field = TextEdit::default();
@@ -452,6 +476,9 @@ pub fn overlay(s: &State, cx: &Cx<State>, win: [f32; 2]) -> Option<El> {
     }
     if s.airplay.devices.is_empty() {
         panel = panel.child(note("airplay-looking", true, "Looking for speakers\u{2026}"));
+        if no_speaker_hint(s) {
+            panel = panel.child(note("airplay-none-found", false, NO_SPEAKER_HINT));
+        }
     }
     if s.cast_enabled() {
         panel = cast_rows(s, panel, true);
@@ -574,7 +601,7 @@ fn scene_devices() -> Vec<Output> {
     ]
 }
 
-/// The picker's states, over whatever the scene before set up. `what`: `closed`, `looking`,
+/// The picker's states, over whatever the scene before set up. `what`: `closed`, `looking`, `looking-none`,
 /// `list`, `connecting`, `on`, `group`, `group-joining`, `group-failed`, `pin`, `password`,
 /// `password-wrong`, `unavailable`, `failed`.
 pub fn scene(s: &mut State, what: &str) {
@@ -587,7 +614,12 @@ pub fn scene(s: &mut State, what: &str) {
     s.ui.airplay.open = !matches!(what, "closed" | "failed" | "on-closed" | "unavailable" | "group-failed");
     s.ui.airplay.anchor = if s.ui.now_playing { "np-airplay" } else { "airplay" };
     s.airplay.browsing = s.ui.airplay.open;
-    if !matches!(what, "looking" | "unavailable") {
+    s.airplay.browsing_since = s.airplay.browsing.then(crate::clock::now);
+    if what == "looking-none" {
+        // Looking for a while already, and nothing answered.
+        s.airplay.browsing_since = crate::clock::now().checked_sub(NO_SPEAKER_HINT_AFTER + Duration::from_secs(1));
+    }
+    if !matches!(what, "looking" | "looking-none" | "unavailable") {
         s.airplay.devices = scene_devices();
     }
     let (id, name) = ("aa".to_string(), "Bedroom".to_string());
@@ -691,6 +723,30 @@ mod tests {
     }
 
     #[test]
+    fn with_no_speaker_after_a_while_the_picker_says_why_that_may_be() {
+        crate::clock::freeze();
+        let mut s = State::offline();
+        s.airplay.available = true;
+        toggle(&mut s, "airplay");
+        assert!(s.airplay.browsing_since.is_some());
+        assert!(!no_speaker_hint(&s), "not at once");
+        crate::clock::advance(NO_SPEAKER_HINT_AFTER);
+        assert!(no_speaker_hint(&s));
+        assert!(poll(&mut s, &mut Tx::default()), "the view runs once to show it");
+        assert!(!poll(&mut s, &mut Tx::default()));
+        // A speaker answers: no hint. Closed and opened again: the wait starts over.
+        s.airplay.devices = scene_devices();
+        assert!(!no_speaker_hint(&s));
+        s.airplay.devices.clear();
+        close(&mut s);
+        assert!(s.airplay.browsing_since.is_none() && !no_speaker_hint(&s));
+        toggle(&mut s, "airplay");
+        assert!(!no_speaker_hint(&s));
+        assert!(NO_SPEAKER_HINT.contains("VPN") && NO_SPEAKER_HINT.contains("224.0.0.251") && NO_SPEAKER_HINT.contains("5353"));
+        assert!(no_speaker_hint(&open("looking-none")) && !no_speaker_hint(&open("looking")));
+    }
+
+    #[test]
     fn opening_looks_for_speakers_and_closing_stops() {
         let mut s = State::offline();
         s.airplay.available = true;
@@ -766,10 +822,10 @@ mod tests {
         let mut s = open("list");
         s.ui.airplay.field = TextEdit::new("old");
         s.airplay.ask = Some(Ask { id: "dd".into(), name: "Living Room TV".into(), need: Need::Pin, wrong: false });
-        assert!(poll(&mut s));
+        assert!(poll(&mut s, &mut Tx::default()));
         assert!(s.ui.airplay.field.focused && s.ui.airplay.field.text.is_empty());
         s.ui.airplay.field = TextEdit::new("12");
-        assert!(!poll(&mut s), "typing isn't interrupted");
+        assert!(!poll(&mut s, &mut Tx::default()), "typing isn't interrupted");
         assert_eq!(s.ui.airplay.field.text, "12");
         // Answered: the field goes and the row shows it is connecting.
         s.airplay_answer("1234");

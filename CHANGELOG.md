@@ -5,6 +5,16 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **AirPlay on Linux:** the AUR packages (`uzumaki` and `uzumaki-bin`), the AppImage and `install.sh` now include
+  the AirPlay helper, so HomePods and other AirPlay speakers, one or several in sync, work as on macOS. Speakers
+  are found with mDNS: a VPN kill switch or a firewall must let multicast to `224.0.0.251` (UDP 5353) through
+  (see "AirPlay on Linux" in the README). When no speaker shows up after a few seconds, the AirPlay menu says so.
+
+### Fixed
+- **AirPlay:** going back to This Computer, the song goes on from where you were listening, instead of about a
+  second further on (the speakers play a little behind the app; the app now steps back by their actual delay).
+
 ## [0.4.0] - 2026-11-20
 
 Reorganised Settings and, as a Beta, Chromecast. You need an Apple Music subscription.
