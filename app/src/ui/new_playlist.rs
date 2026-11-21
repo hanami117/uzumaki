@@ -232,13 +232,13 @@ fn place_part(s: &State) -> El {
     let here = chip("new-playlist/here", "This computer", d.here).on_press(|s: &mut State| s.ui.new_pl.here = true);
     let locals = d.songs.iter().any(Song::is_local);
     let note = match (d.here, locals) {
-        (true, _) => "Kept in Uzumaki on this computer. Holds Apple Music songs and local files; not synced.",
-        (false, true) => "Synced with Apple Music. Its local files stay on this computer only.",
-        (false, false) => "Synced with Apple Music to your other devices.",
+        (true, _) => "Only in Uzumaki, on this computer. Mix Apple Music songs and local files. Not on your other devices.",
+        (false, true) => "Saved to Apple Music and on your other devices. Local files you add show only here.",
+        (false, false) => "Saved to Apple Music and on your other devices. Local files you add later show only here.",
     };
     col().key("new-playlist/place").w_full().gap(8.0)
         .child(row().gap(8.0).child(apple).child(here))
-        .child(text(note).font(SMALL12).color(PAL.dim).wrap())
+        .child(text(note).font(SMALL12).color(PAL.dim).w_full().min_w(0.0).wrap())
 }
 
 fn field(
