@@ -129,7 +129,7 @@ impl Decoded {
 
 /// Decodes `bytes` once: the tint from a 16 px thumbnail, the pixels shrunk to fit `max_side`.
 fn decode(bytes: &[u8], max_side: u32) -> Option<Decoded> {
-    let img = image::load_from_memory(bytes).ok()?;
+    let img = crate::picture::decode(bytes, false).ok()?;
     let tint = tint_of(&img.thumbnail(16, 16).to_rgb8());
     let img = if img.width().max(img.height()) > max_side {
         img.resize(max_side, max_side, image::imageops::FilterType::Triangle)
@@ -802,6 +802,14 @@ impl<V: Clone> Lru<V> {
 
 #[cfg(test)]
 mod tests {
+    /// A JPEG XL picture (a playlist cover being picked) shows in previews like any other.
+    #[test]
+    fn a_jxl_cover_decodes_for_previews() {
+        let bytes = include_bytes!("../fixtures/pictures/gradient-48x32.jxl");
+        let d = decode(bytes, 512).expect("JXL decodes in the artwork loader");
+        let _ = d;
+    }
+
     use super::*;
 
     #[test]
