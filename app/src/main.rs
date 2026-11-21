@@ -39,6 +39,7 @@ mod login;
 mod menu_bar_mac;
 mod lyrics;
 mod media;
+mod mixed;
 mod models;
 mod motion;
 // On macOS only the single-instance check is used; the D-Bus service is not. Windows has no

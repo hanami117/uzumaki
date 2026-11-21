@@ -1,6 +1,7 @@
 //! Creating library playlists (Ctrl+N, the sidebar's +, "Add to Playlist → New Playlist…").
 //! One POST to `/v1/me/library/playlists` through the bridge; the songs, when given, go in the
-//! same request. Local files can't be in Apple playlists, so they are left out.
+//! same request. Local files can't be in Apple playlists: they join the new playlist's overlay on
+//! this computer once Apple has made it (`mixed.rs`).
 
 use serde_json::{Value, json};
 
@@ -48,9 +49,7 @@ impl State {
         }
         let body = new_playlist_body(&name, description, songs);
         let apple: Vec<Song> = songs.iter().filter(|s| s.playable && !s.is_local()).cloned().collect();
-        if apple.len() < songs.len() {
-            self.toast = Some("Local files can't be in Apple Music playlists; they were left out.".into());
-        }
+        self.new_playlist_locals = songs.iter().filter(|s| s.is_local()).cloned().collect();
         #[cfg(test)]
         self.sent.borrow_mut().push(format!("POST /v1/me/library/playlists {body}"));
         let Some(b) = &self.bridge else { return };
@@ -78,6 +77,11 @@ impl State {
                 self.library_playlists.items.insert(0, Collection { tracks: Vec::new(), ..c.clone() });
                 self.save(cache::PLAYLISTS, self.library_playlists.items.clone());
                 self.toast = Some(format!("Created “{name}”"));
+                let locals = std::mem::take(&mut self.new_playlist_locals);
+                if !locals.is_empty() {
+                    let n = self.add_local_to_playlist(&c, &locals);
+                    self.toast = Some(format!("Created “{name}”; {n} local song{} added on this computer only", if n == 1 { "" } else { "s" }));
+                }
                 if let Some(src) = self.new_playlist_picture.take() {
                     self.set_playlist_picture(&c.id, src);
                 }
@@ -85,6 +89,7 @@ impl State {
             }
             Err(e) => {
                 self.new_playlist_picture = None;
+                self.new_playlist_locals.clear();
                 self.toast = Some(format!("Couldn't create “{name}”: {e}"));
             }
         }

@@ -32,6 +32,7 @@ mod favourites;
 mod library;
 mod local;
 mod lyrics;
+pub mod mixed;
 pub mod motion;
 mod playlist_edit;
 mod playlists;
@@ -619,6 +620,10 @@ pub struct State {
     restricted_at: Option<Instant>,
     /// Apple's stars: what is known about songs, albums and playlists.
     favs: favourites::Favourites,
+    /// Local songs inserted into Apple playlists and the Uzumaki playlists (`mixed.rs`).
+    pub mixed: mixed::Mixed,
+    /// Local files given to the New Playlist dialog: they join the new Apple playlist's overlay.
+    new_playlist_locals: Vec<Song>,
     /// The picture chosen in the New Playlist dialog, for the playlist Apple is creating.
     new_playlist_picture: Option<std::path::PathBuf>,
     /// Animated artwork in Now Playing and album pages (`motion.rs`).
@@ -717,6 +722,8 @@ impl State {
             restricted_at: None,
             favs: Default::default(),
             new_playlist_picture: None,
+            mixed: mixed::Mixed::new(persist),
+            new_playlist_locals: Vec::new(),
             motion: motion::MotionState::default(),
             airplay: airplay::AirPlay::new(persist),
             cast: cast::Cast::default(),

@@ -436,7 +436,7 @@ impl State {
     pub fn load_route_data(&mut self) {
         // Local albums, artists and folders come from the music folders, never from Apple.
         self.fill_local_page();
-        if self.route.local_library() {
+        if self.route.local_library() || self.route.uzumaki() {
             return;
         }
         self.lookup_collection_cache();

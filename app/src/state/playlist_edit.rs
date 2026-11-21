@@ -74,14 +74,15 @@ impl State {
         self.custom_art(&pin.id).or_else(listed).or(pin.artwork.as_ref())
     }
 
-    /// Library playlists can get a picture (Favourite Songs too: it stays on this computer).
+    /// Library playlists can get a picture (Favourite Songs too: it stays on this computer), and
+    /// Uzumaki playlists.
     pub fn can_set_picture(c: &Collection) -> bool {
-        c.kind == CollectionKind::Playlist && c.id.starts_with("p.")
+        c.kind == CollectionKind::Playlist && (c.id.starts_with("p.") || crate::mixed::is_uzu_id(&c.id))
     }
 
-    /// Only the user's own playlists can be renamed on Apple's side.
+    /// Only the user's own playlists can be renamed on Apple's side; Uzumaki playlists here.
     pub fn can_rename(c: &Collection) -> bool {
-        c.kind == CollectionKind::Playlist && c.id.starts_with("p.") && c.editable
+        c.kind == CollectionKind::Playlist && ((c.id.starts_with("p.") && c.editable) || crate::mixed::is_uzu_id(&c.id))
     }
 
     /// Where pictures are saved: the user's data folder in the app, a scratch folder in tests.
@@ -155,6 +156,9 @@ impl State {
     /// Renames playlist `id` and sets its description on Apple's side. The app shows the
     /// change at once and turns it back if Apple refuses.
     pub fn edit_playlist(&mut self, id: &str, name: &str, description: &str) {
+        if crate::mixed::is_uzu_id(id) {
+            return self.rename_uzu_playlist(id, name, description);
+        }
         let found = self.library_playlists.items.iter().find(|c| c.id == id).or_else(|| self.collections.get(id).and_then(|l| l.ready()));
         let Some(c) = found.cloned() else { return };
         let (name, desc) = (name.trim(), description.trim());

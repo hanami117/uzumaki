@@ -276,6 +276,9 @@ impl State {
         // Local albums opened before hold the old songs: drop them (the open one is filled again).
         self.collections.retain(|id, _| !view::is_album_id(id));
         self.fill_local_page();
+        // Mixed playlists: moved files keep their new path, open Uzumaki playlists follow.
+        self.relink_moved();
+        self.refresh_uzu_collections();
     }
 
     /// The songs of a local album (`view::ALBUM_PREFIX` id), artist (`view::ARTIST_PREFIX` id) or
@@ -304,6 +307,15 @@ impl State {
     /// navigation and whenever the index changes. Never from the view.
     pub(super) fn fill_local_page(&mut self) {
         let what = match &self.route {
+            // An Uzumaki playlist comes from the store (`mixed.rs`), built afresh on each visit.
+            Route::Collection { id, .. } if crate::mixed::is_uzu_id(id) => {
+                let load = match self.uzu_collection(id) {
+                    Some(c) => Load::Ready(c),
+                    None => Load::Failed("This playlist was deleted.".into()),
+                };
+                self.collections.insert(id.clone(), load);
+                return;
+            }
             Route::Collection { id, .. } if view::is_album_id(id) => {
                 if !matches!(self.collections.get(id), Some(Load::Ready(_))) {
                     let load = match self.local_album(id) {

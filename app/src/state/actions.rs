@@ -97,10 +97,13 @@ impl State {
         }
     }
 
+    /// Plays `c`'s songs, with the local songs of its overlay in their places (`mixed.rs`):
+    /// `Start::At` counts in that merged list, as the page's rows do.
     fn play_loaded(&mut self, c: &Collection, start: Start) {
+        let tracks = self.playlist_songs(c);
         match start {
-            Start::At(i) => self.play_list(&c.tracks, i, &c.title),
-            Start::Shuffle => self.shuffle_play(&c.tracks, &c.title),
+            Start::At(i) => self.play_list(&tracks, i, &c.title),
+            Start::Shuffle => self.shuffle_play(&tracks, &c.title),
         }
     }
 
@@ -145,7 +148,7 @@ impl State {
             return;
         }
         self.play_loaded(&c, p.start);
-        self.growing = more.then(|| Growing { id: id.to_string(), title: c.title.clone(), len: c.tracks.len() });
+        self.growing = more.then(|| Growing { id: id.to_string(), title: c.title.clone(), len: self.queue.original.len() });
     }
 
     /// More songs of the list playing now landed (its next page): they join the queue, unless
@@ -178,6 +181,10 @@ impl State {
     /// With shuffle on, the rest of the list follows in random order.
     pub fn play_list(&mut self, songs: &[Song], index: usize, source: &str) {
         let Some(first) = songs.get(index) else { return };
+        if crate::mixed::is_missing(first) {
+            self.toast = Some(format!("“{}” isn't in your music folders any more.", first.title));
+            return;
+        }
         if !first.playable {
             self.toast = Some(format!("“{}” isn't available on Apple Music.", first.title));
             return;
@@ -640,21 +647,30 @@ impl State {
         self.set_volume(self.playback.volume + delta);
     }
 
-    /// Adds `songs` to one of the user's library playlists.
+    /// Adds `songs` to one of the user's library playlists, or to an Uzumaki playlist. Local
+    /// files can't go to Apple: in an Apple playlist they join its overlay on this computer
+    /// (`mixed.rs`), and only the Apple songs are sent.
     pub fn add_to_playlist(&mut self, playlist: &Collection, songs: &[Song]) {
-        let Some(b) = &self.bridge else { return };
+        if crate::mixed::is_uzu_id(&playlist.id) {
+            return self.add_to_uzu(&playlist.id, songs);
+        }
         if !playlist.id.starts_with("p.") {
             self.toast = Some("Only your own library playlists can be edited.".into());
             return;
         }
-        if songs.iter().all(Song::is_local) {
-            self.toast = Some("Local files can't be added to Apple Music playlists yet.".into());
-            return;
+        let locals: Vec<Song> = songs.iter().filter(|s| s.is_local()).cloned().collect();
+        if !locals.is_empty() {
+            let n = self.add_local_to_playlist(playlist, &locals);
+            let what = if n == 1 { format!("“{}”", locals[0].title) } else { format!("{n} local songs") };
+            self.toast = Some(format!("Added {what} to “{}” on this computer (Apple Music can't hold local files)", playlist.title));
         }
         let data = super::playlists::song_refs(songs);
         if data.is_empty() {
             return;
         }
+        #[cfg(test)]
+        self.sent.borrow_mut().push(format!("POST /v1/me/library/playlists/{}/tracks {}", playlist.id, serde_json::json!({ "data": data })));
+        let Some(b) = &self.bridge else { return };
         let (id, name, count) = (playlist.id.clone(), playlist.title.clone(), data.len());
         let account = Some(self.session.account);
         b.api_post(&format!("/v1/me/library/playlists/{id}/tracks"), serde_json::json!({ "data": data }), move |r| {
