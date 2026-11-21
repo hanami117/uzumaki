@@ -41,6 +41,7 @@ mod lyrics;
 mod media;
 mod mixed;
 mod models;
+mod picture;
 mod motion;
 // On macOS only the single-instance check is used; the D-Bus service is not. Windows has no
 // session bus at all: its media keys are `smtc.rs`.

@@ -182,7 +182,7 @@ fn remove_picture(s: &mut State) {
 fn choose_picture(tx: &mut Tx) {
     tx.open_file(
         rune::FileDialogOptions { title: "Choose a playlist picture".into(), ..Default::default() }
-            .filter("Pictures", &["png", "jpg", "jpeg"]),
+            .filter("Pictures", crate::picture::EXTENSIONS),
         |s: &mut State, result: rune::FileDialogResult, _tx: &mut Tx| match result {
             Ok(Some(path)) => s.ui.new_pl.picture = Picture::Set(path),
             Ok(None) => {} // cancelled
