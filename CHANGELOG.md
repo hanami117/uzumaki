@@ -35,6 +35,9 @@ takes each release's notes from its section here.
 - **AirPlay:** going back to This Computer, the song goes on from where you were listening, instead of about a
   second further on (the speakers play a little behind the app; the app now steps back by their actual delay),
   and without a stutter: this computer stays silent until the player is there, then fades in.
+- **Discord:** with "Hide when paused" off, a paused song's card showed a time that kept running past the song's
+  length (Discord counts on its own under a card without a bar). The card now shows the bar held still at 0:00
+  while paused (Discord can't show a bar stopped where you paused); playing again picks up from the right place.
 
 ## [0.4.0] - 2026-11-20
 

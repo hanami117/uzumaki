@@ -4,6 +4,13 @@
 //! Shape (Discord's `SET_ACTIVITY`): `type` 2 (Listening), `details` = the title, `state` = the
 //! artist, `assets` (the cover as a large image, the Uzumaki icon as the small one), `timestamps`
 //! (start and end, so Discord draws a progress bar like Spotify's) and one button.
+//!
+//! Paused (with "Hide when paused" off): an activity without `timestamps` is not a still card.
+//! Discord then runs a clock of its own, counting from when the card first appeared, so it
+//! passes the song's length and keeps going (Music Presence #64, Plezy #2360; seen through
+//! arRPC in GoofCord too, which hands the activity on unchanged). Discord has no way to pin a bar
+//! at a position, so a paused song gets a bar that starts a year from now: Discord holds it at
+//! 0:00 of the song's length, still, for as long as the pause lasts.
 
 use serde_json::{Value, json};
 
@@ -21,6 +28,8 @@ const MAX_IMAGE_URL: usize = 256;
 const MAX_BUTTON_URL: usize = 512;
 /// Two timestamps this close are the same song at the same place: the clock drifts a little.
 const DRIFT: u64 = 2;
+/// How far ahead a paused song's bar starts, so Discord never reaches it (seconds; a year).
+pub const FROZEN_AHEAD: u64 = 365 * 24 * 3600;
 /// The button's label.
 pub const BUTTON: &str = "Open in Apple Music";
 /// What the title line says when the title is hidden.
@@ -55,6 +64,8 @@ pub struct Activity {
     pub small_text: Option<String>,
     pub start: Option<u64>,
     pub end: Option<u64>,
+    /// Paused: `start` and `end` hold a still bar (see the top of this file), not the time.
+    pub paused: bool,
     pub button: Option<String>,
     pub status: StatusDisplay,
 }
@@ -95,13 +106,22 @@ impl Activity {
     }
 
     /// The same thing on show, give or take the clock's drift: not worth telling Discord again.
+    /// Two paused cards are the same when their still bars are as long (the far start moves
+    /// with the clock, the bar doesn't).
     pub fn same_as(&self, other: &Activity) -> bool {
         let near = |a: Option<u64>, b: Option<u64>| match (a, b) {
             (Some(a), Some(b)) => a.abs_diff(b) <= DRIFT,
             (a, b) => a == b,
         };
         let strip = |a: &Activity| Activity { start: None, end: None, ..a.clone() };
-        strip(self) == strip(other) && near(self.start, other.start) && near(self.end, other.end)
+        if strip(self) != strip(other) {
+            return false;
+        }
+        if self.paused {
+            let len = |a: &Activity| a.start.zip(a.end).map(|(s, e)| e.saturating_sub(s));
+            return self.start.is_some() == other.start.is_some() && len(self) == len(other);
+        }
+        near(self.start, other.start) && near(self.end, other.end)
     }
 }
 
@@ -171,7 +191,12 @@ pub fn build(snap: Option<&Snapshot>, prefs: &Prefs, now: u64) -> Option<Activit
     let (start, end) = if snap.playing {
         let start = now.saturating_sub(snap.position.max(0.0) as u64);
         (Some(start), (snap.duration >= 1.0).then(|| start + snap.duration as u64))
+    } else if snap.duration >= 1.0 {
+        // A still bar (see the top of this file): without timestamps Discord would run a clock.
+        let start = now + FROZEN_AHEAD;
+        (Some(start), Some(start + snap.duration as u64))
     } else {
+        // No length to draw a bar with (rare: a stream). Discord may count here.
         (None, None)
     };
     // The link names the song, so it goes with the title.
@@ -185,6 +210,7 @@ pub fn build(snap: Option<&Snapshot>, prefs: &Prefs, now: u64) -> Option<Activit
         small_image,
         start,
         end,
+        paused: !snap.playing,
         button,
         status: prefs.status,
     })
@@ -283,13 +309,27 @@ mod tests {
     }
 
     #[test]
-    fn paused_hides_by_default_and_otherwise_shows_without_a_clock() {
+    fn paused_hides_by_default_and_otherwise_shows_a_still_bar() {
         let mut s = song();
         s.playing = false;
         assert!(build(Some(&s), &on(), 1000).is_none(), "hide when paused is on by default");
-        let shown = build(Some(&s), &Prefs { hide_when_paused: false, ..on() }, 1000).unwrap().to_json();
-        assert!(shown.get("timestamps").is_none(), "a paused song has no running bar");
+        let keep = Prefs { hide_when_paused: false, ..on() };
+        let shown = build(Some(&s), &keep, 1000).unwrap().to_json();
+        // Not left out: Discord would run its own clock under a card with no timestamps. A bar
+        // that starts a year from now stays at 0:00 of the song's length.
+        let year = 365 * 24 * 3600;
+        assert_eq!(shown["timestamps"], json!({"start": 1000 + year, "end": 1000 + year + 327}));
         assert_eq!(shown["assets"]["small_text"], "Uzumaki \u{b7} Paused");
+        assert_eq!(shown["details"], "Redbone", "the rest of the card stays");
+        // Nothing new to say while the pause lasts (the far start moves with the clock).
+        let a = build(Some(&s), &keep, 1000).unwrap();
+        assert!(a.same_as(&build(Some(&s), &keep, 1000 + 3600).unwrap()));
+        assert!(a.same_as(&build(Some(&Snapshot { position: 200.0, ..s.clone() }), &keep, 1100).unwrap()), "a seek while paused moves nothing");
+        assert!(!a.same_as(&build(Some(&song()), &keep, 1000).unwrap()), "playing again is news");
+        assert!(!a.same_as(&build(Some(&Snapshot { title: "Zombie".into(), ..s.clone() }), &keep, 1000).unwrap()));
+        // No length known: no bar to hold still.
+        let unknown = build(Some(&Snapshot { duration: 0.0, ..s.clone() }), &keep, 1000).unwrap().to_json();
+        assert!(unknown.get("timestamps").is_none());
         assert!(build(None, &on(), 1000).is_none(), "nothing playing, nothing shown");
     }
 

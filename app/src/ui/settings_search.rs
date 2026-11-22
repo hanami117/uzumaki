@@ -245,7 +245,7 @@ const SPECS: &[Spec] = &[
     spec(Row::DiscordStatus, Tab::Notifications, "Status text", "Next to your name in the member list. Needs a recent Discord.", "discord show in status line member list mini profile compact song title artist app name"),
     spec(Row::DiscordArtwork, Tab::Notifications, "Album cover", "On your Discord card. Off: the Uzumaki icon.", "discord show artwork cover album art picture image"),
     spec(Row::DiscordButtons, Tab::Notifications, "\u{201c}Open in Apple Music\u{201d} button", "On your Discord card, for songs from Apple Music.", "discord show buttons button link share"),
-    spec(Row::DiscordHidePaused, Tab::Notifications, "Hide when paused", "Off: the card stays, without the progress bar.", "discord pause paused stop remove clear"),
+    spec(Row::DiscordHidePaused, Tab::Notifications, "Hide when paused", "Off: the card stays, its bar stopped at 0:00 (Discord can't show where you paused).", "discord pause paused stop remove clear"),
     spec(Row::DiscordHideTitle, Tab::Notifications, "Hide the song title", "Shows \u{201c}Listening to music\u{201d} and the artist only.", "discord private privacy hide song title name secret"),
     // ---- Local Files ----
     spec(Row::MusicFolders, Tab::Local, "Music folders", "Songs in these folders (and their subfolders) show up under Local Files.", "folder directory files flac mp3 rescan scan import"),
