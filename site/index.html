@@ -51,7 +51,7 @@
    "url": "https://getuzumaki.app/",
    "operatingSystem": "Linux, macOS, Windows",
    "applicationCategory": "MultimediaApplication",
-   "softwareVersion": "0.4.0",
+   "softwareVersion": "0.4.1",
    "license": "https://www.gnu.org/licenses/gpl-3.0.html",
    "offers": {
     "@type": "Offer",
@@ -354,7 +354,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
     </li>
     <li class="reveal">
       <h3>Media keys, tray and notifications</h3>
-      <p>MPRIS on Linux, Now Playing on macOS and the media overlay on Windows, so media keys and desktop widgets just work. A tray icon with playback controls, optional close-to-tray, song-change notifications, and hook scripts that run on every song change. AirPlay speakers on macOS, and Chromecast (Beta, off by default) on macOS and Linux.</p>
+      <p>MPRIS on Linux, Now Playing on macOS and the media overlay on Windows, so media keys and desktop widgets just work. A tray icon with playback controls, optional close-to-tray, song-change notifications, and hook scripts that run on every song change. AirPlay speakers on macOS and Linux, and Chromecast (Beta, off by default) on macOS and Linux.</p>
     </li>
     <li class="reveal">
       <h3>Your whole library, fast</h3>
@@ -533,7 +533,7 @@ if(window.IntersectionObserver){d.classList.add("js");setTimeout(function(){d.cl
     <li class="reveal">
       <span class="n">01</span>
       <h3>Install</h3>
-      <p>On Arch, from the AUR; on other Linux, as an AppImage or from source; on macOS, the DMG or Homebrew; on Windows, the installer or a zip. Version 0.4.0 is out for Linux, macOS and Windows: see <a href="#download">Download</a>.</p>
+      <p>On Arch, from the AUR; on other Linux, as an AppImage or from source; on macOS, the DMG or Homebrew; on Windows, the installer or a zip. Version 0.4.1 is out for Linux, macOS and Windows: see <a href="#download">Download</a>.</p>
     </li>
     <li class="reveal">
       <span class="n">02</span>
@@ -632,7 +632,7 @@ Juniper Vale - Small Rooms
 <section class="wrap dl" id="download" aria-labelledby="dl-h">
   <span class="eyebrow reveal"><b>05</b> &middot; download</span>
   <h2 id="dl-h" class="reveal">Get Uzumaki</h2>
-  <p class="lead reveal">The latest beta, version 0.4.0, is out for Linux, macOS and Windows. Free and open source under the GPL. Each system has an install page, and <a href="/apple-music-linux/">Apple Music on Linux</a> sums up what you get on Linux.</p>
+  <p class="lead reveal">The latest beta, version 0.4.1, is out for Linux, macOS and Windows. Free and open source under the GPL. Each system has an install page, and <a href="/apple-music-linux/">Apple Music on Linux</a> sums up what you get on Linux.</p>
   <div class="dl-grid stagger">
     <div class="card reveal" id="download-macos">
       <h3>macOS</h3>
@@ -679,7 +679,7 @@ Juniper Vale - Small Rooms
       <a class="more" href="/download/windows/">Windows install guide &rarr;</a>
     </div>
   </div>
-  <p class="note reveal">Once a day Uzumaki asks this site whether a new version is out and tells you; it never downloads or installs anything by itself. Settings &rarr; Advanced turns it off. Checksums are on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.4.0">release page</a>.</p>
+  <p class="note reveal">Once a day Uzumaki asks this site whether a new version is out and tells you; it never downloads or installs anything by itself. Settings &rarr; Advanced turns it off. Checksums are on the <a href="https://github.com/hanami117/uzumaki/releases/tag/v0.4.1">release page</a>.</p>
 </section>
 
 <section class="wrap faq" id="faq" aria-labelledby="faq-h">
@@ -728,7 +728,7 @@ Juniper Vale - Small Rooms
 
   <details class="reveal">
     <summary>When can I download it?</summary>
-    <p>Now: version 0.4.0 is out for Linux (AUR and AppImage), macOS and Windows. The <a href="#download">Download</a> section has an install page for each system, and releases appear on the <a href="https://github.com/hanami117/uzumaki/releases">GitHub releases page</a>.</p>
+    <p>Now: version 0.4.1 is out for Linux (AUR and AppImage), macOS and Windows. The <a href="#download">Download</a> section has an install page for each system, and releases appear on the <a href="https://github.com/hanami117/uzumaki/releases">GitHub releases page</a>.</p>
   </details>
 
   <details class="reveal">
@@ -739,6 +739,11 @@ Juniper Vale - Small Rooms
   <details class="reveal">
     <summary>Is there a Windows version?</summary>
     <p>Yes, since version 0.3.0, for Windows 10 and 11 on x64. Download the installer or a zip: see the <a href="/download/windows/">Windows install guide</a>. It plays Apple Music, local files and has media keys, a tray icon, notifications, Discord status and the <code>uzu</code> command. AirPlay isn&rsquo;t available on Windows. Uzumaki isn&rsquo;t code-signed yet, so SmartScreen warns you the first time.</p>
+  </details>
+
+  <details class="reveal">
+    <summary>AirPlay on Linux finds no speakers. What can I do?</summary>
+    <p>Speakers are found with mDNS, so your computer must be on the same network as them and able to send multicast to it: <code>224.0.0.251</code>, UDP port 5353. A VPN kill switch or a firewall often blocks that. Allow it in your VPN&rsquo;s LAN or exceptions setting (<code>224.0.0.251/32</code>, and <code>224.0.1.129/32</code> for the PTP clock) or in ufw/firewalld, and allow incoming connections from your LAN. Precise PTP timing is optional: <code>sudo setcap cap_net_bind_service=+ep /usr/lib/uzumaki/cliairplay</code> (without it, NTP timing works fine, also for several speakers).</p>
   </details>
 
   <details class="reveal">

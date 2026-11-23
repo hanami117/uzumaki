@@ -5,10 +5,12 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-23
+
+Mixed playlists (Apple Music songs and your own files together), AirPlay on Linux, and JPEG XL pictures. You need
+an Apple Music subscription to stream; local files play without one.
+
 ### Added
-- **JPEG XL pictures.** Playlist pictures (New Playlist, Choose Picture…) and the Appearance background picture
-  now accept `.jxl` files besides PNG and JPEG. A JPEG XL is converted like any other picture (an animated one gives
-  its first frame), so nothing is stored as JPEG XL.
 - **Mixed playlists.** "Add to Playlist" now works on local files (the song menu, Local Files, several songs at
   once, or a drag onto a playlist). In your Apple Music playlists they are kept on this computer only, marked with
   a small icon: Apple Music can't hold your own files and nothing is sent to it. They keep their place next to the
@@ -26,6 +28,9 @@ takes each release's notes from its section here.
   the AirPlay helper, so HomePods and other AirPlay speakers, one or several in sync, work as on macOS. Speakers
   are found with mDNS: a VPN kill switch or a firewall must let multicast to `224.0.0.251` (UDP 5353) through
   (see "AirPlay on Linux" in the README). When no speaker shows up after a few seconds, the AirPlay menu says so.
+- **JPEG XL pictures.** Playlist pictures (New Playlist, Choose Picture…) and the Appearance background picture
+  now accept `.jxl` files besides PNG and JPEG. A JPEG XL is converted like any other picture (an animated one gives
+  its first frame), so nothing is stored as JPEG XL.
 
 ### Fixed
 - **AirPlay and Chromecast:** songs you uploaded to your iCloud Music Library (not in Apple's catalog) were silent on
