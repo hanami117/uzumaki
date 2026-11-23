@@ -462,6 +462,7 @@ impl Settings {
     /// Parses a settings file; defaults when it is unreadable. A file with no `onboarded` key was
     /// written before onboarding existed: that is an existing install, so it counts as done
     /// (`Some(0)`, written back on the next save).
+    #[cfg(test)]
     pub fn from_json(bytes: &[u8]) -> Self {
         Self::parse(bytes).0
     }

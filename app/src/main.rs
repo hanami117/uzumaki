@@ -438,10 +438,10 @@ fn main() {
 
     // `uzu` talks to this socket; it goes away with `_ctl` when the app ends.
     let _ctl = ctl::start(handle.clone());
-    // Windows: the pipe's name is also the lock against a second copy. Two copies started in the
-    // same moment both pass the check above; the one that didn't get the pipe leaves here, before
-    // it starts a second Electron on the same sign-in profile.
-    #[cfg(windows)]
+    // The socket (on Windows the pipe's name) is also the lock against a second copy. Two copies
+    // started in the same moment (a double-click, a login start while the icon is clicked) both
+    // pass the check above; the one that didn't get the socket leaves here, before it starts a
+    // second Electron on the same sign-in profile.
     if _ctl.is_none() && !test_instance && ctl::other_copy_running(!hidden) {
         eprintln!("uzumaki: already running{}", if hidden { "" } else { "; showed its window" });
         return;
