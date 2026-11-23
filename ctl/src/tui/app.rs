@@ -711,6 +711,13 @@ impl App {
         let was = self.queue.current.as_ref().map(|s| s.id.clone());
         // The cursor's song is gone along with the playing one (another playlist replaced the queue): the playing song is the place to be.
         let lost_key = self.key.clone();
+        // Another source replaced the queue: a filter kept from the old one would hide the new
+        // songs (and the playing one), leaving only old matches such as the history on screen.
+        let new_source = !first && (q.source != self.queue.source || q.station != self.queue.station);
+        if new_source && !self.filter.is_empty() && !self.filtering {
+            self.set_message(format!("New queue: filter /{} cleared", self.filter), now);
+            self.filter.clear();
+        }
         self.upnext_head.title = format!("\u{25b8} Up Next \u{b7} {}", crate::fmt::plural(q.up_next.len(), "song"));
         self.history_head.title = format!("\u{27f2} History \u{b7} {}", crate::fmt::plural(q.history.len(), "song"));
         self.autoplay_head.title = "\u{221e} AutoPlay \u{b7} similar music will keep playing".to_string();

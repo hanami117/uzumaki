@@ -4187,6 +4187,52 @@ fn linkin_park_then_replay() -> (Queue, Queue) {
     (search, playlist)
 }
 
+/// The queue table's text (under the column headers).
+fn table_text(rig: &Rig) -> String {
+    let text = lines(&draw(&rig.app, rig.now, 120, 30));
+    let head = text.iter().position(|l| l.contains("Title") && l.contains("Time")).expect("the table's header");
+    text[head + 1..].join("\n")
+}
+
+/// The bug of 0.4.1: a `/linkin` filter kept on screen 1 hid the whole new queue (and the playing
+/// song) when the app's window started another playlist; only the old Linkin Park songs, now the
+/// history, still matched, so the screen looked stuck on the old list until `uzu` restarted.
+#[test]
+fn a_new_source_clears_a_filter_kept_from_the_old_queue() {
+    let (search, playlist) = linkin_park_then_replay();
+    let (mut rig, queue) = replaceable("new-source-filter", search, false);
+    rig.app.resize_to(120, 30);
+    rig.press(&[ch('/')]);
+    rig.press(&"linkin".chars().map(ch).collect::<Vec<_>>());
+    rig.press(&[key(KeyCode::Enter)]);
+    assert!(table_text(&rig).contains("Numb 5"), "{}", table_text(&rig));
+    *queue.lock().unwrap() = playlist;
+    rig.advance(3100);
+    assert_eq!(rig.app.queue.source, "Replay 2026");
+    assert_eq!(rig.app.filter, "", "the old source's filter goes");
+    assert_eq!(rig.app.message(rig.now), Some("New queue: filter /linkin cleared"));
+    let table = table_text(&rig);
+    assert!(table.contains("Replay 0") && table.contains("Replay 1 ") && table.contains("Replay 5"), "{table}");
+}
+
+/// The same source keeps the filter (a reorder, the next song, an edit), and so does one being typed.
+#[test]
+fn a_filter_stays_while_the_source_stays_or_while_typing() {
+    let (search, playlist) = linkin_park_then_replay();
+    let (mut rig, queue) = replaceable("same-source-filter", search.clone(), true);
+    rig.press(&[ch('/'), ch('n'), ch('u'), key(KeyCode::Enter)]);
+    let mut next = search.clone();
+    next.history.push(next.current.take().unwrap());
+    next.current = Some(next.up_next.remove(0));
+    *queue.lock().unwrap() = next;
+    rig.advance(600);
+    assert_eq!((rig.app.queue.up_next.len(), rig.app.filter.as_str()), (search.up_next.len() - 1, "nu"));
+    rig.press(&[ch('/'), ch('m')]);
+    *queue.lock().unwrap() = playlist;
+    rig.advance(600);
+    assert_eq!((rig.app.queue.source.as_str(), rig.app.filter.as_str()), ("Replay 2026", "num"), "typing goes on");
+}
+
 /// With `queue_rev` in the status, any change of the queue shows at the next status poll (half
 /// a second), whatever changed; while nothing changes the queue isn't fetched at all.
 #[test]
