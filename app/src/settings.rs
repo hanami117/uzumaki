@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -410,6 +410,8 @@ impl Default for Settings {
 /// Saves run on background threads; this keeps them in order (and writing one at a time).
 static SAVED_GEN: Mutex<u64> = Mutex::new(0);
 static NEXT_GEN: AtomicU64 = AtomicU64::new(1);
+/// Set when settings.json exists but couldn't be read: nothing is saved this session.
+static READ_ONLY: AtomicBool = AtomicBool::new(false);
 
 /// `$XDG_CONFIG_HOME/uzumaki` (else `~/.config/uzumaki`), on macOS too: settings and hooks live here.
 pub(crate) fn config_dir() -> Option<PathBuf> {
@@ -430,32 +432,115 @@ fn path() -> Option<PathBuf> {
 }
 
 impl Settings {
-    /// Reads the file; defaults when it is missing or unreadable.
+    /// Reads the file; defaults when it is missing. A file that can't be read (permissions, I/O)
+    /// gives defaults and turns saving off for this session, so it is never overwritten. A file
+    /// with values this version doesn't understand (a newer version's, or a typo) keeps every
+    /// other value; the original is copied to `settings.json.bak` before anything is written.
     pub fn load() -> Self {
-        path().and_then(|p| std::fs::read(p).ok()).map(|b| Self::from_json(&b)).unwrap_or_default()
+        let Some(path) = path() else { return Self::default() };
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Self::default(),
+            Err(e) => {
+                eprintln!("[settings] can't read {}: {e}; settings won't be saved this session", path.display());
+                READ_ONLY.store(true, Ordering::Relaxed);
+                return Self::default();
+            }
+        };
+        let (s, lossy) = Self::parse(&bytes);
+        if lossy {
+            let bak = path.with_extension("json.bak");
+            eprintln!("[settings] some values in {} weren't understood and use their default; the original is kept as {}", path.display(), bak.display());
+            if std::fs::copy(&path, &bak).is_err() {
+                // Without a copy, keep the original as it is rather than drop what we don't know.
+                READ_ONLY.store(true, Ordering::Relaxed);
+            }
+        }
+        s
     }
 
     /// Parses a settings file; defaults when it is unreadable. A file with no `onboarded` key was
     /// written before onboarding existed: that is an existing install, so it counts as done
     /// (`Some(0)`, written back on the next save).
     pub fn from_json(bytes: &[u8]) -> Self {
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return Self::default() };
+        Self::parse(bytes).0
+    }
+
+    /// `from_json`, plus whether anything in the file was dropped (a value that didn't parse,
+    /// or a file that isn't JSON at all).
+    fn parse(bytes: &[u8]) -> (Self, bool) {
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return (Self::default(), true) };
         let old = value.as_object().is_some_and(|o| !o.contains_key("onboarded"));
         // The switch "Also on album pages" (off) beside an on "Animated artwork" is Now Playing only.
         let page_motion_off = value.get("album_page_motion").and_then(serde_json::Value::as_bool) == Some(false);
-        let mut s: Self = serde_json::from_value(value).unwrap_or_default();
+        let (mut s, lossy) = match serde_json::from_value::<Self>(value.clone()) {
+            Ok(s) => (s, false),
+            Err(_) => (Self::lenient(&value), true),
+        };
         if old && s.onboarded.is_none() {
             s.onboarded = Some(0);
         }
         if page_motion_off && s.animated_artwork == AnimatedArtwork::Always {
             s.animated_artwork = AnimatedArtwork::NowPlaying;
         }
-        s
+        (s, lossy)
+    }
+
+    /// Builds settings from a file that didn't parse as a whole: starts from the defaults and
+    /// takes the file's values one by one (inside nested objects too), keeping each that still
+    /// parses. Only the bad values fall back to their default.
+    fn lenient(file: &serde_json::Value) -> Self {
+        let Some(file) = file.as_object() else { return Self::default() };
+        let Ok(mut merged) = serde_json::to_value(Self::default()) else { return Self::default() };
+        let ok = |v: &serde_json::Value| serde_json::from_value::<Self>(v.clone()).is_ok();
+        fn merge(merged: &mut serde_json::Value, at: &[&str], file: &serde_json::Map<String, serde_json::Value>, ok: &dyn Fn(&serde_json::Value) -> bool) {
+            for (key, value) in file {
+                let mut path = at.to_vec();
+                path.push(key);
+                let mut candidate = merged.clone();
+                let Some(slot) = slot_at(&mut candidate, &path) else { continue };
+                let before = slot.clone();
+                *slot = value.clone();
+                if ok(&candidate) {
+                    *merged = candidate;
+                } else if let (Some(inner), true) = (value.as_object(), before.is_object()) {
+                    merge(merged, &path, inner, ok);
+                } else if let (Some(items), true) = (value.as_array(), before.is_array()) {
+                    // A list (pins, folders): keep the items that parse, drop the others.
+                    let mut kept = Vec::new();
+                    for item in items {
+                        let mut candidate = merged.clone();
+                        let Some(slot) = slot_at(&mut candidate, &path) else { break };
+                        let mut list = kept.clone();
+                        list.push(item.clone());
+                        *slot = serde_json::Value::Array(list.clone());
+                        if ok(&candidate) {
+                            kept = list;
+                            *merged = candidate;
+                        }
+                    }
+                }
+            }
+        }
+        /// The value at `path` (the last key inserted if missing), when every parent is an object.
+        fn slot_at<'a>(v: &'a mut serde_json::Value, path: &[&str]) -> Option<&'a mut serde_json::Value> {
+            let (last, parents) = path.split_last()?;
+            let mut v = v;
+            for key in parents {
+                v = v.as_object_mut()?.get_mut(*key)?;
+            }
+            Some(v.as_object_mut()?.entry(last.to_string()).or_insert(serde_json::Value::Null))
+        }
+        merge(&mut merged, &[], file, &ok);
+        serde_json::from_value(merged).unwrap_or_default()
     }
 
     /// Writes atomically on a background thread. Saves never interleave, and a save that
     /// lost the race to a newer one is dropped (the file never goes back to an older copy).
     pub fn save(&self) {
+        if READ_ONLY.load(Ordering::Relaxed) {
+            return;
+        }
         let Some(path) = path() else { return };
         let Ok(json) = serde_json::to_vec_pretty(self) else { return };
         let generation = NEXT_GEN.fetch_add(1, Ordering::Relaxed);
@@ -470,6 +555,10 @@ impl Settings {
             let tmp = path.with_extension("json.tmp");
             if std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, &path).is_ok() {
                 *saved = generation;
+            } else {
+                // Full disk or read-only folder: don't leave a partial copy behind.
+                let _ = std::fs::remove_file(&tmp);
+                eprintln!("[settings] couldn't save {}", path.display());
             }
         });
     }
@@ -690,5 +779,31 @@ mod review_edges {
         assert_eq!(s.onboarded, Some(2), "onboarding would run again");
         assert!(s.shuffle, "shuffle lost");
         assert_eq!(s.music_folders, vec![PathBuf::from("/music")], "music folders lost");
+        assert_eq!(s.theme, Settings::default().theme, "only the bad value is defaulted");
+    }
+
+    /// A bad value inside a nested object only defaults that value, and a file that parses
+    /// whole isn't reported as lossy (no .bak for it).
+    #[test]
+    fn a_bad_nested_value_keeps_its_siblings() {
+        let mut v = serde_json::to_value(Settings { shuffle: true, ..Settings::default() }).unwrap();
+        let (good, lossy) = Settings::parse(&serde_json::to_vec(&v).unwrap());
+        assert!(good.shuffle && !lossy);
+        v["shuffle"] = serde_json::json!("yes please");
+        v["onboarded"] = serde_json::json!(4);
+        let (s, lossy) = Settings::parse(&serde_json::to_vec(&v).unwrap());
+        assert!(lossy);
+        assert_eq!((s.shuffle, s.onboarded), (false, Some(4)));
+        assert_eq!(Settings::parse(b"[1, 2]").1, true, "not an object: defaults, reported");
+        // A pin of a kind this version doesn't know drops that pin only.
+        let mut v = serde_json::to_value(Settings::default()).unwrap();
+        let pin = serde_json::json!({"kind": "Playlist", "id": "p.1", "title": "Mine"});
+        let mut future = pin.clone();
+        future["kind"] = serde_json::json!("Hologram");
+        v["pins"] = serde_json::json!([pin, future]);
+        v["appearance"]["no_such_field"] = serde_json::json!(1);
+        let (s, lossy) = Settings::parse(&serde_json::to_vec(&v).unwrap());
+        assert!(lossy);
+        assert_eq!(s.pins.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["p.1"]);
     }
 }
