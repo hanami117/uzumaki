@@ -382,3 +382,52 @@ fn the_client_id_is_the_configured_one_when_it_is_one() {
     }
     assert_eq!(p(None).available(), p(None).effective_client_id().is_some());
 }
+
+#[test]
+fn a_pause_after_play_is_sent_as_a_still_bar_and_only_once() {
+    let dir = scratch();
+    let fake = Fake::start(&dir);
+    let mut p = Presence::with_env(env(&dir));
+    p.configure(&Prefs { hide_when_paused: false, ..on() });
+    p.update_at(Some(&song()), 5_000);
+    fake.next_event(); // the handshake
+    assert_eq!(activity_of(&fake.frame()).unwrap()["timestamps"], json!({"start": 4_990, "end": 5_190}));
+    // Paused: the card stays, and a new SET_ACTIVITY goes out with a bar Discord can't reach
+    // (no timestamps at all would let Discord run a clock of its own).
+    let paused = Snapshot { playing: false, ..song() };
+    p.update_at(Some(&paused), 5_010);
+    let f = fake.frame();
+    let a = activity_of(&f).expect("the card stays while paused");
+    let ahead = activity::FROZEN_AHEAD;
+    assert_eq!(a["timestamps"], json!({"start": 5_010 + ahead, "end": 5_010 + ahead + 200}));
+    assert_eq!(a["assets"]["small_text"], "Uzumaki \u{b7} Paused");
+    assert_eq!(a["details"], "Redbone");
+    // The app keeps reporting the pause every second: nothing more is sent.
+    for t in 5_011..5_015 {
+        p.update_at(Some(&paused), t);
+    }
+    fake.quiet(200);
+    // Playing again: a running bar from where the song is.
+    p.update_at(Some(&Snapshot { position: 10.0, ..song() }), 5_100);
+    assert_eq!(activity_of(&fake.frame()).unwrap()["timestamps"], json!({"start": 5_090, "end": 5_290}));
+    p.close(WAIT);
+}
+
+#[test]
+fn a_pause_inside_the_gap_still_reaches_discord() {
+    let dir = scratch();
+    let fake = Fake::start(&dir);
+    let mut e = env(&dir);
+    e.min_gap = Duration::from_millis(400);
+    let mut p = Presence::with_env(e);
+    p.configure(&Prefs { hide_when_paused: false, ..on() });
+    p.update_at(Some(&song()), 5_000);
+    fake.next_event();
+    fake.frame();
+    // Paused right after the song started: held back by the rate limit, never dropped.
+    p.update_at(Some(&Snapshot { playing: false, ..song() }), 5_000);
+    let a = fake.frame();
+    assert!(activity_of(&a).unwrap()["timestamps"]["start"].as_u64().unwrap() > 5_000 + 3600, "{a}");
+    fake.quiet(600);
+    p.close(WAIT);
+}

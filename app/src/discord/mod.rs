@@ -89,7 +89,8 @@ pub struct Prefs {
     pub artwork: bool,
     /// The "Open in Apple Music" button.
     pub buttons: bool,
-    /// Clear the card while paused (otherwise it stays, without the progress bar).
+    /// Clear the card while paused (otherwise it stays, its bar held still at 0:00: Discord can't
+    /// show a bar stopped where the song was, and runs a clock of its own under a card without one).
     pub hide_when_paused: bool,
     /// Show "Listening to music" instead of the title (no album, no button).
     pub hide_title: bool,
@@ -262,7 +263,7 @@ impl Presence {
 
     /// What is playing now (None: nothing is, or it is stopped). Cheap: builds the activity and
     /// compares it to the last one; only a change reaches the worker. Seeks and pauses show up
-    /// as changed timestamps or as no activity.
+    /// as changed timestamps (a pause: a still bar) or as no activity.
     pub fn update(&mut self, snap: Option<&Snapshot>) {
         self.update_at(snap, unix_now());
     }

@@ -27,7 +27,7 @@ Local files show title and artist only.
 | Show on Discord | off | the main switch |
 | Show artwork | on | off: the Uzumaki icon replaces the cover; no cover link goes to Discord |
 | Show buttons | on | the "Open in Apple Music" button (Apple Music songs only) |
-| Hide when paused | on | off: the card stays while paused, without the progress bar |
+| Hide when paused | on | off: the card stays while paused, its bar held at 0:00 (Discord runs a clock of its own under a card without one, and has no way to show a bar stopped where you paused) |
 | Hide song title | off | "Listening to music" and the artist; no album, no button |
 
 They live in `settings.json` (`~/.config/uzumaki/`, `~/Library/Application Support/…` as the other settings):
