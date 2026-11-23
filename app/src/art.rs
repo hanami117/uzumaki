@@ -20,7 +20,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rune::{Image, ImageCache};
 
@@ -40,6 +40,8 @@ const DISK_BUDGET: u64 = 300 * 1024 * 1024;
 /// Largest artwork body accepted.
 const MAX_BODY: u64 = 8 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(15);
+/// A cover that failed on the network is asked again after this (`Art::net_failed`).
+const NET_RETRY: Duration = Duration::from_secs(30);
 
 /// Pixel size of the full-screen Now Playing cover. State preloads this size for the current
 /// and next songs, and the view must request exactly this size so it hits the same cache entry.
@@ -157,8 +159,12 @@ struct Inner {
     tints: Lru<[u8; 3]>,
     /// Covers being fetched (by memory key), with the view frame that last asked for each (0: a preload).
     in_flight: HashMap<String, u64>,
-    /// URLs given up on (not memory keys: a failed download fails at every size).
+    /// URLs given up on (not memory keys: a failed download fails at every size): Apple said no
+    /// (HTTP 4xx) or the picture can't be decoded.
     failed: HashSet<String>,
+    /// URLs that failed on the network (offline, after wake, a 5xx), and when: asked again
+    /// after `NET_RETRY`, or as soon as any cover loads (the network is back).
+    net_failed: HashMap<String, Instant>,
     /// Counts for `UZUMAKI_ART_LOG`: covers decoded and let go.
     loads: u64,
     evictions: u64,
@@ -182,6 +188,7 @@ impl Default for Inner {
             tints: Lru::with_budget(TINT_ENTRIES),
             in_flight: HashMap::new(),
             failed: HashSet::new(),
+            net_failed: HashMap::new(),
             loads: 0,
             evictions: 0,
             held: HashMap::new(),
@@ -272,7 +279,7 @@ impl Art {
         if let Some(img) = inner.images.get(&key, drawn) {
             return Some(img);
         }
-        if inner.failed.contains(&url) {
+        if inner.failed.contains(&url) || inner.net_failed.get(&url).is_some_and(|t| t.elapsed() < NET_RETRY) {
             return None;
         }
         if let Some(asked) = inner.in_flight.get_mut(&key) {
@@ -354,6 +361,7 @@ impl Art {
         // Asked for by the frame on screen: held like the covers it drew, so a page of more
         // covers than the budget fills up once instead of pushing out its own.
         let drawn = inner.in_flight.remove(&key).is_some_and(|f| f != 0 && f == inner.images.frame());
+        inner.net_failed.clear();
         inner.tints.put(stable_url(&url).to_string(), cover.tint, 1, false);
         match &self.cache {
             Some(cache) => {
@@ -379,11 +387,16 @@ impl Art {
         }
     }
 
-    /// UI thread: the download failed; don't retry this session.
-    pub fn failed(&mut self, key: String, url: String) {
+    /// UI thread: the download failed. `lasting` (HTTP 4xx, not a picture): not asked again
+    /// this session; a network failure is asked again later (`net_failed`).
+    pub fn failed(&mut self, key: String, url: String, lasting: bool) {
         let inner = self.inner.get_mut();
         inner.in_flight.remove(&key);
-        inner.failed.insert(url);
+        if lasting {
+            inner.failed.insert(url);
+        } else {
+            inner.net_failed.insert(url, Instant::now());
+        }
     }
 }
 
@@ -513,7 +526,8 @@ fn show(handle: &Handle, agent: &ureq::Agent, dir: &Path, key: String, url: Stri
         Ok(cover) => handle.update(move |s: &mut State, _tx| s.art.loaded(key, url, cover)),
         Err(e) => {
             eprintln!("uzumaki: artwork {url}: {e}");
-            handle.update(move |s: &mut State, _tx| s.art.failed(key, url));
+            let lasting = e.starts_with("HTTP 4") || e.starts_with("not an");
+            handle.update(move |s: &mut State, _tx| s.art.failed(key, url, lasting));
         }
     }
 }
