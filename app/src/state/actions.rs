@@ -561,6 +561,11 @@ impl State {
         if self.playback.position > 3.0 {
             return self.seek_to(0.0);
         }
+        // A queued song goes back to the list song before it (MusicKit's own Previous only
+        // knows that when the list started before it, so the app does it either way).
+        if let Some(song) = self.queue.back_from_user() {
+            return self.begin_current(song);
+        }
         if self.queue.pos > self.queue.base && !self.playback.local {
             if self.bridge.is_some() {
                 self.airplay_flush();

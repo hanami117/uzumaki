@@ -626,6 +626,19 @@ impl PlayQueue {
     }
 
     /// Previous at the start of MusicKit's queue: restart one song earlier. Returns that song.
+    /// Previous on a song queued by hand (Play Next / Add to Queue): the list song heard just
+    /// before it, without moving in the list. None when no queued song plays (or on a station,
+    /// where the list is the station's).
+    pub fn back_from_user(&mut self) -> Option<Song> {
+        if self.user_playing.is_none() || self.station_live() {
+            return None;
+        }
+        let song = self.current().cloned()?;
+        self.user_playing = None;
+        self.base = self.pos;
+        Some(song)
+    }
+
     pub fn step_back(&mut self) -> Option<Song> {
         if self.pos == 0 {
             return None;
