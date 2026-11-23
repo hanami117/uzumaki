@@ -168,4 +168,15 @@ mod tests {
         assert!(!s.discord.active(), "but headless and tests start no thread and touch no socket");
         s.discord_sync();
     }
+
+    /// Review 2026-11-23: on a Chromecast the window shows `heard_now` (player minus the
+    /// measured delay); Discord's bar should match it, not run seconds ahead.
+    #[test]
+    fn review_discord_position_is_what_the_window_shows() {
+        let mut s = playing("1161018480");
+        s.playback.state = PlayState::Paused;
+        s.playback.output_delay = 7.7;
+        let snap = s.discord_snapshot().unwrap();
+        assert!((snap.position - s.playback.heard_now()).abs() < 0.01, "discord {} vs window {}", snap.position, s.playback.heard_now());
+    }
 }

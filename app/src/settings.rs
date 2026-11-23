@@ -675,3 +675,20 @@ mod tests {
         assert_eq!(back, s);
     }
 }
+
+#[cfg(test)]
+mod review_edges {
+    use super::*;
+
+    /// A settings.json written by a newer Uzumaki (a Theme it doesn't know) must not throw away
+    /// the user's other settings, nor send an onboarded user back through onboarding.
+    #[test]
+    fn one_unknown_value_keeps_the_rest_of_the_file() {
+        let s = Settings::from_json(
+            br#"{"onboarded": 2, "shuffle": true, "music_folders": ["/music"], "theme": "Sepia"}"#,
+        );
+        assert_eq!(s.onboarded, Some(2), "onboarding would run again");
+        assert!(s.shuffle, "shuffle lost");
+        assert_eq!(s.music_folders, vec![PathBuf::from("/music")], "music folders lost");
+    }
+}

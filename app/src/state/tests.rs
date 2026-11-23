@@ -3233,3 +3233,87 @@ fn previous_to_a_song_that_autoplay_also_suggests_stays_in_the_list() {
     s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("a")))));
     assert_eq!((s.queue.pos, s.queue.context.len(), s.queue.autoplay.len()), (0, 2, 2));
 }
+
+// ---------------------------------------------------------------- review-edges (2026-11-23)
+
+/// A local file deleted, renamed or on an unmounted drive after it was queued: the player says
+/// "Couldn't play" then Stopped. Apple songs that fail are skipped (`QueueFailed`); the local
+/// one stops the whole queue, so an unattended playlist goes silent at the first missing file.
+#[test]
+fn review_edges_a_vanished_local_file_mid_queue_skips_to_the_next_song() {
+    let mut s = State::offline();
+    s.play_list(&[local("x"), local("gone"), local("z")], 0, "L");
+    from_local(&mut s, Event::PlayState(PlayState::Playing));
+    from_local(&mut s, Event::PlayState(PlayState::Ended));
+    assert_eq!(s.playback.song.as_ref().unwrap().title, "gone");
+    from_local(&mut s, Event::Error("Couldn't play “gone”: No such file or directory".into()));
+    from_local(&mut s, Event::PlayState(PlayState::Stopped));
+    assert_eq!(local_sent(&s), ["play x", "play gone", "play z"], "the queue stopped at the missing file");
+}
+
+/// A mixed playlist row already known missing (greyed stand-in, `playable: false`) sits between
+/// two local files. Playing from the first, the app's own advance (after a local file) must pass
+/// over it like Apple's greyed songs, not hand it to the player.
+#[test]
+fn review_edges_a_greyed_missing_row_is_passed_over_after_a_local_file() {
+    let mut s = State::offline();
+    let missing = Song { playable: false, ..local("missing") };
+    s.play_list(&[local("x"), missing, local("z")], 0, "Mix");
+    from_local(&mut s, Event::PlayState(PlayState::Ended));
+    assert_eq!(s.playback.song.as_ref().unwrap().title, "z", "{:?}", local_sent(&s));
+}
+
+/// Electron crashes while a song plays. The bar, MPRIS and the tray must not keep saying
+/// Playing (with a clock that runs on), and the app must be able to start a new bridge without
+/// a quit: `start_bridge` is the only way in, and it refuses while the dead `Bridge` is kept.
+#[test]
+fn review_edges_a_crashed_bridge_stops_the_player_and_can_be_restarted() {
+    let (mut s, starts) = with_engine();
+    s.start_bridge();
+    s.session.bridge_up = true;
+    s.session.authorized = true;
+    s.play_songs(&[song("a"), song("b")], 0);
+    s.apply_msg(Msg::Bridge(Event::PlayState(PlayState::Playing)));
+    s.apply_msg(Msg::Bridge(Event::Exited));
+    let state = s.playback.state;
+    s.start_bridge();
+    let n = started(&starts);
+    s.engine.as_ref().unwrap().shutdown();
+    assert_ne!(state, PlayState::Playing, "still Playing after Electron died");
+    assert_eq!(n, 2, "no new bridge after the crash");
+}
+
+/// First launch with the network down (or Apple failing once): Albums shows "Could not load your
+/// albums" and nothing ever asks again in this session, not on going back to the page, not when
+/// the network is back (only a restart helps). `ensure_library_albums` only asks from `Idle`.
+#[test]
+fn review_edges_a_failed_library_list_is_asked_again_when_the_page_is_opened_again() {
+    let mut s = State::offline();
+    s.session.bridge_up = true;
+    s.session.authorized = true;
+    s.navigate(Route::Library(LibraryTab::Albums));
+    let before = sent_matching(&s, "/v1/me/library/albums");
+    assert!(before >= 1, "{:?}", s.sent.borrow());
+    s.apply_msg(Msg::LibraryAlbums(Err("Failed to fetch".into())));
+    s.navigate(Route::Home);
+    s.navigate(Route::Library(LibraryTab::Albums));
+    assert!(sent_matching(&s, "/v1/me/library/albums") > before, "never asked again: {:?}", s.library_albums.load);
+}
+
+
+/// The app lives in the tray for days. A playlist shown this session is edited on the iPhone
+/// (songs added, reordered): opening it again in Uzumaki never asks Apple, not even the list
+/// with `lastModifiedDate`, so the page (and a mixed playlist's overlay anchors, and what Play
+/// queues) stay on the old copy until the app is restarted.
+#[test]
+fn review_edges_a_playlist_edited_elsewhere_mid_session_is_checked_again_later() {
+    let mut s = cached_playlist_state("v1");
+    let mut fresh = playlist("p.1", "v1");
+    fresh.tracks.clear();
+    s.apply_msg(Msg::LibraryPlaylists(Ok(Page { items: vec![fresh], next: None, total: None })));
+    let lists = sent_matching(&s, "/v1/me/library/playlists");
+    // Hours later (another device edits p.1 meanwhile), the user opens it again.
+    s.navigate(Route::Home);
+    s.navigate(Route::Collection { kind: CollectionKind::Playlist, id: "p.1".into() });
+    assert!(sent_matching(&s, "/v1/me/library/playlists") > lists, "nothing asks Apple again: {:?}", s.sent.borrow());
+}

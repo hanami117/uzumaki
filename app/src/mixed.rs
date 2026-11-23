@@ -681,3 +681,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
+
+#[cfg(test)]
+mod review_edges {
+    use super::*;
+
+    /// playlists.json exists but can't be read (EACCES after a `sudo uzumaki`, EIO on a failing
+    /// disk, a home on a network mount that is slow to come up). That is read as a first run:
+    /// `Loaded::Ok(empty)`, not read-only, so the next playlist change writes an empty store over
+    /// the user's Uzumaki playlists (rename replaces the file even when it isn't ours to read).
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_file_is_not_a_first_run() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("uzumaki-review-edges-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("playlists.json");
+        let mut store = Store::default();
+        store.playlists.push(UzuPlaylist { id: "u.1".into(), name: "Mine".into(), description: None, created: 1, modified: 1, entries: vec![] });
+        store.write(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let loaded = Store::read(&path);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_ne!(loaded, Loaded::Ok(Store::default()), "an unreadable file reads as an empty, writable store");
+    }
+}
