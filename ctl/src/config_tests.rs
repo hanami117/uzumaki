@@ -888,6 +888,9 @@ fn layout_keys() {
     // A screen by number, and "normal" is no view.
     let cfg = Config::parse("[layout]\nstart_screen = 5\nstart_view = \"normal\"\n");
     assert_eq!((cfg.layout.start_screen, cfg.layout.start_view), (4, None));
+    let cfg = Config::parse("[layout]\nstart_screen = \"2\"\n");
+    assert_eq!((cfg.layout.start_screen, lines(&cfg).len()), (1, 0), "a number in quotes, as the default file suggests");
+    assert!(lines(&Config::parse("[layout]\nstart_screen = 0\n"))[0].contains("from 1 to 5"));
 }
 
 #[test]
