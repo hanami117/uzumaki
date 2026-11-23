@@ -313,7 +313,7 @@ impl Browse {
     fn play_song(&self) -> Out {
         let (Some(c), Some(songs)) = (self.selected(), self.songs()) else { return Out::None };
         match songs.get(self.right.cursor).filter(|_| self.visible_right().contains(&self.right.cursor)) {
-            Some(_) => {
+            Some(song) => {
                 // A sorted pane plays in its order: the whole sorted list, from the cursor's place in it.
                 let (index, order) = match self.right_sort {
                     None => (self.right.cursor, None),
@@ -322,7 +322,9 @@ impl Browse {
                         (order.iter().position(|&i| i == self.right.cursor).unwrap_or(0), Some(order))
                     }
                 };
-                Out::Request(Request::PlayCollection { kind: self.kind, id: c.id.clone(), index: Some(index), order }, None)
+                // With the song's id: the app plays this song even when the list changed since
+                // it was loaded here (or says to reload a sorted one).
+                Out::Request(Request::PlayCollection { kind: self.kind, id: c.id.clone(), index: Some(index), order, song_id: Some(song.id.clone()) }, None)
             }
             None => Out::None,
         }
@@ -330,7 +332,7 @@ impl Browse {
 
     fn play_all(&self) -> Out {
         match self.selected() {
-            Some(c) => Out::Request(Request::PlayCollection { kind: self.kind, id: c.id.clone(), index: None, order: self.songs().filter(|_| self.right_sort.is_some()).map(|s| sort::order_songs(s, self.right_sort)) }, Some(format!("Playing: {}", c.title))),
+            Some(c) => Out::Request(Request::PlayCollection { kind: self.kind, id: c.id.clone(), index: None, order: self.songs().filter(|_| self.right_sort.is_some()).map(|s| sort::order_songs(s, self.right_sort)), song_id: None }, Some(format!("Playing: {}", c.title))),
             None => Out::None,
         }
     }

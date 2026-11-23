@@ -711,9 +711,12 @@ impl App {
         let was = self.queue.current.as_ref().map(|s| s.id.clone());
         // The cursor's song is gone along with the playing one (another playlist replaced the queue): the playing song is the place to be.
         let lost_key = self.key.clone();
-        // Another source replaced the queue: a filter kept from the old one would hide the new
+        // Another queue replaced this one: a filter kept from the old one would hide the new
         // songs (and the playing one), leaving only old matches such as the history on screen.
-        let new_source = !first && (q.source != self.queue.source || q.station != self.queue.station);
+        // The app numbers each queue (`run`), so a new one with the same name counts too (two
+        // searches are both ""); an older app sends no number, then the name has to do.
+        let new_run = matches!((q.run, self.queue.run), (Some(a), Some(b)) if a != b);
+        let new_source = !first && (new_run || q.source != self.queue.source || q.station != self.queue.station);
         if new_source && !self.filter.is_empty() && !self.filtering {
             self.set_message(format!("New queue: filter /{} cleared", self.filter), now);
             self.filter.clear();
@@ -804,6 +807,8 @@ impl App {
                 if self.away {
                     self.away = false;
                     self.queue_dirty = true;
+                    // The app came back, maybe a newer one (an upgrade): ask for lyrics again.
+                    self.lyrics.unsupported = false;
                 }
                 match &reply {
                     Reply::Status(st) => self.set_status(st.clone(), now),
@@ -905,7 +910,7 @@ impl App {
                             Some(e) => self.set_message(format!("Search failed: {e}"), now),
                             None => {
                                 if let Some(path) = &self.last {
-                                    last::save(path, &Last::Search);
+                                    last::save(path, &Last::Search { ids: self.search.results.iter().map(|s| s.id.clone()).collect() });
                                 }
                             }
                         }
@@ -1222,6 +1227,11 @@ impl App {
         self.rows().get(self.cursor).filter(|r| r.kind.is_selectable()).map(|r| r.number)
     }
 
+    /// The id of the song under the cursor, for the app to check that a number still means it.
+    fn selected_id(&self) -> Option<String> {
+        self.rows().get(self.cursor).map(|r| r.song.id.clone()).filter(|id| !id.is_empty())
+    }
+
     fn activate(&mut self, be: &mut dyn Backend, now: Instant) {
         if self.rows().get(self.cursor).is_some_and(|r| r.kind == RowKind::History) {
             self.toggle_history(now);
@@ -1230,7 +1240,9 @@ impl App {
         match self.selected_number() {
             Some(Some(n)) => {
                 let start = self.entries_before_history();
-                let req = if n > start { Request::History { index: n - start - 1 } } else { Request::Jump { index: n - 1 } };
+                // With the song's id: the queue may have moved on since this list was fetched.
+                let id = self.selected_id();
+                let req = if n > start { Request::History { index: n - start - 1, id } } else { Request::Jump { index: n - 1, id } };
                 self.act(be, req, now);
             },
             Some(None) => self.act(be, Request::Seek { to: SeekTo::Absolute(0.0) }, now),
@@ -1278,7 +1290,8 @@ impl App {
         match self.selected_number() {
             Some(Some(n)) if n > self.queue.up_next.len() => self.set_message(self.uneditable(n), now),
             Some(Some(n)) => {
-                if self.send(be, Request::Remove { indices: vec![n - 1] }, now).is_some() {
+                let ids = self.selected_id().into_iter().collect();
+                if self.send(be, Request::Remove { indices: vec![n - 1], ids }, now).is_some() {
                     self.set_message("Removed 1 song", now);
                 }
             }
@@ -1303,10 +1316,10 @@ impl App {
             return;
         }
         let (from, to) = (n - 1, if down { n } else { n - 2 });
-        if self.send(be, Request::Move { from, to }, now).is_some() {
-            let target = if down { self.cursor + 1 } else { self.cursor - 1 };
-            self.set_cursor(target);
-        }
+        let id = self.selected_id();
+        // The reply is the queue after the move: `set_queue` puts the cursor back on its song,
+        // now one row down (or up), so J again moves the same song on.
+        self.send(be, Request::Move { from, to, id }, now);
     }
 
     // -------------------------------------------------------------------------------- lyrics

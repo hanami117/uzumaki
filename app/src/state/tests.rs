@@ -1188,9 +1188,9 @@ mod uzu {
         changed(&s, "shuffle on");
         s.set_shuffle(false);
         changed(&s, "shuffle off");
-        s.ctl_move(0, 2).unwrap();
+        s.ctl_move(0, 2, None).unwrap();
         changed(&s, "a reorder");
-        s.ctl_remove(&[0]).unwrap();
+        s.ctl_remove(&[0], &[]).unwrap();
         changed(&s, "a removal");
         s.add_to_queue(&[song("99")]);
         changed(&s, "an insert");
@@ -1258,10 +1258,10 @@ mod uzu {
         c.title = "Road".into();
         c.tracks = vec![song("1"), song("2")];
         c.tracks[1].playable = false;
-        assert_eq!(s.ctl_play_collection(&c, Some(5), None), Err("“Road” has 2 songs".into()));
-        assert_eq!(s.ctl_play_collection(&c, Some(1), None), Err("“Song 2” isn't available on Apple Music".into()));
+        assert_eq!(s.ctl_play_collection(&c, Some(5), None, None), Err("“Road” has 2 songs".into()));
+        assert_eq!(s.ctl_play_collection(&c, Some(1), None, None), Err("“Song 2” isn't available on Apple Music".into()));
         assert!(s.playback.song.is_none());
-        assert_eq!(s.ctl_play_collection(&c, Some(0), None), Ok(()));
+        assert_eq!(s.ctl_play_collection(&c, Some(0), None, None), Ok(()));
         assert_eq!((s.playback.song.as_ref().map(|x| x.id.as_str()), s.queue.source.as_str()), (Some("1"), "Road"));
     }
 
@@ -1274,30 +1274,30 @@ mod uzu {
         c.tracks[3].playable = false;
         let up = |s: &State| s.queue.up_next().map(|x| x.id.clone()).collect::<Vec<_>>();
         // `index` is a position within `order`: here the song "4", then the rest as sorted.
-        s.ctl_play_collection(&c, Some(1), Some(&[2, 4, 0, 3, 1])).unwrap();
+        s.ctl_play_collection(&c, Some(1), Some(&[2, 4, 0, 3, 1]), None).unwrap();
         assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("4"));
         assert_eq!(up(&s), ["0", "3", "1"]);
         assert_eq!(s.queue.source, "Road");
         // No index: from the first playable song of the order.
         s.last_play = None;
-        s.ctl_play_collection(&c, None, Some(&[3, 1, 0, 2, 4])).unwrap();
+        s.ctl_play_collection(&c, None, Some(&[3, 1, 0, 2, 4]), None).unwrap();
         assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("1"));
         assert_eq!(up(&s), ["0", "2", "4"]);
         // With shuffle: it still starts at the chosen song, the rest in some order.
         s.set_shuffle(true);
         s.last_play = None;
-        s.ctl_play_collection(&c, Some(0), Some(&[4, 3, 2, 1, 0])).unwrap();
+        s.ctl_play_collection(&c, Some(0), Some(&[4, 3, 2, 1, 0]), None).unwrap();
         assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("4"));
         let mut rest = up(&s);
         rest.sort();
         assert_eq!(rest, ["0", "1", "2", "3"]);
         // The position is checked against the reordered list, and so are the indices.
         s.last_play = None;
-        assert_eq!(s.ctl_play_collection(&c, Some(1), Some(&[0, 3, 2])), Err("“Song 3” isn't available on Apple Music".into()));
-        assert_eq!(s.ctl_play_collection(&c, Some(3), Some(&[0, 1, 2])), Err("“Road” has 3 songs".into()));
+        assert_eq!(s.ctl_play_collection(&c, Some(1), Some(&[0, 3, 2]), None), Err("“Song 3” isn't available on Apple Music".into()));
+        assert_eq!(s.ctl_play_collection(&c, Some(3), Some(&[0, 1, 2]), None), Err("“Road” has 3 songs".into()));
         let stale = Err("this list changed since it was loaded; press R to reload".to_string());
-        assert_eq!(s.ctl_play_collection(&c, Some(0), Some(&[0, 5])), stale);
-        assert_eq!(s.ctl_play_collection(&c, None, Some(&[9])), stale);
+        assert_eq!(s.ctl_play_collection(&c, Some(0), Some(&[0, 5]), None), stale);
+        assert_eq!(s.ctl_play_collection(&c, None, Some(&[9]), None), stale);
     }
 
     #[test]
@@ -1306,7 +1306,7 @@ mod uzu {
         let mut c = playlist("p.1", "v1");
         c.tracks = (1..=50).map(|i| song(&i.to_string())).collect();
         c.tracks[0].playable = false;
-        s.ctl_play_collection(&c, None, None).unwrap();
+        s.ctl_play_collection(&c, None, None, None).unwrap();
         assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("2"));
         s.set_shuffle(true);
         crate::state::queue::seed_for_tests(11);
@@ -1314,14 +1314,14 @@ mod uzu {
             .map(|_| {
                 s.last_play = None; // not a double-click
                 s.playback.state = PlayState::Stopped; // nor a click on the song still loading
-                s.ctl_play_collection(&c, None, None).unwrap();
+                s.ctl_play_collection(&c, None, None, None).unwrap();
                 s.playback.song.clone().unwrap().id
             })
             .collect();
         assert!(firsts.len() > 3, "random starts: {firsts:?}");
         assert!(!firsts.contains("1"), "never the unplayable one");
         c.tracks.iter_mut().for_each(|t| t.playable = false);
-        assert!(s.ctl_play_collection(&c, None, None).is_err());
+        assert!(s.ctl_play_collection(&c, None, None, None).is_err());
     }
 
     #[test]
@@ -1350,10 +1350,10 @@ mod uzu {
     #[test]
     fn jump_seek_shuffle_and_repeat() {
         let mut s = State::offline();
-        assert_eq!(s.ctl_jump(0), Err("Up Next is empty".into()));
+        assert_eq!(s.ctl_jump(0, None), Err("Up Next is empty".into()));
         s.play_list(&[song("1"), song("2"), song("3")], 0, "Mix");
-        assert_eq!(s.ctl_jump(5), Err("Up Next has 2 songs".into()));
-        assert_eq!(s.ctl_jump(1), Ok(()));
+        assert_eq!(s.ctl_jump(5, None), Err("there is no song 6 in Up Next (it has 2)".into()));
+        assert_eq!(s.ctl_jump(1, None), Ok(()));
         assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("3"));
         s.ctl_seek(ctl::SeekTo::Percent(50.0));
         assert_eq!(s.playback.position, 100.0);
@@ -1535,13 +1535,13 @@ fn uzu_sees_the_next_lap_and_can_jump_into_it() {
     assert_eq!(q.up_next.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["3"]);
     assert_eq!(q.next_lap.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["1", "2", "3"], "without shuffle the list order");
     assert_eq!(q.repeat, ctl::RepeatMode::All);
-    assert_eq!(s.ctl_jump(5), Err("Up Next has 4 songs".into()));
-    assert_eq!(s.ctl_jump(2), Ok(()), "entry 3 is the second song of the next lap");
+    assert_eq!(s.ctl_jump(5, None), Err("there is no song 6 in Up Next (it has 4)".into()));
+    assert_eq!(s.ctl_jump(2, None), Ok(()), "entry 3 is the second song of the next lap");
     assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("2"));
     assert_eq!(s.ctl_queue().up_next.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["3"]);
     s.set_repeat(Repeat::Off);
     assert!(s.ctl_queue().next_lap.is_empty());
-    assert_eq!(s.ctl_jump(1), Err("Up Next has 1 songs".into()));
+    assert_eq!(s.ctl_jump(1, None), Err("there is no song 2 in Up Next (it has 1)".into()));
 }
 
 // ------------------------------------------------------------------------ stations
@@ -1573,7 +1573,7 @@ fn a_station_lists_the_songs_it_picked_and_uzu_sees_them() {
     assert_eq!(q.station.as_deref(), Some("Stazione di Thomas"));
     assert_eq!(q.up_next.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["u"]);
     assert_eq!((q.queued, q.station_played.iter().map(|x| x.id.as_str()).collect::<Vec<_>>()), (1, vec!["b", "a"]));
-    assert_eq!(s.ctl_jump(3), Err("Up Next has 3 songs".into()));
+    assert_eq!(s.ctl_jump(3, None), Err("there is no song 4 in Up Next (it has 3)".into()));
     // A normal list drops the station.
     s.play_list(&[song("x")], 0, "Mix");
     assert!(s.queue.station.is_none() && s.ctl_queue().station.is_none());
@@ -1586,7 +1586,7 @@ fn a_played_song_replays_alone_then_the_station_picks_up() {
     for id in ["a", "b", "c"] {
         heard(&mut s, id);
     }
-    assert_eq!(s.ctl_jump(1), Ok(()), "entry 1 is the older of the two played songs");
+    assert_eq!(s.ctl_jump(1, None), Ok(()), "entry 1 is the older of the two played songs");
     assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("a"));
     assert_eq!(played_ids(&s), ["c", "b"]);
     heard(&mut s, "a"); // MusicKit says the same
@@ -1610,7 +1610,7 @@ fn repeat_all_does_not_loop_a_replayed_station_song() {
     for id in ["a", "b"] {
         heard(&mut s, id);
     }
-    assert_eq!(s.ctl_jump(0), Ok(()));
+    assert_eq!(s.ctl_jump(0, None), Ok(()));
     assert!(s.queue.next_lap_songs().is_empty());
     assert!(s.queue.peek_next(Repeat::All).is_none());
 }
@@ -2400,7 +2400,7 @@ mod local_tabs {
         let (loaded, _) = s.ctl_lookup(&albums[0].id);
         let c = loaded.unwrap();
         assert_eq!(c.tracks.len(), 3);
-        s.ctl_play_collection(&c, Some(1), None).unwrap();
+        s.ctl_play_collection(&c, Some(1), None, None).unwrap();
         assert_eq!(local_sent(&s), ["play Middle"]);
     }
 }
@@ -3233,3 +3233,109 @@ fn previous_to_a_song_that_autoplay_also_suggests_stays_in_the_list() {
     s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("a")))));
     assert_eq!((s.queue.pos, s.queue.context.len(), s.queue.autoplay.len()), (0, 2, 2));
 }
+
+// ------------------------------------------------------------------- review 2026-11-23 (uzu)
+
+/// R6: `Jump` is documented (`uzumaki_ctl::Request::Jump`) and used by the TUI (Enter on a row
+/// under "∞ AutoPlay") with AutoPlay's songs numbered after Up Next and the next lap, and
+/// `Queue::jump` handles them, but `ctl_jump`'s range check leaves `autoplay.len()` out: Enter
+/// on a suggestion answers "Up Next has N songs".
+#[test]
+fn review_uzu_jump_takes_autoplay_numbers() {
+    let mut s = playing_with_autoplay(&["a"], 4);
+    let q = s.ctl_queue();
+    assert_eq!((q.up_next.len(), q.next_lap.len(), q.autoplay.len()), (0, 0, 4));
+    // The TUI's row "3" under AutoPlay: up_next + next_lap + 2.
+    assert_eq!(s.ctl_jump(2, None), Ok(()), "Enter on the third AutoPlay suggestion");
+    assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("ap2"));
+}
+
+/// Review 2026-11-23 (state, C2): uzu lists AutoPlay's suggestions (numbered after Up Next, as
+/// the TUI's rows) and sends `Jump` for them, as the window's click does (`play_up_next`).
+#[test]
+fn review_uzu_jump_reaches_autoplay_suggestions() {
+    let mut s = State::offline();
+    s.session.authorized = true;
+    let list = vec![song("a"), song("b")];
+    s.play_songs(&list, 0);
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("a")))));
+    let run = s.queue.run;
+    s.apply_msg(Msg::AutoplayStation { run, result: Ok("st.1".into()) });
+    s.apply_msg(Msg::AutoplayTracks { run, result: Ok((0..4).map(|i| song(&format!("ap{i}"))).collect()) });
+    let q = s.ctl_queue();
+    assert_eq!((q.up_next.len(), q.next_lap.len(), q.autoplay.len()), (1, 0, 4));
+    // The third suggestion, as the TUI numbers it (0-based: up_next + next_lap + 2).
+    let r = s.ctl_jump(q.up_next.len() + q.next_lap.len() + 2, None);
+    assert_eq!(r, Ok(()), "uzu can't play an AutoPlay song it lists");
+    assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("ap2"));
+}
+
+/// Review 2026-11-23 (uzu R3/R4): requests that number a song carry its id; when the list moved
+/// on since the client fetched it (a song ended, one was added), the app acts on that song where
+/// it is now, or refuses when it is gone, instead of acting on whatever the number points at.
+#[test]
+fn uzu_numbers_with_ids_follow_the_song() {
+    let mut s = State::offline();
+    let list: Vec<Song> = (1..=8).map(|i| song(&i.to_string())).collect();
+    s.play_list(&list, 0, "Mix");
+    let up = |s: &State| s.ctl_queue().up_next.iter().map(|x| x.id.clone()).collect::<Vec<_>>();
+    assert_eq!(up(&s), ["2", "3", "4", "5", "6", "7", "8"], "what the client printed");
+    // Song 1 ends: everything moves up by one.
+    s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("2")))));
+    // Printed #4 ("5") to printed #2's place (before "3").
+    s.ctl_move(3, 1, Some("5")).unwrap();
+    assert_eq!(up(&s), ["5", "3", "4", "6", "7", "8"]);
+    // Printed #6 ("7", index 5) is at index 4 now.
+    s.ctl_remove(&[5], &["7".into()]).unwrap();
+    assert_eq!(up(&s), ["5", "3", "4", "6", "8"]);
+    // A song that is gone: nothing changes.
+    let gone = "the queue changed and that song is no longer in it (run uzu queue again)";
+    assert_eq!(s.ctl_remove(&[0, 1], &["5".into(), "x".into()]), Err(gone.into()));
+    assert_eq!(s.ctl_move(0, 1, Some("x")), Err(gone.into()));
+    assert_eq!(s.ctl_jump(0, Some("x")), Err(gone.into()));
+    assert_eq!(up(&s), ["5", "3", "4", "6", "8"]);
+    // Old clients: the number alone, as before.
+    s.ctl_remove(&[0], &[]).unwrap();
+    assert_eq!(up(&s), ["3", "4", "6", "8"]);
+    // Jump to "6", numbered 4 in an older listing.
+    assert_eq!(s.ctl_jump(3, Some("6")), Ok(()));
+    assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("6"));
+    assert_eq!(s.ctl_history(0, Some("x")), Err("the history changed and that song is no longer in it (run uzu queue again)".into()));
+}
+
+/// Review 2026-11-23 (uzu R3): Enter on a playlist song plays that song after the playlist
+/// changed (a song added at the top); a sorted list that changed, or a song gone, is refused.
+#[test]
+fn uzu_play_collection_with_a_song_id_plays_that_song() {
+    let mut s = State::offline();
+    let mut c = playlist("p.1", "v1");
+    c.title = "Road".into();
+    c.tracks = vec![song("new"), song("a"), song("b"), song("c")];
+    // The client saw a, b, c: "b" was number 2 (index 1).
+    assert_eq!(s.ctl_play_collection(&c, Some(1), None, Some("b")), Ok(()));
+    assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("b"));
+    assert_eq!(s.queue.up_next().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["c"], "the list as it is now, from b");
+    let e = s.ctl_play_collection(&c, Some(1), None, Some("gone")).unwrap_err();
+    assert!(e.contains("“Road” changed and that song is no longer in it"), "{e}");
+    let e = s.ctl_play_collection(&c, Some(0), Some(&[2, 1, 0]), Some("c")).unwrap_err();
+    assert!(e.contains("“Road” changed since uzu loaded it"), "{e}");
+    // The song where the client saw it: played as before (sorted too).
+    assert_eq!(s.ctl_play_collection(&c, Some(0), Some(&[3, 2, 1]), Some("c")), Ok(()));
+    assert_eq!(s.playback.song.as_ref().map(|x| x.id.as_str()), Some("c"));
+}
+
+/// The queue's number (`Queue::run`, for uzu's filter) changes with a new list, also one with
+/// the same name, and not with edits.
+#[test]
+fn ctl_queue_numbers_each_queue() {
+    let mut s = State::offline();
+    s.play_list(&[song("1"), song("2"), song("3")], 0, "");
+    let first = s.ctl_queue().run;
+    assert!(first.is_some());
+    s.ctl_remove(&[0], &[]).unwrap();
+    s.add_to_queue(&[song("9")]);
+    assert_eq!(s.ctl_queue().run, first, "edits keep it");
+    s.play_list(&[song("4"), song("5")], 0, "");
+    assert_ne!(s.ctl_queue().run, first, "another search played from the window: same name, new queue");
+}
+
