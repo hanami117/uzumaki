@@ -5,6 +5,11 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Fixed
+- **uzu:** the Queue screen kept showing an old list when a filter (`/`) was on and another playlist started from
+  the window. A queue from another source now clears the filter and says so. With this app version the screen also
+  follows every queue change within half a second, instead of every 3 s.
+
 ## [0.4.1] - 2026-11-23
 
 Mixed playlists (Apple Music songs and your own files together), AirPlay on Linux, and JPEG XL pictures. You need
