@@ -6,6 +6,9 @@ takes each release's notes from its section here.
 ## [Unreleased]
 
 ### Added
+- **JPEG XL pictures.** Playlist pictures (New Playlist, Choose Picture…) and the Appearance background picture
+  now accept `.jxl` files besides PNG and JPEG. A JPEG XL is converted like any other picture (an animated one gives
+  its first frame), so nothing is stored as JPEG XL.
 - **Mixed playlists.** "Add to Playlist" now works on local files (the song menu, Local Files, several songs at
   once, or a drag onto a playlist). In your Apple Music playlists they are kept on this computer only, marked with
   a small icon: Apple Music can't hold your own files and nothing is sent to it. They keep their place next to the

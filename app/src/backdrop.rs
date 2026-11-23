@@ -453,7 +453,7 @@ fn load(source: &Source, online: bool) -> Result<image::RgbaImage, String> {
         Source::Url(url) if !online && !url.starts_with("file://") => return Err("offline".into()),
         Source::Url(url) => crate::art::bytes_blocking(url)?,
     };
-    let img = image::load_from_memory(&bytes).map_err(|e| format!("not a readable picture ({e})"))?;
+    let img = crate::picture::decode(&bytes, false)?;
     drop(bytes);
     let img = if img.width().max(img.height()) > MAX_SIDE {
         let k = MAX_SIDE as f32 / img.width().max(img.height()) as f32;

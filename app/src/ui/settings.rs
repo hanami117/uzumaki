@@ -544,7 +544,7 @@ fn row_el(r: &Rx, id: Row) -> El {
                 .on_press_tx(|_s: &mut State, tx: &mut rune::Tx| {
                     tx.open_file(
                         rune::FileDialogOptions { title: "Choose a background picture".into(), ..Default::default() }
-                            .filter("Pictures", &["png", "jpg", "jpeg"]),
+                            .filter("Pictures", crate::picture::EXTENSIONS),
                         |s: &mut State, result: rune::FileDialogResult, _tx: &mut rune::Tx| match result {
                             Ok(Some(path)) => s.set_bg_picture(path),
                             Ok(None) => {} // cancelled

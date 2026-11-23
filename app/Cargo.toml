@@ -13,6 +13,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = "3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# JPEG XL pictures (picture.rs): pure Rust, MIT OR Apache-2.0, no C library, no colour-management
+# crate (default features off also drops rayon).
+jxl-oxide = { version = "0.12", default-features = false }
 uzumaki-fx = { path = "../fx" }
 # The `uzu` control protocol and socket (the app answers, `uzu` asks).
 uzumaki-ctl = { path = "../ctl" }
