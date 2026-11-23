@@ -314,7 +314,7 @@ impl State {
 
     /// Greys out a song Apple couldn't find, wherever this session lists it, so it isn't queued
     /// again (until the list reloads from Apple).
-    fn mark_unavailable(&mut self, song: &Song) {
+    pub(super) fn mark_unavailable(&mut self, song: &Song) {
         self.for_each_song(|s| {
             if s.same_track(song) {
                 s.playable = false;

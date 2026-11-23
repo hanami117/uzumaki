@@ -106,6 +106,7 @@ impl State {
             Event::PlayState(state) => {
                 if state == PlayState::Playing {
                     self.starting = None;
+                    self.skipped_in_row = 0;
                 }
                 if state == self.playback.state {
                     return false;
@@ -116,13 +117,37 @@ impl State {
                 }
             }
             Event::Time { current, duration } => return self.apply_time(current, duration),
-            Event::Error(e) => {
-                self.starting = None;
-                self.toast = Some(e);
-            }
+            Event::Error(e) => self.local_failed(e),
             _ => return false,
         }
         true
+    }
+
+    /// The local player couldn't open the current file (deleted, renamed, on a drive that's gone,
+    /// or not decodable): like an Apple song that isn't available, it is skipped (up to
+    /// `MAX_SKIPS` in a row), and a file that's gone is greyed wherever it is listed.
+    fn local_failed(&mut self, error: String) {
+        self.starting = None;
+        let Some(song) = self.playback.song.clone().filter(Song::is_local) else {
+            self.toast = Some(error);
+            return;
+        };
+        if song.local_path().is_some_and(|p| !p.exists()) {
+            self.mark_unavailable(&song);
+        }
+        self.skipped_in_row += 1;
+        let next = if self.skipped_in_row < MAX_SKIPS { self.queue.advance(self.playback.repeat) } else { None };
+        match next {
+            Some(next) => {
+                self.toast = Some(format!("{error}. Skipped."));
+                self.begin_current(next);
+            }
+            None => {
+                // The player's Stopped follows.
+                self.toast = Some(error);
+                self.skipped_in_row = 0;
+            }
+        }
     }
 
     /// A local file played to its end: the app decides what's next.

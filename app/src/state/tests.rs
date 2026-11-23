@@ -3343,3 +3343,14 @@ fn a_crashed_engine_restarts_a_few_times_then_waits_for_the_user() {
     assert_eq!(started(&starts), 5);
     s.engine.as_ref().unwrap().shutdown();
 }
+
+/// Only greyed rows after a local file: nothing plays next and the queue stays where it was.
+#[test]
+fn only_greyed_rows_left_after_a_local_file_end_the_list_in_place() {
+    let mut s = State::offline();
+    let missing = Song { playable: false, ..local("missing") };
+    s.play_list(&[local("x"), missing.clone(), missing], 0, "Mix");
+    from_local(&mut s, Event::PlayState(PlayState::Ended));
+    assert_eq!(s.queue.pos, 0);
+    assert_eq!(local_sent(&s), ["play x"]);
+}

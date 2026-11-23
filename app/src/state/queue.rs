@@ -404,7 +404,28 @@ impl PlayQueue {
     /// the app, not MusicKit, decides what plays next: after a local file, and at the edge
     /// between an Apple run and a local file. MusicKit's queue starts again from the new song,
     /// so `base` moves with it.
+    /// Greyed songs (unavailable, a missing file, explicit when those are refused) are passed
+    /// over, as MusicKit's queue never gets them (`upcoming_ids`); when nothing playable follows,
+    /// the queue is left as it was.
     pub fn advance(&mut self, repeat: Repeat) -> Option<Song> {
+        let greyed = self.context.iter().chain(&self.user).chain(&self.autoplay).any(|s| !self.can_bridge(s));
+        if !greyed {
+            return self.advance_once(repeat);
+        }
+        let before = self.clone();
+        let limit = self.context.len() + self.user.len() + self.autoplay.len() + 1;
+        for _ in 0..limit {
+            match self.advance_once(repeat) {
+                Some(s) if !self.can_bridge(&s) => continue,
+                Some(s) => return Some(s),
+                None => break,
+            }
+        }
+        *self = before;
+        None
+    }
+
+    fn advance_once(&mut self, repeat: Repeat) -> Option<Song> {
         if self.station_live() {
             return self.station_take_user();
         }
