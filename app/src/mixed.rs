@@ -165,6 +165,9 @@ pub enum Loaded {
     Newer(Store),
     /// Unreadable: kept aside as `.bad`, the app starts empty.
     Broken,
+    /// There, but reading it failed (permissions, I/O): shown empty and never written over,
+    /// since it may be the only copy of the user's Uzumaki playlists.
+    Unreadable(String),
 }
 
 impl Store {
@@ -182,7 +185,11 @@ impl Store {
 
     /// Reads `path` (see `Loaded`).
     pub fn read(path: &Path) -> Loaded {
-        let Ok(bytes) = std::fs::read(path) else { return Loaded::Ok(Store::default()) };
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Loaded::Ok(Store::default()),
+            Err(e) => return Loaded::Unreadable(e.to_string()),
+        };
         let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
             set_aside(path);
             return Loaded::Broken;
@@ -705,5 +712,6 @@ mod review_edges {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert_ne!(loaded, Loaded::Ok(Store::default()), "an unreadable file reads as an empty, writable store");
+        assert!(matches!(loaded, Loaded::Unreadable(_)), "{loaded:?}");
     }
 }

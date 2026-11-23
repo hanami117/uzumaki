@@ -766,6 +766,9 @@ impl State {
         s.session.storefront = s.settings.storefront.as_ref().map(|f| f.id.clone());
         // "Show on Discord", when it was left on (no thread at all otherwise).
         s.discord_configure();
+        if let Some(w) = s.mixed.warning.take() {
+            s.toast = Some(w);
+        }
         s
     }
 

@@ -34,6 +34,8 @@ pub struct Mixed {
     path: Option<PathBuf>,
     /// The file was written by a newer Uzumaki: shown, never written over.
     read_only: bool,
+    /// Why the file couldn't be read, shown once at startup.
+    pub warning: Option<String>,
     /// The Uzumaki playlists as sidebar entries (no songs), newest first.
     pub cards: Vec<Collection>,
     index: RefCell<IndexSlot>,
@@ -47,6 +49,7 @@ impl Mixed {
             return Self::default();
         }
         let path = mx::path();
+        let mut warning = None;
         let (store, read_only) = match Store::read(&path) {
             mx::Loaded::Ok(s) => (s, false),
             mx::Loaded::Newer(s) => {
@@ -57,8 +60,13 @@ impl Mixed {
                 eprintln!("uzumaki: {} was unreadable; kept as playlists.json.bad", path.display());
                 (Store::default(), false)
             }
+            mx::Loaded::Unreadable(e) => {
+                eprintln!("uzumaki: can't read {}: {e}; playlist changes won't be saved", path.display());
+                warning = Some(format!("Couldn't read your Uzumaki playlists ({e}). They're kept as they are; changes won't be saved until the app can read playlists.json."));
+                (Store::default(), true)
+            }
         };
-        let mut m = Self { store, path: Some(path), read_only, ..Self::default() };
+        let mut m = Self { store, path: Some(path), read_only, warning, ..Self::default() };
         m.cards = cards(&m.store);
         m
     }
