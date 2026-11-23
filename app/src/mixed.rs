@@ -707,6 +707,11 @@ mod review_edges {
         store.playlists.push(UzuPlaylist { id: "u.1".into(), name: "Mine".into(), description: None, created: 1, modified: 1, entries: vec![] });
         store.write(&path).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&path).is_ok() {
+            // Root (a Docker run) reads it anyway: nothing to test here.
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
         let loaded = Store::read(&path);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
