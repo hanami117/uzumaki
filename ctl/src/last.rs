@@ -12,10 +12,20 @@ use uzumaki_ctl::Kind;
 pub enum Last {
     /// `playlists` / `albums`: the ids in printed numbering (a filter keeps the original numbers).
     Collections { kind: Kind, ids: Vec<String> },
-    /// `playlist X` / `album X`: the songs of that collection.
-    Songs { kind: Kind, id: String },
-    /// `search`: the app keeps the results.
-    Search,
+    /// `playlist X` / `album X`: the songs of that collection, with their ids as printed (empty
+    /// in a record from an older uzu: then n is the song's place in the list now).
+    Songs {
+        kind: Kind,
+        id: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        songs: Vec<String>,
+    },
+    /// `search`: the app keeps the results; `ids` are the songs as printed (empty in a record
+    /// from an older uzu: then n is a result of the app's last search, whoever made it).
+    Search {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ids: Vec<String>,
+    },
     /// `queue`: the up-next song ids as printed.
     Queue { ids: Vec<String> },
 }
@@ -49,13 +59,20 @@ mod tests {
         assert_eq!(load(&path), None);
         for last in [
             Last::Collections { kind: Kind::Album, ids: vec!["l.1".into(), "l.2".into()] },
-            Last::Songs { kind: Kind::Playlist, id: "p.x".into() },
-            Last::Search,
+            Last::Songs { kind: Kind::Playlist, id: "p.x".into(), songs: vec![] },
+            Last::Songs { kind: Kind::Playlist, id: "p.x".into(), songs: vec!["a".into(), "b".into()] },
+            Last::Search { ids: vec![] },
+            Last::Search { ids: vec!["a".into()] },
             Last::Queue { ids: vec!["s1".into(), "s1".into()] },
         ] {
             save(&path, &last);
             assert_eq!(load(&path), Some(last));
         }
+        // Records written by an older uzu still read.
+        std::fs::write(&path, r#"{"list":"search"}"#).unwrap();
+        assert_eq!(load(&path), Some(Last::Search { ids: vec![] }));
+        std::fs::write(&path, r#"{"list":"songs","kind":"album","id":"l.1"}"#).unwrap();
+        assert_eq!(load(&path), Some(Last::Songs { kind: Kind::Album, id: "l.1".into(), songs: vec![] }));
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(load(&path), None);
         let _ = std::fs::remove_dir_all(&dir);

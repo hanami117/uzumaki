@@ -795,7 +795,7 @@ mod review_edges {
         let (s, lossy) = Settings::parse(&serde_json::to_vec(&v).unwrap());
         assert!(lossy);
         assert_eq!((s.shuffle, s.onboarded), (false, Some(4)));
-        assert_eq!(Settings::parse(b"[1, 2]").1, true, "not an object: defaults, reported");
+        assert!(Settings::parse(b"[1, 2]").1, "not an object: defaults, reported");
         // A pin of a kind this version doesn't know drops that pin only.
         let mut v = serde_json::to_value(Settings::default()).unwrap();
         let pin = serde_json::json!({"kind": "Playlist", "id": "p.1", "title": "Mine"});

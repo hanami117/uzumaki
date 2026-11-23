@@ -52,6 +52,13 @@ pub fn repeat_from(m: ctl::RepeatMode) -> Repeat {
     }
 }
 
+fn kind_word(c: &Collection) -> &'static str {
+    match c.kind {
+        CollectionKind::Album => "album",
+        CollectionKind::Playlist => "playlist",
+    }
+}
+
 fn play_state(p: PlayState) -> ctl::PlayState {
     match p {
         PlayState::Playing => ctl::PlayState::Playing,
@@ -96,6 +103,16 @@ pub fn lyrics_reply(song_id: &str, l: &crate::lyrics::Lyrics) -> ctl::Reply {
             .collect(),
     }
 }
+
+/// Where song `id` is in `ids` now, for a request that numbered it `index` in a list the client
+/// fetched earlier: `index` itself when it still holds that song, else the nearest place that
+/// does (not one of `taken`). `None`: the song is gone.
+fn locate(ids: &[String], index: usize, id: &str, taken: &[usize]) -> Option<usize> {
+    ids.iter().enumerate().filter(|&(k, x)| x == id && !taken.contains(&k)).min_by_key(|&(k, _)| k.abs_diff(index)).map(|(k, _)| k)
+}
+
+/// What a request that names a song gone from the queue answers.
+const QUEUE_CHANGED: &str = "the queue changed and that song is no longer in it (run uzu queue again)";
 
 fn lyrics_state(song_id: &str, status: ctl::LyricsStatus) -> ctl::Reply {
     ctl::Reply::Lyrics { song_id: song_id.to_string(), status, lines: Vec::new() }
@@ -195,7 +212,25 @@ impl State {
             station_played: self.queue.station_played().iter().map(song_info).collect(),
             autoplay: self.queue.autoplay.iter().map(song_info).collect(),
             autoplay_on: self.autoplay_offered().then_some(self.settings.autoplay),
+            run: Some(self.queue.run),
         }
+    }
+
+    /// The ids of the entries `Jump` numbers, in its order: Up Next, the next lap, AutoPlay's
+    /// suggestions, then the songs a station played (as `ctl_queue` lists them).
+    fn ctl_jump_ids(&self) -> Vec<String> {
+        let lap = self.queue.next_lap_songs();
+        self.queue
+            .up_next()
+            .chain(lap.iter())
+            .chain(self.queue.autoplay.iter())
+            .chain(self.queue.station_played().iter())
+            .map(|s| s.id.clone())
+            .collect()
+    }
+
+    fn ctl_up_next_ids(&self) -> Vec<String> {
+        self.queue.up_next().map(|s| s.id.clone()).collect()
     }
 
     /// The library's playlists: those pinned in the sidebar first, in pin order (marked with
@@ -313,7 +348,10 @@ impl State {
     /// `order` (song indices into `c.tracks`) plays them in that order instead, and `index` is a
     /// position within it; an index past the songs is an error (the list changed since the
     /// client loaded it). An empty `order` is the same as none.
-    pub fn ctl_play_collection(&mut self, c: &Collection, index: Option<usize>, order: Option<&[usize]>) -> Result<(), String> {
+    ///
+    /// `song_id`: the song the client showed at `index`. When the list changed since, that song
+    /// plays from where it is now; gone (or a sorted list that changed) is an error.
+    pub fn ctl_play_collection(&mut self, c: &Collection, index: Option<usize>, order: Option<&[usize]>, song_id: Option<&str>) -> Result<(), String> {
         // With the local songs of its overlay: `Tracks` listed them so (`mixed.rs`).
         let all = self.playlist_songs(c);
         let reordered: Vec<Song>;
@@ -337,6 +375,20 @@ impl State {
             }
             return Ok(());
         }
+        let index = match (index, song_id) {
+            (Some(i), Some(want)) if tracks.get(i).is_none_or(|s| s.id != want) => {
+                if order.is_some_and(|o| !o.is_empty()) {
+                    // The order was made from the old list: no telling what it means now.
+                    return Err(format!("“{}” changed since uzu loaded it: reload it (R, or uzu {} again)", c.title, kind_word(c)));
+                }
+                let ids: Vec<String> = tracks.iter().map(|s| s.id.clone()).collect();
+                match locate(&ids, i, want, &[]) {
+                    Some(k) => Some(k),
+                    None => return Err(format!("“{}” changed and that song is no longer in it: reload it (R, or uzu {} again)", c.title, kind_word(c))),
+                }
+            }
+            (index, _) => index,
+        };
         let playable: Vec<usize> = (0..tracks.len()).filter(|&i| tracks[i].playable).collect();
         let index = match index {
             Some(i) => i,
@@ -354,31 +406,73 @@ impl State {
         Ok(())
     }
 
-    pub fn ctl_jump(&mut self, index: usize) -> Result<(), String> {
-        let n = self.queue.up_next_len() + self.queue.next_lap_songs().len() + self.queue.station_played().len();
+    /// `Jump`: entry `index` in `ctl_jump_ids`' order; with `id`, that song wherever it is now.
+    pub fn ctl_jump(&mut self, index: usize, id: Option<&str>) -> Result<(), String> {
+        let ids = self.ctl_jump_ids();
+        let index = match id {
+            Some(id) => locate(&ids, index, id, &[]).ok_or(QUEUE_CHANGED)?,
+            None => index,
+        };
+        let n = ids.len();
         if index >= n {
             return Err(match n {
                 0 => "Up Next is empty".into(),
-                n => format!("Up Next has {n} songs"),
+                n => format!("there is no song {} in Up Next (it has {n})", index + 1),
             });
         }
         self.play_up_next(index);
         Ok(())
     }
 
-    /// `uzu move`: Up Next entry `from` to index `to` (0-based).
-    pub fn ctl_move(&mut self, from: usize, to: usize) -> Result<(), String> {
-        let n = self.queue.up_next().count();
+    /// `History`: entry `index` of the session history (oldest first, as `ctl_queue` lists it);
+    /// with `id`, that song wherever it is now.
+    pub fn ctl_history(&mut self, index: usize, id: Option<&str>) -> Result<(), String> {
+        let entries = self.history_indices();
+        let index = match id {
+            Some(id) => {
+                let ids: Vec<String> = entries.iter().map(|&i| self.history.tracks[i].1.id.clone()).collect();
+                locate(&ids, index, id, &[]).ok_or("the history changed and that song is no longer in it (run uzu queue again)")?
+            }
+            None => index,
+        };
+        let Some(&i) = entries.get(index) else { return Err("History entry no longer exists".into()) };
+        self.play_history(i);
+        Ok(())
+    }
+
+    /// `uzu move`: Up Next entry `from` to index `to` (0-based). With `id` (the song at `from`)
+    /// found elsewhere, `to` moves by as much.
+    pub fn ctl_move(&mut self, from: usize, to: usize, id: Option<&str>) -> Result<(), String> {
+        let ids = self.ctl_up_next_ids();
+        let n = ids.len();
+        let (from, to) = match id {
+            Some(id) => {
+                let now = locate(&ids, from, id, &[]).ok_or(QUEUE_CHANGED)?;
+                (now, (to + now).saturating_sub(from).min(n.saturating_sub(1)))
+            }
+            None => (from, to),
+        };
         self.check_up_next(n, &[from, to])?;
         self.move_up_next(from, to);
         Ok(())
     }
 
-    /// `uzu del`: removes Up Next entries (0-based).
-    pub fn ctl_remove(&mut self, indices: &[usize]) -> Result<(), String> {
-        let n = self.queue.up_next().count();
-        self.check_up_next(n, indices)?;
-        self.remove_up_next_many(indices);
+    /// `uzu del`: removes Up Next entries (0-based). `ids` (when given, one per index): the songs
+    /// meant, wherever they are now; one gone removes nothing.
+    pub fn ctl_remove(&mut self, indices: &[usize], ids: &[String]) -> Result<(), String> {
+        let now = self.ctl_up_next_ids();
+        let n = now.len();
+        let mut found = Vec::with_capacity(indices.len());
+        if !ids.is_empty() && ids.len() == indices.len() {
+            for (&i, id) in indices.iter().zip(ids) {
+                let k = locate(&now, i, id, &found).ok_or(QUEUE_CHANGED)?;
+                found.push(k);
+            }
+        } else {
+            found.extend_from_slice(indices);
+        }
+        self.check_up_next(n, &found)?;
+        self.remove_up_next_many(&found);
         Ok(())
     }
 

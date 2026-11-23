@@ -214,34 +214,77 @@ pub enum Request {
     /// them, for a list the user sorted. `index` is then a position within `order`, not a song
     /// number. An index out of range is an error ("this list changed since it was loaded").
     /// Absent (old clients) or `None`: the collection's own order.
+    ///
+    /// `song_id`: the id of the song the client shows at `index` (in `order` when given). The app
+    /// plays that song: from `index` when it is still there, else from its new place in the list;
+    /// a song no longer in it (or a sorted list that changed) is an error ("this list changed").
+    /// Absent (old clients): `index` alone. An app older than this ignores it.
     PlayCollection {
         kind: Kind,
         id: String,
         index: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         order: Option<Vec<usize>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        song_id: Option<String>,
     },
     /// Now playing and Up Next. Replies `Queue`.
     Queue,
     /// Plays entry `index` (0-based) of `Queue::up_next`, then of `Queue::next_lap`, then of
     /// `Queue::autoplay`, then of `Queue::station_played`, now. Replies `Status`.
-    Jump { index: usize },
+    ///
+    /// `id` (here and in `History`, `Move`, `Remove`, `Pick`): the id of the song the client
+    /// listed at that number. The queue may have moved on since the client fetched it (a song
+    /// ended): the app then acts on that song where it is now, or answers an error when it is
+    /// gone, instead of acting on whatever the number points at now. Absent (old clients): the
+    /// number alone. An app older than these fields ignores them.
+    Jump {
+        index: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
     /// Replay chronological session history entry (0-based). Replies Status.
-    History { index: usize },
+    History {
+        index: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
     /// Moves entry `from` of `Queue::up_next` so it sits at index `to` afterwards (0-based).
+    /// With `id` (the song at `from`) and the song found elsewhere, `to` shifts by as much.
     /// Replies `Queue`.
-    Move { from: usize, to: usize },
-    /// Removes entries of `Queue::up_next` (0-based, any order, repeats ignored). Replies `Queue`.
-    Remove { indices: Vec<usize> },
+    Move {
+        from: usize,
+        to: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
+    /// Removes entries of `Queue::up_next` (0-based, any order, repeats ignored). `ids`: the
+    /// songs at those indices, in the same order (empty: the indices alone). Replies `Queue`.
+    Remove {
+        indices: Vec<usize>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ids: Vec<String>,
+    },
     /// Adds the local file `path` (absolute, in the music folders) to playlist `id`: one of the
     /// user's Apple playlists (the file joins it on this computer only) or an Uzumaki playlist.
     /// Replies `Tracks` (the playlist with its local songs). Older apps answer "bad request".
     PlaylistAddLocal { id: String, path: String },
-    /// Searches Apple Music's catalog for songs. The app remembers the results for `Pick`.
+    /// Searches Apple Music's catalog for songs. The app remembers the results for `Pick` (those
+    /// of its last few searches, whoever asked).
     /// Replies `Songs`.
     Search { query: String },
     /// Acts on songs of the last `Search` (0-based, in the order given). Replies `Status`.
-    Pick { indices: Vec<usize>, action: PickAction },
+    ///
+    /// `ids`: the picked songs' ids, as the client's search listed them. The app then takes them
+    /// from whichever of its recent searches has them, so another client's search in between
+    /// changes nothing, and `indices` are ignored; an id it no longer has is an error ("search
+    /// again"). Empty (old clients): `indices` into the last search. Older apps ignore it.
+    Pick {
+        indices: Vec<usize>,
+        action: PickAction,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ids: Vec<String>,
+    },
     /// The lyrics of the song playing now, from the app's memory (the app fetches them on every
     /// song change; only when they are missing does it ask Apple, once, and answers `loading`
     /// until they land). Replies `Lyrics`. Not part of `Status`: that is polled twice a second
@@ -577,6 +620,12 @@ pub struct Queue {
     /// The AutoPlay setting (∞), when the app says. `None` from an older app.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autoplay_on: Option<bool>,
+    /// Which queue this is: a new number each time a list or station starts (also one with the
+    /// same `source` name, such as two searches or two playlists of the same title); edits,
+    /// shuffle and the songs moving on keep it. Only equality means anything. `None` from an
+    /// older app: compare `source` and `station` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<u64>,
 }
 
 impl std::hash::Hash for SongInfo {
@@ -870,15 +919,90 @@ mod tests {
         assert_ne!(uid(), 0, "tests don't run as root");
     }
 
+    /// The protocol as it was before song ids rode along with numbers (main `d9b1f64`), for the
+    /// compatibility checks below.
+    mod old {
+        use super::super::{Kind, PickAction, RepeatMode, SongInfo};
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        #[serde(tag = "cmd", rename_all = "snake_case")]
+        pub enum Request {
+            PlayCollection {
+                kind: Kind,
+                id: String,
+                index: Option<usize>,
+                #[serde(default, skip_serializing_if = "Option::is_none")]
+                order: Option<Vec<usize>>,
+            },
+            Jump { index: usize },
+            History { index: usize },
+            Move { from: usize, to: usize },
+            Remove { indices: Vec<usize> },
+            Pick { indices: Vec<usize>, action: PickAction },
+        }
+
+        #[derive(Debug, PartialEq, Deserialize)]
+        pub struct Queue {
+            pub current: Option<SongInfo>,
+            pub up_next: Vec<SongInfo>,
+            pub queued: usize,
+            pub source: String,
+            pub shuffle: bool,
+            pub repeat: RepeatMode,
+        }
+    }
+
+    /// Old app + new uzu: the new requests read as the old ones (the ids are ignored, the
+    /// numbers act as before). New app + old uzu: the old requests read with no ids (the numbers
+    /// alone). An old uzu reads a new `Queue` (its `run` is ignored).
+    #[test]
+    fn song_ids_with_numbers_are_compatible_both_ways() {
+        let pairs = [
+            (
+                Request::PlayCollection { kind: Kind::Playlist, id: "p.x".into(), index: Some(2), order: Some(vec![2, 0, 1]), song_id: Some("s".into()) },
+                old::Request::PlayCollection { kind: Kind::Playlist, id: "p.x".into(), index: Some(2), order: Some(vec![2, 0, 1]) },
+                Request::PlayCollection { kind: Kind::Playlist, id: "p.x".into(), index: Some(2), order: Some(vec![2, 0, 1]), song_id: None },
+            ),
+            (Request::Jump { index: 3, id: Some("s".into()) }, old::Request::Jump { index: 3 }, Request::Jump { index: 3, id: None }),
+            (Request::History { index: 1, id: Some("h".into()) }, old::Request::History { index: 1 }, Request::History { index: 1, id: None }),
+            (Request::Move { from: 2, to: 0, id: Some("s".into()) }, old::Request::Move { from: 2, to: 0 }, Request::Move { from: 2, to: 0, id: None }),
+            (Request::Remove { indices: vec![1, 0], ids: vec!["a".into(), "b".into()] }, old::Request::Remove { indices: vec![1, 0] }, Request::Remove { indices: vec![1, 0], ids: vec![] }),
+            (
+                Request::Pick { indices: vec![4], action: PickAction::Add, ids: vec!["x".into()] },
+                old::Request::Pick { indices: vec![4], action: PickAction::Add },
+                Request::Pick { indices: vec![4], action: PickAction::Add, ids: vec![] },
+            ),
+        ];
+        for (new, old_form, new_without_ids) in pairs {
+            let text = serde_json::to_string(&new).unwrap();
+            assert_eq!(serde_json::from_str::<old::Request>(&text).unwrap(), old_form, "an old app reads {text}");
+            assert_eq!(serde_json::from_str::<Request>(&text).unwrap(), new, "round trip {text}");
+            let old_text = serde_json::to_string(&old_form).unwrap();
+            assert_eq!(serde_json::from_str::<Request>(&old_text).unwrap(), new_without_ids, "a new app reads {old_text}");
+            // Without ids, a new uzu sends exactly what an old one did.
+            assert_eq!(serde_json::to_string(&new_without_ids).unwrap(), old_text);
+        }
+        let q = Queue { up_next: vec![SongInfo { id: "a".into(), ..Default::default() }], source: "".into(), run: Some(42), ..Default::default() };
+        let text = serde_json::to_string(&Reply::Queue(q.clone())).unwrap();
+        assert!(text.contains(r#""run":42"#), "{text}");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let old_q: old::Queue = serde_json::from_value(v).unwrap();
+        assert_eq!(old_q.up_next, q.up_next);
+        let without = serde_json::to_string(&Reply::Queue(Queue { run: None, ..q })).unwrap();
+        assert!(!without.contains("run"), "{without}");
+        assert!(matches!(serde_json::from_str::<Reply>(&without), Ok(Reply::Queue(Queue { run: None, .. }))), "an old app's queue");
+    }
+
     #[test]
     fn wire_format_is_readable() {
         let req = Request::Seek { to: SeekTo::Relative(-10.0) };
         assert_eq!(serde_json::to_string(&req).unwrap(), r#"{"cmd":"seek","to":{"relative":-10.0}}"#);
-        let req = Request::PlayCollection { kind: Kind::Playlist, id: "p.x".into(), index: Some(2), order: None };
+        let req = Request::PlayCollection { kind: Kind::Playlist, id: "p.x".into(), index: Some(2), order: None, song_id: None };
         assert_eq!(serde_json::to_string(&req).unwrap(), r#"{"cmd":"play_collection","kind":"playlist","id":"p.x","index":2}"#);
         // An old client's message has no `order`; a new one's round-trips.
         assert_eq!(serde_json::from_str::<Request>(r#"{"cmd":"play_collection","kind":"playlist","id":"p.x","index":2}"#).unwrap(), req);
-        let ordered = Request::PlayCollection { kind: Kind::Album, id: "l.1".into(), index: None, order: Some(vec![2, 0, 1]) };
+        let ordered = Request::PlayCollection { kind: Kind::Album, id: "l.1".into(), index: None, order: Some(vec![2, 0, 1]), song_id: None };
         let text = serde_json::to_string(&ordered).unwrap();
         assert_eq!(text, r#"{"cmd":"play_collection","kind":"album","id":"l.1","index":null,"order":[2,0,1]}"#);
         assert_eq!(serde_json::from_str::<Request>(&text).unwrap(), ordered);
@@ -1098,7 +1222,7 @@ mod history_protocol_tests {
         assert!(queue.history.is_empty());
         queue.history.push(SongInfo { id: "played".into(), ..Default::default() });
         assert_eq!(serde_json::from_str::<Queue>(&serde_json::to_string(&queue).unwrap()).unwrap(), queue);
-        let request = Request::History { index: 2 };
+        let request = Request::History { index: 2, id: None };
         assert_eq!(serde_json::from_str::<Request>(&serde_json::to_string(&request).unwrap()).unwrap(), request);
     }
 }

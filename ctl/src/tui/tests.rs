@@ -259,11 +259,15 @@ impl Rig {
             self.app.handle_key(*k, &mut self.client, self.now);
         }
     }
+    /// The last request, without the song ids that go along with numbers (`crate::tests::bare`).
     fn last(&self) -> Request {
+        crate::tests::bare(self.last_full())
+    }
+    fn last_full(&self) -> Request {
         self.log.lock().unwrap().last().cloned().unwrap()
     }
     fn sent(&self, req: &Request) -> bool {
-        self.log.lock().unwrap().contains(req)
+        self.log.lock().unwrap().iter().any(|r| crate::tests::bare(r.clone()) == *req)
     }
 }
 
@@ -281,7 +285,9 @@ fn first_tick_loads_status_and_queue_with_the_cursor_on_the_playing_song() {
 fn enter_jumps_to_the_numbered_row() {
     let mut rig = Rig::new("enter");
     rig.press(&[ch('j'), ch('j'), key(KeyCode::Down), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Jump { index: 2 }); // row 3 -> up-next index 2
+    assert_eq!(rig.last(), Request::Jump { index: 2, id: None }); // row 3 -> up-next index 2
+    let want = rig.app.queue.up_next[2].id.clone();
+    assert_eq!(rig.last_full(), Request::Jump { index: 2, id: Some(want) }, "with the song's id, for the app to check");
     // On the playing row Enter restarts the song.
     rig.press(&[ch('o'), key(KeyCode::Enter)]);
     assert_eq!(rig.last(), Request::Seek { to: uzumaki_ctl::SeekTo::Absolute(0.0) });
@@ -294,15 +300,18 @@ fn edit_keys_send_the_right_requests() {
     assert!(!rig.log.lock().unwrap().iter().any(|r| matches!(r, Request::Remove { .. })));
     assert_eq!(rig.app.message(rig.now), Some("Can't remove the playing song"));
     rig.press(&[ch('j'), ch('j'), ch('d')]);
-    assert_eq!(rig.last(), Request::Remove { indices: vec![1] });
+    assert_eq!(rig.last(), Request::Remove { indices: vec![1], ids: vec![] });
     assert_eq!(rig.app.message(rig.now), Some("Removed 1 song"));
     // The reply (a 3-song queue) replaced the list.
     assert_eq!(rig.app.queue.up_next.len(), 3);
+    let removed = rig.log.lock().unwrap().iter().rev().find(|r| matches!(r, Request::Remove { .. })).cloned();
+    assert!(matches!(removed, Some(Request::Remove { ids, .. }) if ids.len() == 1), "d sends the song's id");
     rig.press(&[ch('g'), ch('j'), ch('J')]);
-    assert_eq!(rig.last(), Request::Move { from: 0, to: 1 });
+    assert_eq!(rig.last(), Request::Move { from: 0, to: 1, id: None });
+    assert!(matches!(rig.last_full(), Request::Move { id: Some(_), .. }));
     assert_eq!(rig.app.cursor, 2, "the selection follows the moved song");
     rig.press(&[ch('K')]);
-    assert_eq!(rig.last(), Request::Move { from: 1, to: 0 });
+    assert_eq!(rig.last(), Request::Move { from: 1, to: 0, id: None });
     assert_eq!(rig.app.cursor, 1);
 }
 
@@ -345,7 +354,7 @@ fn filter_narrows_rows_but_keeps_real_numbers() {
     rig.press(&[key(KeyCode::Enter)]);
     assert!(!rig.app.filtering && rig.app.filter == "m83");
     rig.press(&[ch('j'), key(KeyCode::Enter)]); // the second M83 song is number 7
-    assert_eq!(rig.last(), Request::Jump { index: 6 });
+    assert_eq!(rig.last(), Request::Jump { index: 6, id: None });
     // Esc clears a kept filter before it quits; Esc while typing clears and stops typing.
     rig.press(&[key(KeyCode::Esc)]);
     assert!(rig.app.filter.is_empty() && !rig.app.quit);
@@ -424,7 +433,7 @@ fn polling_is_throttled_and_mouse_works() {
     rig.app.handle_mouse(click(first + 3), &mut rig.client, rig.now);
     assert_eq!(rig.app.cursor, 3);
     rig.app.handle_mouse(click(first + 3), &mut rig.client, rig.now + Duration::from_millis(100));
-    assert_eq!(rig.last(), Request::Jump { index: 2 });
+    assert_eq!(rig.last(), Request::Jump { index: 2, id: None });
     let wheel = MouseEvent { kind: MouseEventKind::ScrollDown, column: 5, row: 6, modifiers: KeyModifiers::NONE };
     rig.app.handle_mouse(wheel, &mut rig.client, rig.now);
     assert_eq!(rig.app.cursor, 6);
@@ -500,7 +509,7 @@ fn pinned_playlists_come_first_and_say_so() {
     assert!(text[14].contains("4  Road Trip ") && !text[14].contains("pinned"), "{}", text[14]);
     // The numbers are `uzu playlists`' numbers: P on the first plays the pinned one.
     rig.press(&[ch('P')]);
-    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.road2".into(), index: None, order: None });
+    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.road2".into(), index: None, order: None, song_id: None });
     // Narrow: the tag gives way to the title.
     let text = rig.frame(40, 18);
     assert!(text.iter().any(|l| l.contains("1  Road …")) && !text.iter().any(|l| l.contains("pinned")), "{text:?}");
@@ -555,9 +564,9 @@ fn enter_opens_the_list_and_plays_from_a_song() {
     rig.advance(300);
     rig.press(&[key(KeyCode::Enter)]);
     rig.press(&[ch('j'), ch('j'), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: Some(2), order: None });
+    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: Some(2), order: None, song_id: None });
     rig.press(&[ch('h'), ch('P')]);
-    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: None, order: None });
+    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: None, order: None, song_id: None });
     assert_eq!(rig.app.message(rig.now), Some("Playing: Road Trip"));
     // Enter on the left pane moves to the right and sends nothing.
     let n = rig.requests().len();
@@ -565,7 +574,7 @@ fn enter_opens_the_list_and_plays_from_a_song() {
     assert_eq!(rig.requests().len(), n);
     // P also works from the right pane.
     rig.press(&[ch('P')]);
-    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: None, order: None });
+    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: None, order: None, song_id: None });
 }
 
 #[test]
@@ -629,7 +638,7 @@ fn albums_screen_and_reload() {
     assert!(text[11].contains("Discovery") && text[11].contains("Daft Punk"), "{}", text[11]);
     assert!(rig.requests().contains(&Request::Tracks { kind: Kind::Album, id: "l.1".into() }));
     rig.press(&[ch('j'), ch('P')]);
-    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Album, id: "l.2".into(), index: None, order: None });
+    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Album, id: "l.2".into(), index: None, order: None, song_id: None });
     // Opening a loaded screen again doesn't reload; `R` does, and keeps the selection.
     rig.press(&[ch('1'), ch('4')]);
     assert_eq!(rig.requests().iter().filter(|r| **r == Request::Albums).count(), 1);
@@ -718,13 +727,13 @@ fn search_input_runs_the_query_and_results_number_from_one() {
     assert!(text[13].contains('2') && text[13].contains("Instant Crush"), "{}", text[13]);
     // Enter on result 2 plays it, `a` adds, `N` plays next.
     rig.press(&[ch('j'), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Pick { indices: vec![1], action: PickAction::Play });
+    assert_eq!(rig.last(), Request::Pick { indices: vec![1], action: PickAction::Play, ids: vec![] });
     assert_eq!(rig.app.message(rig.now), Some("Playing: Instant Crush"));
     rig.press(&[ch('j'), ch('a')]);
-    assert_eq!(rig.last(), Request::Pick { indices: vec![2], action: PickAction::Add });
+    assert_eq!(rig.last(), Request::Pick { indices: vec![2], action: PickAction::Add, ids: vec![] });
     assert_eq!(rig.app.message(rig.now), Some("Added: Around the World"));
     rig.press(&[ch('N')]);
-    assert_eq!(rig.last(), Request::Pick { indices: vec![2], action: PickAction::Next });
+    assert_eq!(rig.last(), Request::Pick { indices: vec![2], action: PickAction::Next, ids: vec![] });
     assert_eq!(rig.app.message(rig.now), Some("Playing next: Around the World"));
 }
 
@@ -756,7 +765,9 @@ fn a_search_is_recorded_for_uzu_play_and_stale_answers_are_dropped() {
     rig.app.last = Some(path.clone());
     rig.press(&[ch('3'), ch('a'), key(KeyCode::Enter)]);
     rig.app.tick(&mut rig.client, rig.now);
-    assert_eq!(crate::last::load(&path), Some(crate::last::Last::Search));
+    let ids = rig.app.search.results.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+    assert!(!ids.is_empty());
+    assert_eq!(crate::last::load(&path), Some(crate::last::Last::Search { ids }), "with the ids shown, for uzu pick <n>");
     // An answer for an older search changes nothing.
     assert!(!rig.app.search.done(0, Ok(vec![])));
     assert_eq!(rig.app.search.results.len(), 6);
@@ -1281,16 +1292,16 @@ fn enter_and_p_on_a_sorted_pane_send_the_visible_order() {
     // Title descending: Midnight City (3), Lose Yourself (0, 4), Instant Crush (1, 5), Around (2).
     rig.press(&[ch(','), ch('T'), ch('g'), ch('j')]);
     rig.press(&[key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.fav".into(), index: Some(1), order: Some(vec![3, 0, 4, 1, 5, 2]) });
+    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.fav".into(), index: Some(1), order: Some(vec![3, 0, 4, 1, 5, 2]), song_id: None });
     rig.press(&[ch('P')]);
-    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.fav".into(), index: None, order: Some(vec![3, 0, 4, 1, 5, 2]) });
+    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.fav".into(), index: None, order: Some(vec![3, 0, 4, 1, 5, 2]), song_id: None });
     assert_eq!(rig.app.message(rig.now), Some("Playing: Favourite Songs"));
     // From the left pane too, and with a filter the whole sorted list still plays.
     rig.press(&[ch('h'), ch('P')]);
     assert_eq!(played(&rig), (None, Some(vec![3, 0, 4, 1, 5, 2])));
     // Back to the original order: nothing extra is sent.
     rig.press(&[ch('l'), ch(','), ch(','), ch('g'), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.fav".into(), index: Some(0), order: None });
+    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Playlist, id: "p.fav".into(), index: Some(0), order: None, song_id: None });
     rig.press(&[ch('P')]);
     assert_eq!(played(&rig), (None, None));
     // Sorting the list of playlists changes no song order.
@@ -1304,7 +1315,7 @@ fn the_songs_choice_is_shared_by_albums_and_playlists() {
     rig.press(&[ch(','), ch('D'), ch('4')]);
     rig.advance(300);
     rig.press(&[ch('P')]);
-    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Album, id: "l.1".into(), index: None, order: Some(vec![5, 4, 3, 2, 1, 0]) });
+    assert_eq!(rig.last(), Request::PlayCollection { kind: Kind::Album, id: "l.1".into(), index: None, order: Some(vec![5, 4, 3, 2, 1, 0]), song_id: None });
     // The albums list has its own keys.
     rig.advance(3000); // the "Playing" message is gone
     rig.press(&[ch(','), ch('Y')]);
@@ -1326,14 +1337,14 @@ fn a_sorted_search_picks_the_original_result() {
     assert!(text[17].contains(" 1 ") && text[17].contains("Lose Yourself"), "{}", text[17]);
     // The cursor follows the result it was on (result 1), the keys walk the shown order.
     rig.press(&[ch('g'), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Pick { indices: vec![5], action: PickAction::Play });
+    assert_eq!(rig.last(), Request::Pick { indices: vec![5], action: PickAction::Play, ids: vec![] });
     rig.press(&[ch('j'), ch('a')]);
-    assert_eq!(rig.last(), Request::Pick { indices: vec![4], action: PickAction::Add });
+    assert_eq!(rig.last(), Request::Pick { indices: vec![4], action: PickAction::Add, ids: vec![] });
     assert_eq!(rig.app.message(rig.now), Some("Added: Lose Yourself to Dance"));
     rig.press(&[ch('N')]);
-    assert_eq!(rig.last(), Request::Pick { indices: vec![4], action: PickAction::Next });
+    assert_eq!(rig.last(), Request::Pick { indices: vec![4], action: PickAction::Next, ids: vec![] });
     rig.press(&[ch('G'), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Pick { indices: vec![0], action: PickAction::Play });
+    assert_eq!(rig.last(), Request::Pick { indices: vec![0], action: PickAction::Play, ids: vec![] });
     // `,` is text while typing a query, and a sort needs no results to be set.
     rig.press(&[ch('/'), ch(',')]);
     assert_eq!(rig.app.search.input, ",");
@@ -1679,7 +1690,7 @@ fn the_showcase_list_is_up_next_and_still_works() {
     assert!(!rig.app.visible().contains(&0), "the playing song is on the left, not in the list");
     assert_eq!(rig.app.cursor, 1, "the cursor moved off the hidden playing row");
     rig.press(&[key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Jump { index: 0 });
+    assert_eq!(rig.last(), Request::Jump { index: 0, id: None });
     rig.press(&[ch('j'), ch('d')]);
     assert!(matches!(rig.last(), Request::Remove { .. }));
     rig.press(&[ch('o')]);
@@ -1710,7 +1721,7 @@ fn solo_ignores_the_list_keys() {
     assert!(rig.sent(&Request::Next), "playback keys still work");
     let click = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 50, row: 15, modifiers: KeyModifiers::NONE };
     rig.app.handle_mouse(click, &mut rig.client, rig.now);
-    assert!(!rig.sent(&Request::Jump { index: 0 }));
+    assert!(!rig.sent(&Request::Jump { index: 0, id: None }));
 }
 
 /// The fixture with a halfblock cover, in `layout`, laid out for `w`×`h`.
@@ -2847,7 +2858,7 @@ fn the_cursor_skips_the_divider_and_a_lap_song_can_be_played_but_not_edited() {
     rig.press(&[ch('j')]);
     assert_eq!(rig.app.cursor, n + 2, "and j steps back over it");
     rig.press(&[key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Jump { index: n });
+    assert_eq!(rig.last(), Request::Jump { index: n, id: None });
     let sent = rig.log.lock().unwrap().len();
     rig.press(&[ch('d'), ch('J'), ch('K')]);
     assert_eq!(rig.log.lock().unwrap().len(), sent, "nothing is sent for edits of the next lap");
@@ -2901,7 +2912,7 @@ fn the_cursor_skips_the_station_header_and_enter_plays_a_played_song() {
     assert_eq!(rig.app.cursor, 1, "and one more steps over the header onto the queued song");
     rig.press(&[ch('j'), ch('j')]);
     rig.press(&[key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Jump { index: 2 }, "the second played song is entry 3");
+    assert_eq!(rig.last(), Request::Jump { index: 2, id: None }, "the second played song is entry 3");
     rig.press(&[ch('d'), ch('J')]);
     assert_eq!(rig.app.message(rig.now), Some("Songs the station played can't be edited"));
     // The queued song is still editable; a filter hides the header.
@@ -2913,7 +2924,7 @@ fn the_cursor_skips_the_station_header_and_enter_plays_a_played_song() {
 #[test]
 fn the_plain_queue_names_the_station_instead_of_saying_nothing_is_up_next() {
     let q = Queue { station: Some("Stazione di Thomas".into()), ..Default::default() };
-    let text = crate::run::queue_lines(&q, None, false, crate::run::Term { color: false, width: 80 }).join("\n");
+    let text = crate::run::queue_lines(&q, None, false, crate::run::Term { color: false, width: 80, tty: true }).join("\n");
     assert!(text.contains("Stazione di Thomas \u{2014} songs are picked as you listen"), "{text}");
     assert!(!text.contains("Nothing up next"));
 }
@@ -2948,7 +2959,7 @@ fn history_enter_uses_general_replay_without_changing_up_next_numbers() {
     q.history = vec![s("old", "Old track", "Artist", "Album", 120.0)];
     rig.app.set_queue(q, rig.now);
     rig.press(&[ch('h'), key(KeyCode::Home), key(KeyCode::Home), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::History { index: 0 });
+    assert_eq!(rig.last(), Request::History { index: 0, id: None });
 }
 
 #[test]
@@ -3038,9 +3049,9 @@ fn enter_on_a_history_row_still_replays_that_entry_and_the_header_is_skipped() {
     rig.press(&[ch('g')]);
     assert!(rig.app.rows()[rig.app.cursor].kind == RowKind::Past(3));
     rig.press(&[key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::History { index: 0 });
+    assert_eq!(rig.last(), Request::History { index: 0, id: None });
     rig.press(&[ch('j'), ch('j'), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::History { index: 2 }, "H1 is the newest entry");
+    assert_eq!(rig.last(), Request::History { index: 2, id: None }, "H1 is the newest entry");
     rig.press(&[ch('d')]);
     assert_eq!(rig.app.message(rig.now), Some("History songs can't be edited"));
 }
@@ -3061,7 +3072,7 @@ fn the_showcase_cursor_lands_on_the_first_up_next_song_not_on_the_history() {
     rig.press(&[ch('o')]);
     assert_eq!(on(&rig), "n1", "o is the first Up Next song");
     rig.press(&[key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Jump { index: 0 });
+    assert_eq!(rig.last(), Request::Jump { index: 0, id: None });
     // The history shows there too, as a zone of its own.
     let text = lines(&draw(&rig.app, rig.now, 140, 30));
     assert!(text.iter().any(|l| l.contains("⟲ History · 3 songs")));
@@ -3138,7 +3149,7 @@ fn the_up_next_divider_shows_in_the_showcase_only_with_a_history() {
     rig.press(&[ch('k')]);
     assert!(!rig.app.rows()[rig.app.cursor].kind.is_divider());
     rig.press(&[ch('o'), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Jump { index: 0 });
+    assert_eq!(rig.last(), Request::Jump { index: 0, id: None });
     // The normal view has the playing row between them: no divider.
     rig.press(&[ch('F')]);
     assert!(rig.app.showcase().is_none());
@@ -3493,7 +3504,7 @@ fn remapped_keys_drive_the_same_actions() {
     rig.press(&[key(KeyCode::Enter)]);
     assert_eq!(rig.last(), Request::Toggle);
     rig.press(&[ch('j'), ch('x')]);
-    assert_eq!(rig.last(), Request::Jump { index: 0 });
+    assert_eq!(rig.last(), Request::Jump { index: 0, id: None });
 }
 
 #[test]
@@ -3760,7 +3771,7 @@ fn the_cursor_skips_the_autoplay_header_and_enter_plays_a_suggestion() {
     rig.press(&[ch('k'), ch('k')]);
     assert_eq!(rig.app.rows()[rig.app.cursor].song.title, rig.app.queue.up_next[up - 1].title, "k steps over the header onto the last Up Next song");
     rig.press(&[ch('j'), ch('j'), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::Jump { index: up + 1 }, "the second suggestion is entry {}", up + 2);
+    assert_eq!(rig.last(), Request::Jump { index: up + 1, id: None }, "the second suggestion is entry {}", up + 2);
     // They can't be removed or moved from here; the message says so.
     rig.press(&[ch('d')]);
     assert_eq!(rig.app.message(rig.now), Some("AutoPlay songs can't be edited (A turns AutoPlay off)"));
@@ -3792,7 +3803,7 @@ fn history_keeps_its_numbers_with_suggestions_in_the_queue() {
     let first_past = rows.iter().position(|r| matches!(r.kind, RowKind::Past(_))).unwrap();
     rig.app.cursor = first_past;
     rig.press(&[key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::History { index: 0 }, "the oldest history song is History entry 0");
+    assert_eq!(rig.last(), Request::History { index: 0, id: None }, "the oldest history song is History entry 0");
 }
 
 /// The fake app plus AutoPlay: `Autoplay` flips the setting and answers with the queue.
@@ -4001,11 +4012,11 @@ fn an_unfolded_history_replays_through_enter() {
     rig.app.resize_to(100, 30);
     rig.app.set_queue(long_history(0), now);
     rig.press(&[ch('h'), key(KeyCode::Up), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::History { index: 49 }, "H1, the newest, is the last entry");
+    assert_eq!(rig.last(), Request::History { index: 49, id: None }, "H1, the newest, is the last entry");
     rig.press(&[ch('G'), ch('g')]);
     assert_eq!(rig.app.rows()[rig.app.cursor].song.id, "s51", "first g: Up Next 1");
     rig.press(&[ch('g'), key(KeyCode::Enter)]);
-    assert_eq!(rig.last(), Request::History { index: 0 }, "the top of the list: the oldest");
+    assert_eq!(rig.last(), Request::History { index: 0, id: None }, "the top of the list: the oldest");
 }
 
 #[test]
@@ -4146,7 +4157,7 @@ fn the_wheel_and_clicks_work_in_the_unfolded_history() {
     rig.app.handle_mouse(click(first + 2), &mut rig.client, rig.now);
     assert!(rig.app.rows()[rig.app.cursor].kind == RowKind::Past(1));
     rig.app.handle_mouse(click(first + 2), &mut rig.client, rig.now + Duration::from_millis(100));
-    assert_eq!(rig.last(), Request::History { index: 49 }, "a double click replays it");
+    assert_eq!(rig.last(), Request::History { index: 49, id: None }, "a double click replays it");
 }
 
 // ------------------------------------------------------------- a queue replaced under the screen
@@ -4181,9 +4192,9 @@ fn songs_of(tag: &str, title: &str, artist: &str, n: std::ops::Range<usize>) -> 
 /// shuffle and repeat all; the Linkin Park songs heard are its history.
 fn linkin_park_then_replay() -> (Queue, Queue) {
     let lp = songs_of("lp", "Numb", "Linkin Park", 0..12);
-    let search = Queue { current: Some(lp[2].clone()), up_next: lp[3..].to_vec(), history: lp[..2].to_vec(), source: "Linkin Park".into(), repeat: RepeatMode::All, next_lap: lp.clone(), ..Default::default() };
+    let search = Queue { current: Some(lp[2].clone()), up_next: lp[3..].to_vec(), history: lp[..2].to_vec(), source: "Linkin Park".into(), repeat: RepeatMode::All, next_lap: lp.clone(), run: Some(7), ..Default::default() };
     let replay = songs_of("rp", "Replay", "Various", 0..30);
-    let playlist = Queue { current: Some(replay[0].clone()), up_next: replay[1..].to_vec(), history: lp[..3].to_vec(), source: "Replay 2026".into(), shuffle: true, repeat: RepeatMode::All, next_lap: replay.clone(), ..Default::default() };
+    let playlist = Queue { current: Some(replay[0].clone()), up_next: replay[1..].to_vec(), history: lp[..3].to_vec(), source: "Replay 2026".into(), shuffle: true, repeat: RepeatMode::All, next_lap: replay.clone(), run: Some(8), ..Default::default() };
     (search, playlist)
 }
 
@@ -4282,4 +4293,218 @@ fn an_app_without_queue_rev_is_polled_every_three_seconds() {
     assert_ne!(rig.app.queue, reordered, "nothing told it yet");
     rig.advance(1100);
     assert_eq!(rig.app.queue, reordered, "the 3 s poll");
+}
+
+// ------------------------------------------------------------------- review 2026-11-23 (uzu)
+// Repro tests for ../uzumaki-notes/reviews/2026-11-23-uzu.md. Each one FAILS on main `d9b1f64`.
+
+mod review {
+    use super::*;
+    use uzumaki_ctl::{CollectionInfo, Reply};
+
+    fn song(id: &str) -> SongInfo {
+        s(id, &format!("Title {id}"), "Artist", "Album", 200.0)
+    }
+
+    /// R1: `J` moves the song down one place, but the cursor ends up one row past it. The reply
+    /// to `Move` already puts the cursor back on its song (`set_queue` -> `resolve_cursor`), and
+    /// `move_selected` then adds one more step. The stock fake answers `Move` with an unchanged
+    /// list, which hides it; this fake really moves the song.
+    #[test]
+    fn r1_shift_j_keeps_the_cursor_on_the_moved_song() {
+        let up: Arc<Mutex<Vec<SongInfo>>> = Arc::new(Mutex::new(["s1", "s2", "s3", "s4", "s5"].map(song).to_vec()));
+        let q = {
+            let up = up.clone();
+            move || Queue { current: Some(song("s0")), up_next: up.lock().unwrap().clone(), source: "Mix".into(), ..Default::default() }
+        };
+        let log: Arc<Mutex<Vec<Request>>> = Arc::default();
+        let handler = {
+            let (up, q, log) = (up.clone(), q.clone(), log.clone());
+            move |req: Request| {
+                log.lock().unwrap().push(req.clone());
+                match req {
+                    Request::Queue => Reply::Queue(q()),
+                    Request::Move { from, to, .. } => {
+                        let mut l = up.lock().unwrap();
+                        let x = l.remove(from);
+                        l.insert(to, x);
+                        drop(l);
+                        Reply::Queue(q())
+                    }
+                    _ => Reply::Status(Status { state: PlayState::Playing, song: Some(song("s0")), ..Default::default() }),
+                }
+            }
+        };
+        let mut rig = Rig::serving("r1-move", log, handler);
+        rig.press(&[ch('j')]);
+        assert_eq!(rig.app.rows()[rig.app.cursor].song.id, "s1");
+        rig.press(&[ch('J')]);
+        assert_eq!(rig.last(), Request::Move { from: 0, to: 1, id: None });
+        assert_eq!(rig.app.rows()[rig.app.cursor].song.id, "s1", "the cursor should stay on the song J moved");
+        rig.press(&[ch('K')]);
+        assert_eq!(rig.app.rows()[rig.app.cursor].song.id, "s1", "and K too");
+    }
+
+    /// R2: the Search screen picks by index from the app's *global* last search
+    /// (`app/src/ctl.rs` `last_search`). Any other client's search in between (a second `uzu`, a
+    /// one-shot `uzu search`) swaps what Enter plays. This fake keeps one last search, like the app.
+    #[test]
+    fn r2_enter_on_a_search_result_plays_that_result_even_after_another_search() {
+        // Like the app: `Pick` with ids takes them from any recent search, else indices into
+        // the last one (old clients).
+        #[derive(Default)]
+        struct St {
+            last: Vec<SongInfo>,
+            all: Vec<SongInfo>,
+            played: Option<String>,
+        }
+        let st: Arc<Mutex<St>> = Arc::default();
+        let log: Arc<Mutex<Vec<Request>>> = Arc::default();
+        let handler = {
+            let (st, log) = (st.clone(), log.clone());
+            move |req: Request| {
+                log.lock().unwrap().push(req.clone());
+                let mut st = st.lock().unwrap();
+                match req {
+                    Request::Search { query } => {
+                        st.last = (0..3).map(|i| song(&format!("{query}{i}"))).collect();
+                        let last = st.last.clone();
+                        st.all.extend(last.clone());
+                        Reply::Songs { songs: last }
+                    }
+                    Request::Pick { indices, ids, .. } => match if ids.is_empty() { st.last.get(indices[0]).cloned() } else { st.all.iter().find(|s| s.id == ids[0]).cloned() } {
+                        Some(x) => {
+                            st.played = Some(x.id.clone());
+                            Reply::Status(Status { state: PlayState::Playing, song: Some(x), ..Default::default() })
+                        }
+                        None => Reply::Error { message: "search first: uzu search <words>".into() },
+                    },
+                    Request::Queue => Reply::Queue(Queue::default()),
+                    _ => Reply::Status(Status::default()),
+                }
+            }
+        };
+        let mut rig = Rig::serving("r2-search", log, handler);
+        rig.press(&[ch('3'), ch('a'), ch('b'), ch('b'), ch('a'), key(KeyCode::Enter)]);
+        assert_eq!(rig.app.search.results[0].id, "abba0");
+        // Another client searches meanwhile (another terminal, a script, a second uzu).
+        let mut other = Client::connect_to(&crate::tests::socket("tui-r2-search")).unwrap();
+        other.request(&Request::Search { query: "metallica".into() }).unwrap();
+        // The screen still shows "Title abba0" under the cursor; Enter plays it.
+        rig.press(&[key(KeyCode::Enter)]);
+        assert_eq!(st.lock().unwrap().played.as_deref(), Some("abba0"), "Enter played another client's result");
+    }
+
+    /// R3: the Playlists screen keeps a collection's songs for the whole session and plays by
+    /// index into that copy. When the playlist changed meanwhile (a song added at the top in the
+    /// window, on another device, a sort in the app), Enter plays a different song, silently.
+    #[test]
+    fn r3_enter_on_a_playlist_song_plays_that_song_after_the_playlist_changed() {
+        let songs: Arc<Mutex<Vec<SongInfo>>> = Arc::new(Mutex::new(["a", "b", "c"].map(song).to_vec()));
+        let played: Arc<Mutex<Option<String>>> = Arc::default();
+        let log: Arc<Mutex<Vec<Request>>> = Arc::default();
+        let info = CollectionInfo { kind: Kind::Playlist, id: "p.x".into(), title: "Mix".into(), subtitle: String::new(), count: Some(3), favorites: false, editable: true, year: None, pinned: None };
+        let handler = {
+            let (songs, played, log, info) = (songs.clone(), played.clone(), log.clone(), info.clone());
+            move |req: Request| {
+                log.lock().unwrap().push(req.clone());
+                match req {
+                    Request::Playlists => Reply::Collections { items: vec![info.clone()] },
+                    Request::Tracks { .. } => Reply::Tracks { collection: info.clone(), songs: songs.lock().unwrap().clone() },
+                    Request::PlayCollection { index, order, song_id, .. } => {
+                        let all = songs.lock().unwrap().clone();
+                        let mut i = index.unwrap_or(0);
+                        // Like the app: the song asked for, from where it is now.
+                        if let (None, Some(want)) = (&order, &song_id)
+                            && all.get(i).is_none_or(|s| &s.id != want)
+                        {
+                            i = all.iter().position(|s| &s.id == want).unwrap_or(usize::MAX);
+                        }
+                        let pick = match order {
+                            Some(o) => o.get(i).and_then(|&k| all.get(k)).cloned(),
+                            None => all.get(i).cloned(),
+                        };
+                        *played.lock().unwrap() = pick.map(|x| x.id);
+                        Reply::Status(Status::default())
+                    }
+                    Request::Queue => Reply::Queue(Queue::default()),
+                    _ => Reply::Status(Status::default()),
+                }
+            }
+        };
+        let mut rig = Rig::serving("r3-browse", log, handler);
+        rig.press(&[ch('2')]);
+        rig.advance(300); // the songs of "Mix" load
+        rig.press(&[ch('l'), ch('j')]);
+        // In the app, a song is added at the top of the playlist.
+        songs.lock().unwrap().insert(0, song("new"));
+        // The screen shows "Title b" under the cursor (song 2); Enter.
+        rig.press(&[key(KeyCode::Enter)]);
+        assert!(matches!(rig.last(), Request::PlayCollection { .. }), "{:?}", rig.last());
+        assert_eq!(played.lock().unwrap().as_deref(), Some("b"), "Enter played another song than the one under the cursor");
+    }
+
+    /// R7: tiny terminals must never panic (resize to a few cells while a view is open).
+    #[test]
+    fn r7_tiny_terminals_draw_every_screen_and_view_without_panicking() {
+        use super::super::showcase::Layout;
+        let now = Instant::now();
+        for layout in [Layout::Normal, Layout::Showcase, Layout::Solo] {
+            for screen in Screen::ALL {
+                for w in [0u16, 1, 2, 3, 5, 8, 12, 20] {
+                    for h in [0u16, 1, 2, 3, 4, 6, 9, 12] {
+                        let mut app = fixture(now);
+                        app.layout = if screen == Screen::Queue { layout } else { Layout::Normal };
+                        app.screen = screen;
+                        app.help = w == 8; // the help popup too
+                        app.resize_to(w, h);
+                        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+                            t.draw(|f| view::draw(f, &app, now)).unwrap();
+                        }));
+                        assert!(r.is_ok(), "panic at {w}x{h} on {screen:?} {:?}", app.layout);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Review 2026-11-23 (state, C3): 888438d cleared a kept filter only when the source *name*
+/// changed. Two different queues with the same name (two window searches are both "", Library
+/// songs are all "Library", two playlists with the same title) kept the old filter: the 0.4.1
+/// stale screen again. The app's queue number (`Queue::run`) tells them apart.
+#[test]
+fn review_a_new_queue_with_the_same_source_name_clears_the_filter() {
+    let (mut search, mut other) = linkin_park_then_replay();
+    search.source = String::new(); // a song clicked in the window's search results
+    other.source = String::new(); // another search, played from the window
+    let (mut rig, queue) = replaceable("same-name-filter", search, true);
+    rig.app.resize_to(120, 30);
+    rig.press(&[ch('/')]);
+    rig.press(&"linkin".chars().map(ch).collect::<Vec<_>>());
+    rig.press(&[key(KeyCode::Enter)]);
+    *queue.lock().unwrap() = other;
+    rig.advance(3100);
+    assert_eq!(rig.app.queue.current.as_ref().map(|s| s.id.as_str()), Some("rp0"));
+    assert_eq!(rig.app.filter, "", "the filter from the old queue hides the new one: {}", table_text(&rig));
+}
+
+/// The same queue (same `run`) edited, reordered or moved on keeps the filter.
+#[test]
+fn the_same_queue_changing_keeps_the_filter() {
+    let (search, _) = linkin_park_then_replay();
+    let (mut rig, queue) = replaceable("same-run-filter", search, true);
+    rig.app.resize_to(120, 30);
+    rig.press(&[ch('/')]);
+    rig.press(&"numb".chars().map(ch).collect::<Vec<_>>());
+    rig.press(&[key(KeyCode::Enter)]);
+    {
+        let mut q = queue.lock().unwrap();
+        let next = q.up_next.remove(0);
+        let was = q.current.replace(next).unwrap();
+        q.history.push(was);
+    }
+    rig.advance(3100);
+    assert_eq!(rig.app.filter, "numb");
 }
