@@ -689,7 +689,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod review_edges {
     use super::*;
 
@@ -697,7 +697,6 @@ mod review_edges {
     /// disk, a home on a network mount that is slow to come up). That is read as a first run:
     /// `Loaded::Ok(empty)`, not read-only, so the next playlist change writes an empty store over
     /// the user's Uzumaki playlists (rename replaces the file even when it isn't ours to read).
-    #[cfg(unix)]
     #[test]
     fn an_unreadable_file_is_not_a_first_run() {
         use std::os::unix::fs::PermissionsExt;
