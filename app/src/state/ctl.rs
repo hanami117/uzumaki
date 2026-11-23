@@ -137,7 +137,7 @@ impl State {
         ctl::Status {
             state: if song.is_some() { play_state(p.state) } else { ctl::PlayState::Stopped },
             song: song.map(song_info),
-            position: p.position_now(),
+            position: p.heard_now(),
             duration: p.duration,
             volume: p.volume,
             shuffle: p.shuffle,
@@ -407,7 +407,7 @@ impl State {
     pub fn ctl_seek(&mut self, to: ctl::SeekTo) {
         let target = match to {
             ctl::SeekTo::Absolute(t) => t,
-            ctl::SeekTo::Relative(d) => self.playback.position_now() + d,
+            ctl::SeekTo::Relative(d) => self.playback.heard_now() + d,
             ctl::SeekTo::Percent(p) => self.playback.duration * p / 100.0,
         };
         self.seek_seconds(target.max(0.0));

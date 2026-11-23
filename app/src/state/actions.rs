@@ -642,7 +642,7 @@ impl State {
     /// Seeks `delta` seconds from where the song is now (Shift+←/→).
     pub fn seek_by(&mut self, delta: f64) {
         if self.playback.song.is_some() && self.playback.duration > 0.0 {
-            let t = self.playback.position_now() + delta;
+            let t = self.playback.heard_now() + delta;
             self.seek_seconds(t);
         }
     }

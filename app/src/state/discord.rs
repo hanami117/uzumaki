@@ -41,7 +41,7 @@ impl State {
             artwork_url: if prefs.artwork { song.artwork.as_ref().map(|a| a.url(512)) } else { None },
             song_url,
             playing,
-            position: p.position_now(),
+            position: p.heard_now(),
             duration: p.duration,
         })
     }
