@@ -5,6 +5,12 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-23
+
+Fixes from a review of `uzu` and the app: the terminal player acts on the song you saw, settings and playlists files
+survive a bad value or a read error, and playback recovers when the engine crashes. You need an Apple Music
+subscription to stream; local files play without one.
+
 ### Fixed
 - **uzu:** the Queue screen kept showing an old list when a filter (`/`) was on and another playlist started from
   the window. A queue from another source now clears the filter and says so. With this app version the screen also
