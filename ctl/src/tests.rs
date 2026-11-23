@@ -26,6 +26,8 @@ struct Fake {
     pending: Option<(usize, u32)>,
     /// Paused (`Toggle` flips it); like MusicKit, the reply to `Toggle` still shows the old state.
     paused: bool,
+    /// The edited Up Next that `Move`/`Remove` answer (song numbers; `None`: songs 1 to 3).
+    edited: Option<Vec<usize>>,
 }
 
 fn fake_handler() -> impl Fn(Request) -> Reply + Send + Sync + 'static {
@@ -91,7 +93,20 @@ pub(crate) fn fake_handler_logged(log: Arc<Mutex<Vec<Request>>>) -> impl Fn(Requ
             Request::Tracks { kind, id } => Reply::Tracks { collection: collection(kind, &id, "Anima ;)", "", false), songs: (0..6).map(song).collect() },
             Request::Queue => Reply::Queue(Queue { current: Some(song(f.current)), up_next: (1..30).map(song).collect(), queued: 2, source: "Anima ;)".into(), ..Default::default() }),
             Request::Search { .. } => Reply::Songs { songs: (0..6).map(song).collect() },
-            Request::Move { .. } | Request::Remove { .. } => Reply::Queue(Queue { current: Some(song(f.current)), up_next: (1..4).map(song).collect(), queued: 0, ..Default::default() }),
+            // Edits answer a short list that really changes (a move moves the song).
+            Request::Move { from, to, .. } => {
+                let mut up = f.edited.take().unwrap_or_else(|| (1..4).collect());
+                if from < up.len() && to < up.len() {
+                    let x = up.remove(from);
+                    up.insert(to, x);
+                }
+                f.edited = Some(up.clone());
+                Reply::Queue(Queue { current: Some(song(f.current)), up_next: up.into_iter().map(song).collect(), queued: 0, ..Default::default() })
+            }
+            Request::Remove { .. } => {
+                f.edited = Some((1..4).collect());
+                Reply::Queue(Queue { current: Some(song(f.current)), up_next: (1..4).map(song).collect(), queued: 0, ..Default::default() })
+            }
             Request::Seek { .. } | Request::Pick { .. } | Request::Jump { .. } | Request::Prev | Request::Pause => Reply::Status(status(&f)),
             Request::Quit => Reply::Status(status(&f)),
             Request::Lyrics => fake_lyrics(&song(f.current).id),
@@ -135,7 +150,7 @@ fn drive(path: &Path, line: &str) -> (Result<(), Fail>, String) {
     let inv = cli::parse(&args).unwrap();
     let stop = AtomicBool::new(false);
     let timing = Timing { poll: Duration::from_millis(5), wait: Duration::from_millis(500), watch: Duration::from_millis(10) };
-    let env = Env { term: Term { width: 80, color: false }, timing, stop: &stop, last: Some(last_file(path)) };
+    let env = Env { term: Term { width: 80, color: false, tty: false }, timing, stop: &stop, last: Some(last_file(path)) };
     let mut client = Client::connect_to(path).unwrap();
     let mut out = Vec::new();
     let result = run::run(&inv, &mut client, &env, &mut out);
@@ -186,16 +201,31 @@ fn commands_against_a_fake_app() {
     assert!(out.contains("Queued\n   1  ") && out.contains("Continue playing from Anima ;)\n"), "{out}");
     assert!(out.trim_end().ends_with("… and 9 more (uzu queue -a)"), "{out}");
 
+    // `drive` writes to a pipe: the results only, no hint line among them.
     let (_, out) = drive(&path, "search daft");
-    assert!(out.contains("uzu pick <n>"), "{out}");
+    assert!(out.contains("Lose Yourself to Dance") && !out.contains("uzu pick <n>"), "{out}");
 
     let (r, _) = drive(&path, "show");
     assert_eq!(r.unwrap_err().msg, "uzu: not in the fake");
 }
 
-/// The requests the fake got after `from`, minus the status polls.
+/// The requests the fake got after `from`, minus the status polls, without the song ids that
+/// go along with numbers (`bare`; the tests of those ids look at them).
 fn acted(log: &Mutex<Vec<Request>>, from: usize) -> Vec<Request> {
-    log.lock().unwrap()[from..].iter().filter(|r| !matches!(r, Request::Status | Request::Playlists | Request::Albums | Request::Queue)).cloned().collect()
+    log.lock().unwrap()[from..].iter().filter(|r| !matches!(r, Request::Status | Request::Playlists | Request::Albums | Request::Queue | Request::Tracks { .. })).cloned().map(bare).collect()
+}
+
+/// `req` without the song ids that ride along with numbers (`Jump::id`, `Pick::ids`, …).
+pub(crate) fn bare(req: Request) -> Request {
+    match req {
+        Request::Jump { index, .. } => Request::Jump { index, id: None },
+        Request::History { index, .. } => Request::History { index, id: None },
+        Request::Move { from, to, .. } => Request::Move { from, to, id: None },
+        Request::Remove { indices, .. } => Request::Remove { indices, ids: vec![] },
+        Request::Pick { indices, action, .. } => Request::Pick { indices, action, ids: vec![] },
+        Request::PlayCollection { kind, id, index, order, .. } => Request::PlayCollection { kind, id, index, order, song_id: None },
+        other => other,
+    }
 }
 
 #[test]
@@ -208,13 +238,13 @@ fn play_number_follows_the_last_list() {
     // No record: playlist n, as before.
     let m = mark(&log);
     drive(&path, "play 3").0.unwrap();
-    assert_eq!(acted(&log, m), [Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: None, order: None }]);
+    assert_eq!(acted(&log, m), [Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: None, order: None, song_id: None }]);
 
     // After a search, the number is a result.
     drive(&path, "search daft").0.unwrap();
     let m = mark(&log);
     drive(&path, "play 2").0.unwrap();
-    assert_eq!(acted(&log, m), [Request::Pick { indices: vec![1], action: cli_play() }]);
+    assert_eq!(acted(&log, m), [Request::Pick { indices: vec![1], action: cli_play(), ids: vec![] }]);
     // ... but `play 3 5` and `play -p 2` keep their meaning.
     let m = mark(&log);
     drive(&path, "play 3 5").0.unwrap();
@@ -223,9 +253,9 @@ fn play_number_follows_the_last_list() {
     assert_eq!(
         acted(&log, m),
         [
-            Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: Some(4), order: None },
-            Request::PlayCollection { kind: Kind::Playlist, id: "p.anima".into(), index: None, order: None },
-            Request::PlayCollection { kind: Kind::Album, id: "l.2".into(), index: None, order: None },
+            Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: Some(4), order: None, song_id: None },
+            Request::PlayCollection { kind: Kind::Playlist, id: "p.anima".into(), index: None, order: None, song_id: None },
+            Request::PlayCollection { kind: Kind::Album, id: "l.2".into(), index: None, order: None, song_id: None },
         ]
     );
 
@@ -233,7 +263,7 @@ fn play_number_follows_the_last_list() {
     drive(&path, "albums hurry").0.unwrap();
     let m = mark(&log);
     drive(&path, "play 2").0.unwrap();
-    assert_eq!(acted(&log, m), [Request::PlayCollection { kind: Kind::Album, id: "l.2".into(), index: None, order: None }]);
+    assert_eq!(acted(&log, m), [Request::PlayCollection { kind: Kind::Album, id: "l.2".into(), index: None, order: None, song_id: None }]);
     let (r, _) = drive(&path, "play 3");
     assert!(r.unwrap_err().msg.contains("only 2 albums"));
 
@@ -241,19 +271,19 @@ fn play_number_follows_the_last_list() {
     drive(&path, "playlist anima").0.unwrap();
     let m = mark(&log);
     drive(&path, "play 4").0.unwrap();
-    assert_eq!(acted(&log, m), [Request::PlayCollection { kind: Kind::Playlist, id: "p.anima".into(), index: Some(3), order: None }]);
+    assert_eq!(acted(&log, m), [Request::PlayCollection { kind: Kind::Playlist, id: "p.anima".into(), index: Some(3), order: None, song_id: None }]);
 
     // The queue: jump to the song's current place in up next.
     drive(&path, "queue").0.unwrap();
     let m = mark(&log);
     drive(&path, "play 3").0.unwrap();
-    assert_eq!(acted(&log, m), [Request::Jump { index: 2 }]);
+    assert_eq!(acted(&log, m), [Request::Jump { index: 2, id: None }]);
     let (r, _) = drive(&path, "play 25");
     assert!(r.unwrap_err().msg.contains("only 20 songs"));
     // A song that left the queue (the fake's queue is s1..s29; pretend s40 was printed).
     super::last::save(&last_file(&path), &super::last::Last::Queue { ids: vec!["s40".into()] });
     let (r, _) = drive(&path, "play 1");
-    assert_eq!(r.unwrap_err().msg, "uzu: that song is no longer in the queue");
+    assert_eq!(r.unwrap_err().msg, "uzu: song 1 of the list uzu queue printed is no longer in the queue (see: uzu queue)");
 }
 
 fn cli_play() -> uzumaki_ctl::PickAction {
@@ -268,21 +298,24 @@ fn jump_by_title_move_and_del() {
     // The fake's up next is s1.. : Instant Crush, Around the World, Midnight City, Lose Yourself, ...
     let (r, _) = drive(&path, "jump midnight");
     assert!(r.is_ok());
-    assert!(acted(&log, 0).contains(&Request::Jump { index: 2 }));
+    assert!(acted(&log, 0).contains(&Request::Jump { index: 2, id: None }));
     let (r, _) = drive(&path, "jump daft punk");
     assert!(r.unwrap_err().msg.contains("no song in Up Next matches 'daft punk'"));
     let (_, _) = drive(&path, "jump lose");
-    assert!(acted(&log, 0).contains(&Request::Jump { index: 3 })); // first in queue order
+    assert!(acted(&log, 0).contains(&Request::Jump { index: 3, id: None })); // first in queue order
 
     let m = log.lock().unwrap().len();
     let (r, out) = drive(&path, "move 3 1");
     assert!(r.is_ok());
-    assert_eq!(acted(&log, m), [Request::Move { from: 2, to: 0 }]);
+    assert_eq!(acted(&log, m), [Request::Move { from: 2, to: 0, id: None }]);
     assert!(out.starts_with("Now playing\n") && out.contains("Continue playing"), "{out}");
     let m = log.lock().unwrap().len();
     let (_, out) = drive(&path, "-q del 2 1");
     assert_eq!(out, "");
-    assert_eq!(acted(&log, m), [Request::Remove { indices: vec![1, 0] }]);
+    // The numbers are those `move` printed (s3 s1 s2): #2 is s1, #1 is s3, found where they are in
+    // the queue now (this fake's `Queue` still lists s1, s2, s3, …), with their ids.
+    assert_eq!(acted(&log, m), [Request::Remove { indices: vec![0, 2], ids: vec![] }]);
+    assert_eq!(log.lock().unwrap().last(), Some(&Request::Remove { indices: vec![0, 2], ids: vec![song(1).id, song(3).id] }));
 }
 
 #[test]
@@ -292,7 +325,7 @@ fn watch_draws_until_stopped_and_restores_the_cursor() {
     let _server = serve(&path, fake_handler_logged(log.clone())).unwrap();
     let inv = cli::parse(&["watch".to_string()]).unwrap();
     let stop = AtomicBool::new(false);
-    let env = Env { term: Term { width: 60, color: false }, timing: Timing { watch: Duration::from_millis(5), ..Timing::default() }, stop: &stop, last: None };
+    let env = Env { term: Term { width: 60, color: false, tty: true }, timing: Timing { watch: Duration::from_millis(5), ..Timing::default() }, stop: &stop, last: None };
     let mut client = Client::connect_to(&path).unwrap();
     let mut out = Vec::new();
     std::thread::scope(|s| {
@@ -347,16 +380,16 @@ fn pinned_playlists_print_first_and_numbers_follow() {
     assert_eq!(
         acted(&log, m),
         [
-            Request::PlayCollection { kind: Kind::Playlist, id: "p.road2".into(), index: None, order: None },
-            Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: None, order: None },
-            Request::PlayCollection { kind: Kind::Playlist, id: "p.road2".into(), index: None, order: None },
+            Request::PlayCollection { kind: Kind::Playlist, id: "p.road2".into(), index: None, order: None, song_id: None },
+            Request::PlayCollection { kind: Kind::Playlist, id: "p.road".into(), index: None, order: None, song_id: None },
+            Request::PlayCollection { kind: Kind::Playlist, id: "p.road2".into(), index: None, order: None, song_id: None },
         ]
     );
     // No record of a list: playlist n is still the printed n.
     let _ = std::fs::remove_file(last_file(&path));
     let m = mark(&log);
     drive(&path, "play 2").0.unwrap();
-    assert_eq!(acted(&log, m), [Request::PlayCollection { kind: Kind::Playlist, id: "p.anima".into(), index: None, order: None }]);
+    assert_eq!(acted(&log, m), [Request::PlayCollection { kind: Kind::Playlist, id: "p.anima".into(), index: None, order: None, song_id: None }]);
 }
 
 #[test]
@@ -368,7 +401,7 @@ fn offline_listing_puts_the_settings_pins_first() {
     std::fs::write(dir.join("settings.json"), r#"{"pins":[{"kind":"Playlist","id":"p.3","title":"Gym"},{"kind":"Album","id":"p.1","title":"Not a playlist"}]}"#).unwrap();
     let inv = cli::parse(&["playlists".to_string()]).unwrap();
     let stop = AtomicBool::new(false);
-    let env = Env { term: Term { width: 60, color: false }, timing: Timing::default(), stop: &stop, last: None };
+    let env = Env { term: Term { width: 60, color: false, tty: true }, timing: Timing::default(), stop: &stop, last: None };
     let mut out = Vec::new();
     run::run(&inv, &mut run::Offline { dir: dir.clone(), settings: Some(dir.join("settings.json")) }, &env, &mut out).unwrap();
     assert_eq!(String::from_utf8(out).unwrap(), "(Uzumaki isn't running — from the cache)\n  1  Gym              pinned\n  2  Favourite Songs\n  3  Mine                     4 songs\n");
@@ -383,7 +416,7 @@ fn offline_listing_uses_the_cache_note() {
     std::fs::write(dir.join("playlists.json"), r#"{"saved_at":1,"data":[{"id":"p.1","title":"Mine","track_count":4},{"id":"p.2","title":"Favourite Songs","favorites":true}]}"#).unwrap();
     let inv = cli::parse(&["playlists".to_string()]).unwrap();
     let stop = AtomicBool::new(false);
-    let env = Env { term: Term { width: 60, color: false }, timing: Timing::default(), stop: &stop, last: None };
+    let env = Env { term: Term { width: 60, color: false, tty: true }, timing: Timing::default(), stop: &stop, last: None };
     let mut out = Vec::new();
     run::run(&inv, &mut run::Offline { dir: dir.clone(), settings: None }, &env, &mut out).unwrap();
     assert_eq!(String::from_utf8(out).unwrap(), "(Uzumaki isn't running — from the cache)\n  1  Favourite Songs\n  2  Mine             4 songs\n");
@@ -512,4 +545,125 @@ fn autoplay_sends_the_asked_state() {
         drive(&path, line).0.unwrap();
     }
     assert_eq!(*log.lock().unwrap(), [Request::Autoplay { on: None }, Request::Autoplay { on: Some(true) }, Request::Autoplay { on: Some(false) }, Request::Autoplay { on: None }]);
+}
+
+// ------------------------------------------------------------------- review 2026-11-23 (uzu)
+// Repro tests for ../uzumaki-notes/reviews/2026-11-23-uzu.md. Each one FAILS on main `d9b1f64`.
+
+mod review {
+    use super::*;
+
+    /// A queue that moves on by itself (the song ended) between two `uzu` commands.
+    fn moving_queue(log: Arc<Mutex<Vec<Request>>>) -> (impl Fn(Request) -> Reply + Send + Sync + 'static, Arc<Mutex<Vec<SongInfo>>>) {
+        let up: Arc<Mutex<Vec<SongInfo>>> = Arc::new(Mutex::new((1..6).map(song).collect()));
+        let up2 = up.clone();
+        let handler = move |req: Request| {
+            log.lock().unwrap().push(req.clone());
+            let q = |l: &Vec<SongInfo>| Queue { current: Some(song(0)), up_next: l.clone(), source: "Mix".into(), ..Default::default() };
+            let mut l = up2.lock().unwrap();
+            match req {
+                Request::Queue => Reply::Queue(q(&l)),
+                Request::Remove { indices, .. } => {
+                    let mut idx = indices.clone();
+                    idx.sort_unstable();
+                    for i in idx.into_iter().rev() {
+                        l.remove(i);
+                    }
+                    Reply::Queue(q(&l))
+                }
+                Request::Jump { index, .. } => {
+                    let x = l.remove(index);
+                    Reply::Status(Status { state: PlayState::Playing, song: Some(x), ..Default::default() })
+                }
+                _ => Reply::Status(Status { state: PlayState::Playing, song: Some(song(0)), ..Default::default() }),
+            }
+        };
+        (handler, up)
+    }
+
+    /// R4: `uzu del <n>` (and `move`, `jump <n>`) take n as a live index, while `uzu play <n>`
+    /// after `uzu queue` follows the printed list by song id. One song ending between the two
+    /// commands is enough for `del 2` to remove the song printed as 3.
+    #[test]
+    fn r4_del_n_removes_the_song_printed_as_n() {
+        let log: Arc<Mutex<Vec<Request>>> = Arc::default();
+        let (handler, up) = moving_queue(log);
+        let path = socket("review-del");
+        let _server = serve(&path, handler).unwrap();
+        let (r, out) = drive(&path, "queue");
+        assert!(r.is_ok());
+        let line2 = out.lines().find(|l| l.trim_start().starts_with("2 ")).unwrap().to_string();
+        assert!(line2.contains(&song(2).title), "{out}");
+        // The playing song ends: song 1 plays, the list moves up by one.
+        up.lock().unwrap().remove(0);
+        let (r, _) = drive(&path, "del 2");
+        assert!(r.is_ok());
+        let left: Vec<String> = up.lock().unwrap().iter().map(|s| s.id.clone()).collect();
+        assert!(!left.contains(&song(2).id), "printed #2 ({}) should be gone; left {left:?}", song(2).id);
+    }
+
+    /// R4b: the same for `jump <n>`.
+    #[test]
+    fn r4b_jump_n_plays_the_song_printed_as_n() {
+        let log: Arc<Mutex<Vec<Request>>> = Arc::default();
+        let (handler, up) = moving_queue(log);
+        let path = socket("review-jump");
+        let _server = serve(&path, handler).unwrap();
+        let _ = drive(&path, "queue");
+        up.lock().unwrap().remove(0);
+        let (r, out) = drive(&path, "-q jump 2");
+        assert!(r.is_ok(), "{out}");
+        let left: Vec<String> = up.lock().unwrap().iter().map(|s| s.id.clone()).collect();
+        // A jump removes the songs before it in the real app; this fake only takes the target out.
+        assert!(!left.contains(&song(2).id), "printed #2 should be the one played; left {left:?}");
+    }
+
+    /// R5: in a pipe (`uzu playlists | grep`, `uzu queue -a > file`) the lists are cut to 80
+    /// columns with `…`: `Term::detect` falls back to 80 when stdout isn't a terminal (and
+    /// `$COLUMNS` isn't exported by shells). `drive` uses width 80 and no colour, which is
+    /// exactly what a pipe gets.
+    #[test]
+    fn r5_piped_lists_keep_whole_titles() {
+        let long = "An Extremely Long Song Title That Goes On (Deluxe Anniversary Remastered Edition)";
+        let handler = move |req: Request| match req {
+            Request::Queue => Reply::Queue(Queue { current: Some(song(0)), up_next: vec![SongInfo { id: "x".into(), title: long.into(), artist: "Some Artist With A Long Name".into(), duration: 200.0, playable: true, ..Default::default() }], ..Default::default() }),
+            _ => Reply::Status(Status::default()),
+        };
+        let path = socket("review-pipe");
+        let _server = serve(&path, handler).unwrap();
+        let (r, out) = drive(&path, "queue");
+        assert!(r.is_ok());
+        assert!(out.contains(long), "title cut in a pipe:\n{out}");
+    }
+
+    /// R3b: the one-shot form of R3. `uzu playlist Mix` records `Last::Songs { id }` and
+    /// `uzu play 2` sends index 1 of whatever the playlist holds by then.
+    #[test]
+    fn r3b_play_n_after_playlist_plays_the_printed_song() {
+        let songs: Arc<Mutex<Vec<SongInfo>>> = Arc::new(Mutex::new((1..4).map(song).collect()));
+        let played: Arc<Mutex<Option<String>>> = Arc::default();
+        let info = collection(Kind::Playlist, "p.mix", "Mix", "", false);
+        let handler = {
+            let (songs, played) = (songs.clone(), played.clone());
+            move |req: Request| match req {
+                Request::Playlists => Reply::Collections { items: vec![info.clone()] },
+                Request::Tracks { .. } => Reply::Tracks { collection: info.clone(), songs: songs.lock().unwrap().clone() },
+                Request::PlayCollection { index, .. } => {
+                    let x = songs.lock().unwrap().get(index.unwrap_or(0)).cloned();
+                    *played.lock().unwrap() = x.as_ref().map(|x| x.id.clone());
+                    Reply::Status(Status { state: PlayState::Playing, song: x, ..Default::default() })
+                }
+                _ => Reply::Status(Status { state: PlayState::Playing, song: Some(song(9)), ..Default::default() }),
+            }
+        };
+        let path = socket("review-play-n");
+        let _server = serve(&path, handler).unwrap();
+        let (r, out) = drive(&path, "playlist mix");
+        assert!(r.is_ok(), "{out}");
+        assert!(out.lines().nth(2).unwrap().contains(&song(2).title), "{out}");
+        songs.lock().unwrap().insert(0, song(7)); // a song added at the top meanwhile
+        let (r, _) = drive(&path, "-q play 2");
+        assert!(r.is_ok());
+        assert_eq!(played.lock().unwrap().as_deref(), Some(song(2).id.as_str()), "printed #2 is {}", song(2).id);
+    }
 }

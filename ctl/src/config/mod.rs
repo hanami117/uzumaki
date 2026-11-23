@@ -271,11 +271,18 @@ impl Config {
         let l = &mut self.layout;
         match e.key.as_str() {
             "start_screen" => {
-                // A screen's number works too.
-                if let Value::Integer(n) = &e.value
-                    && (1..=5).contains(n)
-                {
-                    l.start_screen = *n as usize - 1;
+                // A screen's number works too, also in quotes ("2").
+                let number = match &e.value {
+                    Value::Integer(n) => Some(*n),
+                    Value::String(t) => t.trim().parse::<i64>().ok(),
+                    _ => None,
+                };
+                if let Some(n) = number {
+                    if (1..=5).contains(&n) {
+                        l.start_screen = n as usize - 1;
+                    } else {
+                        w.add(e.line, format!("'start_screen' is a screen: a number from 1 to {} or its name (got {n})", SCREEN_NAMES.len()));
+                    }
                     return;
                 }
                 if let Some(i) = want_choice(e, w, SCREEN_NAMES) {

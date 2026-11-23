@@ -9,6 +9,18 @@ takes each release's notes from its section here.
 - **uzu:** the Queue screen kept showing an old list when a filter (`/`) was on and another playlist started from
   the window. A queue from another source now clears the filter and says so. With this app version the screen also
   follows every queue change within half a second, instead of every 3 s.
+- **uzu:** the Queue filter is also cleared when a new queue has the same name as the old one (two searches played
+  from the window, two playlists with the same title).
+- **uzu:** commands and keys that pick a song by its number now act on the song you saw, even if the list changed
+  in between (a song ended, a song was added to the playlist, another `uzu` searched): `uzu del`/`jump`/`move`/`play
+  <n>`, `uzu pick`, Enter, `d`, `J`/`K` in the TUI. If that song is gone, uzu says so instead of picking another one.
+- **uzu:** Enter on an AutoPlay suggestion in the Queue screen plays it, instead of an "Up Next has N songs" error.
+- **uzu:** `J`/`K` keep the selection on the moved song, so pressing `J` again moves the same song further.
+- **uzu:** lists written to a pipe or a file (`uzu playlists | grep …`, `uzu queue -a > file`) keep whole titles
+  instead of cutting them at 80 columns; the search hint and the "from the cache" note stay out of them.
+- **uzu:** the Lyrics screen works again after Uzumaki was updated and restarted while `uzu` stayed open, and a reply
+  `uzu` can't read says to update `uzu` instead of "lost the connection". `start_screen` in `uzu.toml` takes a number
+  in quotes and says "1 to 5" for one out of range.
 
 ## [0.4.1] - 2026-11-23
 

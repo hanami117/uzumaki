@@ -22,29 +22,39 @@ pub const NOT_RUNNING: &str = "uzumaki isn't running (start it with: uzu start)"
 pub struct Term {
     pub width: usize,
     pub color: bool,
+    /// Stdout is a terminal. In a pipe or a file (`uzu playlists | grep`, `uzu queue -a > f`)
+    /// lists keep whole titles (see [`Term::list_width`]).
+    pub tty: bool,
 }
 
 impl Term {
+    /// The width numbered lists are fitted to: the terminal's, or none in a pipe, so scripts get
+    /// every title whole (the columns stay aligned on the longest one).
+    pub fn list_width(&self) -> usize {
+        if self.tty { self.width } else { usize::MAX }
+    }
+
     /// The real terminal: colour on a TTY unless `NO_COLOR`; width from the ioctl, `$COLUMNS`, or 80.
     pub fn detect() -> Self {
         #[cfg(unix)]
-        let (tty, columns) = {
+        let (tty, ansi, columns) = {
             let tty = unsafe { libc::isatty(1) } == 1;
             let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
             let from_ioctl = unsafe { libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) } == 0 && ws.ws_col > 0;
-            (tty, from_ioctl.then_some(ws.ws_col as usize))
+            (tty, tty, from_ioctl.then_some(ws.ws_col as usize))
         };
         // Windows: the console's own answer. A console that can't take ANSI escapes (old conhost
         // with virtual terminal processing refused) gets plain text.
         #[cfg(windows)]
-        let (tty, columns) = {
+        let (tty, ansi, columns) = {
             use std::io::IsTerminal;
-            let tty = std::io::stdout().is_terminal() && crate::winterm::enable_ansi();
-            (tty, if tty { crate::winterm::columns() } else { None })
+            let tty = std::io::stdout().is_terminal();
+            let ansi = tty && crate::winterm::enable_ansi();
+            (tty, ansi, if tty { crate::winterm::columns() } else { None })
         };
-        let color = tty && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
+        let color = ansi && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
         let width = columns.unwrap_or_else(|| std::env::var("COLUMNS").ok().and_then(|c| c.trim().parse().ok()).filter(|w| *w > 0).unwrap_or(80));
-        Term { width, color }
+        Term { width, color, tty }
     }
 }
 
@@ -157,6 +167,8 @@ fn call(be: &mut dyn Backend, req: Request) -> Result<Reply, Fail> {
     match be.request(&req) {
         Ok(Reply::Error { message }) => Err(Fail::err(message)),
         Ok(reply) => Ok(reply),
+        // A reply this uzu can't read: the app is newer (a new kind of answer), not gone.
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => Err(Fail::err(format!("Uzumaki answered something this uzu doesn't understand: update uzu to the app's version ({e})"))),
         Err(e) => Err(Fail::err(format!("lost the connection to Uzumaki ({e})"))),
     }
 }
@@ -199,7 +211,8 @@ fn playing_id(be: &mut dyn Backend) -> Option<String> {
 }
 
 fn offline_note(be: &dyn Backend, env: &Env, out: &mut dyn Write) -> Result<(), Fail> {
-    if be.offline() {
+    // In a pipe the note would mix with the list a script reads.
+    if be.offline() && env.term.tty {
         put(out, &render(&[dim("(Uzumaki isn't running — from the cache)")], env.term.width, env.term.color))?;
     }
     Ok(())
@@ -318,7 +331,7 @@ fn find(be: &mut dyn Backend, env: &Env, kind: Kind, query: &str) -> Result<Coll
         Found::None => Err(Fail::err(format!("no {} matches '{query}' (see: uzu {}s)", noun(kind), noun(kind)))),
         Found::Many(hits) => {
             let shown: Vec<_> = hits.iter().map(|&i| (i + 1, &items[i])).collect();
-            let lines = list::rows(&list::collection_rows(&shown), env.term.width, false);
+            let lines = list::rows(&list::collection_rows(&shown), env.term.list_width(), false);
             Err(Fail::err(format!("'{query}' matches several {}s, pick one by number:\n{}", noun(kind), lines.join("\n"))))
         }
     }
@@ -333,7 +346,7 @@ fn list_collections(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, kind: 
         let what = if filter.is_empty() { format!("no {}s", noun(kind)) } else { format!("no {}s match '{filter}'", noun(kind)) };
         return put(out, &render(&[dim(what)], env.term.width, env.term.color));
     }
-    put_all(out, &list::rows(&list::collection_rows(&shown), env.term.width, env.term.color))
+    put_all(out, &list::rows(&list::collection_rows(&shown), env.term.list_width(), env.term.color))
 }
 
 /// `playlist add-local`: the file goes into the playlist (on this computer only for an Apple one),
@@ -345,8 +358,8 @@ fn add_local(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, playlist: &st
         Reply::Tracks { collection, songs } => (collection, songs),
         _ => return Err(unexpected()),
     };
-    env.record(Last::Songs { kind: Kind::Playlist, id: found.id });
-    let Term { width, color } = env.term;
+    env.record(Last::Songs { kind: Kind::Playlist, id: found.id, songs: songs.iter().map(|s| s.id.clone()).collect() });
+    let (width, color) = (env.term.list_width(), env.term.color);
     put(out, &list::tracks_header(&collection, &songs, width, color))?;
     put_all(out, &list::rows(&list::song_rows(&songs, None), width, color))
 }
@@ -357,10 +370,10 @@ fn show_tracks(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, kind: Kind,
         Reply::Tracks { collection, songs } => (collection, songs),
         _ => return Err(unexpected()),
     };
-    env.record(Last::Songs { kind, id: found.id });
+    env.record(Last::Songs { kind, id: found.id, songs: songs.iter().map(|s| s.id.clone()).collect() });
     let playing = playing_id(be);
     offline_note(be, env, out)?;
-    let Term { width, color } = env.term;
+    let (width, color) = (env.term.list_width(), env.term.color);
     put(out, &list::tracks_header(&collection, &songs, width, color))?;
     if songs.is_empty() {
         return put(out, &render(&[dim("(no songs)")], width, color));
@@ -381,12 +394,12 @@ fn now_playing_line(song: &SongInfo, st: Option<&Status>, term: Term) -> String 
     if !time.is_empty() {
         spans.push(dim(format!("   {time}")));
     }
-    render(&spans, term.width, term.color)
+    render(&spans, term.list_width(), term.color)
 }
 
 /// Section heading lines and numbered rows for `uzu queue`.
 pub(crate) fn queue_lines(q: &Queue, st: Option<&Status>, all: bool, term: Term) -> Vec<String> {
-    let Term { width, color } = term;
+    let (width, color) = (term.list_width(), term.color);
     let mut lines = Vec::new();
     if !q.history.is_empty() {
         lines.push(render(&[bold("◷ History (replay: uzu history <n>)")], width, color));
@@ -477,36 +490,117 @@ fn jump_title(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, words: &str,
     let q = fetch_queue(be)?;
     let titles: Vec<&str> = q.up_next.iter().map(|s| s.title.as_str()).collect();
     match args::first_title(&titles, words) {
-        Some(index) => act(be, env, out, Request::Jump { index }, true, quiet),
+        Some(index) => act(be, env, out, Request::Jump { index, id: Some(q.up_next[index].id.clone()) }, true, quiet),
         None => Err(Fail::err(format!("no song in Up Next matches '{words}' (see: uzu queue -a)"))),
     }
+}
+
+/// What the numbers of `jump`, `move` and `del` point at: after `uzu queue`, the songs it printed
+/// (found by id in the queue as it is now, which may have moved on), else Up Next as it is now.
+struct QueueNumbers {
+    /// `uzu queue`'s record: the up-next ids as printed.
+    printed: Option<Vec<String>>,
+    /// The queue now, fetched once when a printed number needs it.
+    now: Option<Queue>,
+}
+
+impl QueueNumbers {
+    fn load(env: &Env) -> Self {
+        let printed = match env.last.as_deref().and_then(last::load) {
+            Some(Last::Queue { ids }) => Some(ids),
+            _ => None,
+        };
+        QueueNumbers { printed, now: None }
+    }
+
+    /// Entry `i` (0-based) as the user means it: its place in the queue now, and the song's id
+    /// for the app to check (`None`: a number past what was printed, taken as is).
+    fn resolve(&mut self, be: &mut dyn Backend, i: usize) -> Result<(usize, Option<String>), Fail> {
+        let Some(id) = self.printed.as_ref().and_then(|p| p.get(i)).cloned() else { return Ok((i, None)) };
+        // The same song may appear twice: take the same occurrence as printed.
+        let nth = self.printed.as_ref().map_or(0, |p| p[..i].iter().filter(|x| **x == id).count());
+        if self.now.is_none() {
+            self.now = Some(fetch_queue(be)?);
+        }
+        let q = self.now.as_ref().map_or(&[][..], |q| &q.up_next[..]);
+        match q.iter().enumerate().filter(|(_, s)| s.id == id).nth(nth) {
+            Some((index, _)) => Ok((index, Some(id))),
+            None => Err(Fail::err(format!("song {} of the list uzu queue printed is no longer in the queue (see: uzu queue)", i + 1))),
+        }
+    }
+}
+
+/// `jump <n>`.
+fn jump(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, i: usize, quiet: bool) -> Result<(), Fail> {
+    let (index, id) = QueueNumbers::load(env).resolve(be, i)?;
+    act(be, env, out, Request::Jump { index, id }, true, quiet)
+}
+
+/// `move <from> <to>`: with the song found elsewhere than printed, `to` moves along with it.
+fn move_song(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, from: usize, to: usize, quiet: bool) -> Result<(), Fail> {
+    let (now, id) = QueueNumbers::load(env).resolve(be, from)?;
+    let to = (to + now).saturating_sub(from);
+    change_queue(be, env, out, Request::Move { from: now, to, id }, quiet)
+}
+
+/// `del <n>…`: the ids go along when every number was found in the printed list.
+fn remove(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, numbers: &[usize], quiet: bool) -> Result<(), Fail> {
+    let mut numbers_now = QueueNumbers::load(env);
+    let found = numbers.iter().map(|&i| numbers_now.resolve(be, i)).collect::<Result<Vec<_>, _>>()?;
+    let indices = found.iter().map(|(i, _)| *i).collect();
+    let ids = found.into_iter().map(|(_, id)| id).collect::<Option<Vec<String>>>().unwrap_or_default();
+    change_queue(be, env, out, Request::Remove { indices, ids }, quiet)
+}
+
+/// `pick`/`insert`/`add <n>…`: after `uzu search`, the songs it printed, by id (another client's
+/// search in between changes nothing); else the app's last search.
+fn pick(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, indices: &[usize], action: PickAction, quiet: bool) -> Result<(), Fail> {
+    let ids = match env.last.as_deref().and_then(last::load) {
+        Some(Last::Search { ids }) if !ids.is_empty() => indices
+            .iter()
+            .map(|&i| ids.get(i).cloned().ok_or_else(|| Fail::err(format!("the last search has only {} songs", ids.len()))))
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => Vec::new(),
+    };
+    act(be, env, out, Request::Pick { indices: indices.to_vec(), action, ids }, action == PickAction::Play, quiet)
 }
 
 /// `play <n>`: entry n of the list printed last; with no record, playlist n.
 fn play_number(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, i: usize, quiet: bool) -> Result<(), Fail> {
     let last = env.last.as_deref().and_then(last::load);
     let too_far = |len: usize, what: &str| Fail::err(format!("the last list has only {len} {what}"));
+    let whole = |kind, id| Request::PlayCollection { kind, id, index: None, order: None, song_id: None };
     match last {
         None => {
             let c = find(be, env, Kind::Playlist, &(i + 1).to_string())?;
-            act(be, env, out, Request::PlayCollection { kind: Kind::Playlist, id: c.id, index: None, order: None }, true, quiet)
+            act(be, env, out, whole(Kind::Playlist, c.id), true, quiet)
         }
         Some(Last::Collections { kind, ids }) => match ids.get(i) {
-            Some(id) => act(be, env, out, Request::PlayCollection { kind, id: id.clone(), index: None, order: None }, true, quiet),
+            Some(id) => act(be, env, out, whole(kind, id.clone()), true, quiet),
             None => Err(too_far(ids.len(), &format!("{}s", noun(kind)))),
         },
-        Some(Last::Songs { kind, id }) => act(be, env, out, Request::PlayCollection { kind, id, index: Some(i), order: None }, true, quiet),
-        Some(Last::Search) => act(be, env, out, Request::Pick { indices: vec![i], action: PickAction::Play }, true, quiet),
-        Some(Last::Queue { ids }) => {
-            let Some(id) = ids.get(i) else { return Err(too_far(ids.len(), "songs")) };
-            // The same song may appear twice: take the same occurrence as printed.
-            let nth = ids[..i].iter().filter(|x| *x == id).count();
-            let q = fetch_queue(be)?;
-            let index = q.up_next.iter().enumerate().filter(|(_, s)| &s.id == id).nth(nth).map(|(k, _)| k);
-            match index {
-                Some(index) => act(be, env, out, Request::Jump { index }, true, quiet),
-                None => Err(Fail::err("that song is no longer in the queue")),
+        // A record from an older uzu: the song at that place now.
+        Some(Last::Songs { kind, id, songs }) if songs.is_empty() => act(be, env, out, Request::PlayCollection { kind, id, index: Some(i), order: None, song_id: None }, true, quiet),
+        Some(Last::Songs { kind, id, songs }) => {
+            let Some(song) = songs.get(i) else { return Err(too_far(songs.len(), "songs")) };
+            // The list may have changed since it was printed (a song added at the top, Apple's
+            // order): play the printed song from where it is now.
+            let nth = songs[..i].iter().filter(|x| *x == song).count();
+            let now = match call(be, Request::Tracks { kind, id: id.clone() })? {
+                Reply::Tracks { songs, .. } => songs,
+                _ => return Err(unexpected()),
+            };
+            match now.iter().enumerate().filter(|(_, s)| &s.id == song).nth(nth) {
+                Some((index, _)) => act(be, env, out, Request::PlayCollection { kind, id, index: Some(index), order: None, song_id: Some(song.clone()) }, true, quiet),
+                None => Err(Fail::err(format!("song {} is no longer in that {} (see: uzu {} …)", i + 1, noun(kind), noun(kind)))),
             }
+        }
+        Some(Last::Search { .. }) => pick(be, env, out, &[i], PickAction::Play, quiet),
+        Some(Last::Queue { ids }) => {
+            if i >= ids.len() {
+                return Err(too_far(ids.len(), "songs"));
+            }
+            jump(be, env, out, i, quiet)
         }
     }
 }
@@ -516,12 +610,15 @@ fn search(be: &mut dyn Backend, env: &Env, out: &mut dyn Write, query: &str) -> 
         Reply::Songs { songs } => songs,
         _ => return Err(unexpected()),
     };
-    env.record(Last::Search);
-    let Term { width, color } = env.term;
+    env.record(Last::Search { ids: songs.iter().map(|s| s.id.clone()).collect() });
+    let (width, color) = (env.term.list_width(), env.term.color);
     if songs.is_empty() {
         return put(out, &render(&[dim(format!("no songs found for '{query}'"))], width, color));
     }
     put_all(out, &list::rows(&list::song_rows(&songs, None), width, color))?;
+    if !env.term.tty {
+        return Ok(()); // the hint isn't a result: keep it out of a pipe
+    }
     put(out, &render(&[dim("uzu pick <n>  ·  uzu insert <n>  ·  uzu add <n>")], width, color))
 }
 
@@ -579,7 +676,7 @@ pub fn run(inv: &Invocation, be: &mut dyn Backend, env: &Env, out: &mut dyn Writ
         Command::PlayNumber(i) => play_number(be, env, out, *i, q),
         Command::PlayCollection { kind, words, song } => {
             let c = find(be, env, *kind, &words.join(" "))?;
-            act(be, env, out, Request::PlayCollection { kind: *kind, id: c.id, index: *song, order: None }, true, q)
+            act(be, env, out, Request::PlayCollection { kind: *kind, id: c.id, index: *song, order: None, song_id: None }, true, q)
         }
         Command::Pause => act(be, env, out, Request::Pause, false, q),
         Command::Toggle => act(be, env, out, Request::Toggle, false, q),
@@ -601,14 +698,14 @@ pub fn run(inv: &Invocation, be: &mut dyn Backend, env: &Env, out: &mut dyn Writ
         Command::Playlist(query) => show_tracks(be, env, out, Kind::Playlist, query),
         Command::PlaylistAddLocal { playlist, file } => add_local(be, env, out, playlist, file),
         Command::Album(query) => show_tracks(be, env, out, Kind::Album, query),
-        Command::History(index) => act(be, env, out, Request::History { index: *index }, true, q),
+        Command::History(index) => act(be, env, out, Request::History { index: *index, id: None }, true, q),
         Command::Queue { all } => show_queue(be, env, out, *all),
-        Command::Jump(index) => act(be, env, out, Request::Jump { index: *index }, true, q),
+        Command::Jump(index) => jump(be, env, out, *index, q),
         Command::JumpTitle(words) => jump_title(be, env, out, words, q),
-        Command::Move { from, to } => change_queue(be, env, out, Request::Move { from: *from, to: *to }, q),
-        Command::Remove(indices) => change_queue(be, env, out, Request::Remove { indices: indices.clone() }, q),
+        Command::Move { from, to } => move_song(be, env, out, *from, *to, q),
+        Command::Remove(indices) => remove(be, env, out, indices, q),
         Command::Search(query) => search(be, env, out, query),
-        Command::Pick { indices, action } => act(be, env, out, Request::Pick { indices: indices.clone(), action: *action }, *action == PickAction::Play, q),
+        Command::Pick { indices, action } => pick(be, env, out, indices, *action, q),
         Command::Watch => watch(be, env, out),
         Command::Show => call(be, Request::Show).map(|_| ()),
         Command::Start | Command::Quit | Command::Restart | Command::Help | Command::Version | Command::Screen | Command::CoverInfo | Command::Config(_) => Ok(()), // handled by main

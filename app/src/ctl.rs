@@ -8,7 +8,7 @@
 //! choice, Settings → Account) is seen, and none in local only mode. Commands that need Apple
 //! Music then answer so (`needs_apple`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, SystemTime};
 
@@ -28,10 +28,13 @@ const QUIT_DELAY: Duration = Duration::from_millis(200);
 const AIRPLAY_LOOK: Duration = Duration::from_secs(3);
 /// How long one Apple Music API call may take.
 const API_TIMEOUT: Duration = Duration::from_secs(20);
+/// How many searches `Pick` can still take songs from (by id): a client picks from the results
+/// it shows even after other clients searched (a second `uzu`, a script).
+const SEARCHES_KEPT: usize = 16;
 
 /// Starts listening. The socket file goes away when the returned server is dropped.
 pub fn start(handle: Handle) -> Option<Server> {
-    let ctl = Ctl { handle, cache: Cache::default_location(), last_search: Mutex::default(), disk_counts: Mutex::default() };
+    let ctl = Ctl { handle, cache: Cache::default_location(), searches: Mutex::default(), disk_counts: Mutex::default() };
     match uzumaki_ctl::serve(&uzumaki_ctl::socket_path(), move |req| ctl.answer(req)) {
         Ok(server) => Some(server),
         Err(e) => {
@@ -55,8 +58,9 @@ pub fn other_copy_running(show: bool) -> bool {
 struct Ctl {
     handle: Handle,
     cache: Cache,
-    /// The last `uzu search`: its words and songs, for `uzu pick/insert/add`.
-    last_search: Mutex<(String, Vec<Song>)>,
+    /// The last searches (`uzu search`, the TUI's), newest first: their words and songs, for
+    /// `Pick` (by id from any of them; by index from the newest, for old clients).
+    searches: Mutex<VecDeque<(String, Vec<Song>)>>,
     disk_counts: Mutex<DiskCounts>,
 }
 
@@ -138,20 +142,17 @@ impl Ctl {
                 Ok(Reply::Tracks { collection: info, songs: songs.iter().map(song_info).collect() })
             }
             R::PlaylistAddLocal { id, path } => self.on_ui(true, move |s| s.ctl_add_local(&id, &path))?.map(|(collection, songs)| Reply::Tracks { collection, songs }),
-            R::PlayCollection { kind, id, index, order } => {
+            R::PlayCollection { kind, id, index, order, song_id } => {
                 let c = self.collection(kind, &id)?;
-                self.try_act(move |s| s.ctl_play_collection(&c, index, order.as_deref()))
+                self.try_act(move |s| s.ctl_play_collection(&c, index, order.as_deref(), song_id.as_deref()))
             }
             R::Queue => self.read(|s| Reply::Queue(s.ctl_queue())),
-            R::History { index } => self.try_act(move |s| {
-                let Some(&i) = s.history_indices().get(index) else { return Err("History entry no longer exists".into()); };
-                s.play_history(i); Ok(())
-            }),
-            R::Jump { index } => self.try_act(move |s| s.ctl_jump(index)),
-            R::Move { from, to } => self.on_ui(true, move |s| s.ctl_move(from, to).map(|()| Reply::Queue(s.ctl_queue())))?,
-            R::Remove { indices } => self.on_ui(true, move |s| s.ctl_remove(&indices).map(|()| Reply::Queue(s.ctl_queue())))?,
+            R::History { index, id } => self.try_act(move |s| s.ctl_history(index, id.as_deref())),
+            R::Jump { index, id } => self.try_act(move |s| s.ctl_jump(index, id.as_deref())),
+            R::Move { from, to, id } => self.on_ui(true, move |s| s.ctl_move(from, to, id.as_deref()).map(|()| Reply::Queue(s.ctl_queue())))?,
+            R::Remove { indices, ids } => self.on_ui(true, move |s| s.ctl_remove(&indices, &ids).map(|()| Reply::Queue(s.ctl_queue())))?,
             R::Search { query } => self.search(&query),
-            R::Pick { indices, action } => self.pick(&indices, action),
+            R::Pick { indices, action, ids } => self.pick(&indices, &ids, action),
             // From memory: `ctl_lyrics` never calls the bridge except to fetch lyrics that are
             // missing, once (this thread doesn't wait for Apple; the next poll sees the result).
             R::Lyrics => self.on_ui(true, |s| s.ctl_lyrics()),
@@ -313,27 +314,51 @@ impl Ctl {
         }
         let songs = SearchResults::parse(&self.api(api::search(query))?).songs;
         let reply = Reply::Songs { songs: songs.iter().map(song_info).collect() };
-        *self.last_search.lock().unwrap_or_else(|e| e.into_inner()) = (query.to_string(), songs);
+        let mut kept = self.searches.lock().unwrap_or_else(|e| e.into_inner());
+        kept.push_front((query.to_string(), songs));
+        kept.truncate(SEARCHES_KEPT);
         Ok(reply)
     }
 
-    fn pick(&self, indices: &[usize], action: PickAction) -> Result<Reply, String> {
+    /// `ids` (newer clients): those songs, from whichever recent search has them. Else
+    /// `indices` into the newest search.
+    fn pick(&self, indices: &[usize], ids: &[String], action: PickAction) -> Result<Reply, String> {
         let (source, songs) = {
-            let last = self.last_search.lock().unwrap_or_else(|e| e.into_inner());
-            if last.1.is_empty() {
-                return Err("search first: uzu search <words>".into());
-            }
-            let songs = indices
-                .iter()
-                .map(|&i| last.1.get(i).cloned().ok_or_else(|| format!("the last search has no result {}", i + 1)))
-                .collect::<Result<Vec<Song>, String>>()?;
-            (format!("Search “{}”", last.0), songs)
+            let kept = self.searches.lock().unwrap_or_else(|e| e.into_inner());
+            pick_songs(&kept, indices, ids)?
         };
         if songs.is_empty() {
             return Err("pick which? uzu pick <n>".into());
         }
         self.try_act(move |s| s.ctl_pick(songs, action, &source))
     }
+}
+
+/// The songs `Pick` means, and the queue's name ("Search “words”"). See [`Ctl::pick`].
+fn pick_songs(kept: &VecDeque<(String, Vec<Song>)>, indices: &[usize], ids: &[String]) -> Result<(String, Vec<Song>), String> {
+    if !ids.is_empty() {
+        let mut query = None;
+        let songs = ids
+            .iter()
+            .map(|id| {
+                let (q, song) = kept
+                    .iter()
+                    .find_map(|(q, songs)| songs.iter().find(|s| &s.id == id).map(|s| (q, s)))
+                    .ok_or("Uzumaki no longer has that search's results (it restarted, or many searches came since): search again")?;
+                query.get_or_insert(q);
+                Ok(song.clone())
+            })
+            .collect::<Result<Vec<Song>, String>>()?;
+        return Ok((format!("Search “{}”", query.map_or("", |q| q.as_str())), songs));
+    }
+    let Some((query, last)) = kept.front().filter(|(_, songs)| !songs.is_empty()) else {
+        return Err("search first: uzu search <words>".into());
+    };
+    let songs = indices
+        .iter()
+        .map(|&i| last.get(i).cloned().ok_or_else(|| format!("the last search has no result {}", i + 1)))
+        .collect::<Result<Vec<Song>, String>>()?;
+    Ok((format!("Search “{query}”"), songs))
 }
 
 /// Commands that need Apple Music, by the name `uzu` gives them (`None`: they work in local
@@ -372,6 +397,26 @@ mod tests {
 
     fn info(id: &str, count: Option<u32>) -> CollectionInfo {
         CollectionInfo { kind: Kind::Playlist, id: id.into(), title: id.into(), subtitle: String::new(), count, favorites: false, editable: true, year: None, pinned: None }
+    }
+
+    fn found(ids: &[&str]) -> Vec<Song> {
+        ids.iter().map(|id| Song::parse(&json!({"id": id, "attributes": {"name": format!("Song {id}"), "playParams": {"id": id}}})).unwrap()).collect()
+    }
+
+    /// Review 2026-11-23 (R2): a client picks the results it shows (by id), whatever other
+    /// clients searched since; old clients (no ids) still get the newest search by number.
+    #[test]
+    fn pick_takes_ids_from_any_recent_search() {
+        let mut kept = VecDeque::new();
+        assert_eq!(pick_songs(&kept, &[0], &[]), Err("search first: uzu search <words>".into()));
+        kept.push_front(("abba".to_string(), found(&["a0", "a1"])));
+        kept.push_front(("metallica".to_string(), found(&["m0", "m1"])));
+        let (source, songs) = pick_songs(&kept, &[0], &["a1".to_string()]).unwrap();
+        assert_eq!((source.as_str(), songs[0].id.as_str()), ("Search “abba”", "a1"), "the TUI's own result, not the other client's");
+        let (source, songs) = pick_songs(&kept, &[1], &[]).unwrap();
+        assert_eq!((source.as_str(), songs[0].id.as_str()), ("Search “metallica”", "m1"), "an old client: the last search");
+        assert!(pick_songs(&kept, &[0], &["gone".to_string()]).unwrap_err().contains("search again"));
+        assert_eq!(pick_songs(&kept, &[5], &[]), Err("the last search has no result 6".into()));
     }
 
     #[test]

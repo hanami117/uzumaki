@@ -169,7 +169,9 @@ impl Search {
 
     fn pick(&self, action: PickAction, said: &str) -> Out {
         match self.results.get(self.cursor) {
-            Some(song) => Out::Request(Request::Pick { indices: vec![self.cursor], action }, Some(format!("{said}: {}", song.title))),
+            // By id: the app finds this result among its recent searches, so another client's
+            // search in between doesn't change what plays.
+            Some(song) => Out::Request(Request::Pick { indices: vec![self.cursor], action, ids: vec![song.id.clone()] }, Some(format!("{said}: {}", song.title))),
             None => Out::None,
         }
     }
