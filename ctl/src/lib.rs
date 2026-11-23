@@ -363,7 +363,7 @@ pub enum Kind {
     Playlist,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RepeatMode {
     #[default]
@@ -493,6 +493,12 @@ pub struct Status {
     /// field).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub airplay: Option<AirPlayNow>,
+    /// [`Queue::rev`] of the queue a `Queue` request would answer now. It changes with anything
+    /// in that answer (another source, a reorder, shuffle, the next song, an insert or removal,
+    /// AutoPlay's songs, the history), so a client fetches the queue only when it changed.
+    /// `None` from apps older than this field: poll the queue instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_rev: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
@@ -536,7 +542,7 @@ pub fn pinned_first(items: &mut [CollectionInfo]) {
     items.sort_by_key(|c| c.pinned.unwrap_or(u32::MAX));
 }
 
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Default, Hash, Serialize, Deserialize)]
 pub struct Queue {
     pub current: Option<SongInfo>,
     /// What plays after the current song, in order. The first `queued` entries are songs the
@@ -571,6 +577,24 @@ pub struct Queue {
     /// The AutoPlay setting (∞), when the app says. `None` from an older app.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autoplay_on: Option<bool>,
+}
+
+impl std::hash::Hash for SongInfo {
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        let SongInfo { id, title, artist, album, duration, explicit, local, playable } = self;
+        (id, title, artist, album, duration.to_bits(), explicit, local, playable).hash(h);
+    }
+}
+
+impl Queue {
+    /// A fingerprint of everything in this queue: equal queues give equal numbers, and any change
+    /// gives another one (barring a 64-bit collision). The app sends it in `Status::queue_rev`.
+    pub fn rev(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::hash::DefaultHasher::new();
+        self.hash(&mut h);
+        h.finish()
+    }
 }
 
 // ------------------------------------------------------------------------------------ transport
@@ -713,6 +737,35 @@ fn connection(stream: Stream, handler: &(dyn Fn(Request) -> Reply + Send + Sync)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `queue_rev` is optional both ways, and the fingerprint moves with any field of the queue.
+    #[test]
+    fn the_queue_rev_is_optional_and_follows_the_queue() {
+        let old = r#"{"state":"playing","song":null,"position":0.0,"duration":0.0,"volume":1.0,"shuffle":false,"repeat":"off","source":"","index":null,"count":0,"queued":0,"connected":true,"signed_in":true,"error":null}"#;
+        assert_eq!(serde_json::from_str::<Status>(old).unwrap().queue_rev, None, "an older app");
+        assert!(!serde_json::to_string(&Status::default()).unwrap().contains("queue_rev"));
+        let st = Status { queue_rev: Some(u64::MAX), ..Default::default() };
+        assert_eq!(serde_json::from_str::<Status>(&serde_json::to_string(&st).unwrap()).unwrap(), st);
+        let song = |id: &str| SongInfo { id: id.into(), title: id.into(), duration: 200.0, playable: true, ..Default::default() };
+        let q = Queue { current: Some(song("a")), up_next: vec![song("b"), song("c")], source: "Mix".into(), ..Default::default() };
+        assert_eq!(q.rev(), q.clone().rev());
+        let changes: [fn(&mut Queue); 9] = [
+            |q| q.up_next.swap(0, 1),
+            |q| q.source = "Other".into(),
+            |q| q.shuffle = true,
+            |q| q.history.push(SongInfo::default()),
+            |q| q.autoplay.push(SongInfo::default()),
+            |q| q.next_lap.push(SongInfo::default()),
+            |q| q.up_next[0].duration = 201.0,
+            |q| q.up_next[1].playable = false,
+            |q| q.autoplay_on = Some(true),
+        ];
+        for (i, change) in changes.iter().enumerate() {
+            let mut other = q.clone();
+            change(&mut other);
+            assert_ne!(other.rev(), q.rev(), "change {i}");
+        }
+    }
 
     /// An old app sends no `next_lap` (and an old `uzu` ignores it): both directions keep working.
     #[test]

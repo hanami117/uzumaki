@@ -1159,6 +1159,49 @@ mod uzu {
         assert_eq!(s.ctl_status().index, Some(2), "the list's own number, not the shuffled order");
     }
 
+    /// `uzu`'s queue screen fetches the queue when `queue_rev` changes: every change of what
+    /// `Queue` answers moves it, and nothing else does (the clock, the same answer twice).
+    #[test]
+    fn the_status_queue_rev_follows_every_change_of_the_queue() {
+        let mut s = State::offline();
+        // Compared with the status before, as the screen does (shuffle off can bring back an
+        // earlier order, and with it an earlier rev).
+        let mut last = s.ctl_status().queue_rev.expect("sent");
+        let mut changed = |s: &State, what: &str| {
+            let rev = s.ctl_status().queue_rev.unwrap();
+            assert_eq!(rev, s.ctl_queue().rev(), "{what}: the fingerprint of the queue answered");
+            assert_ne!(rev, last, "{what}: another rev");
+            last = rev;
+        };
+        let list: Vec<Song> = (1..=6).map(|i| song(&i.to_string())).collect();
+        s.play_list(&list, 0, "Linkin Park");
+        changed(&s, "a search played");
+        let same = s.ctl_status().queue_rev;
+        s.apply_event(Event::Time { current: 30.0, duration: 200.0 });
+        assert_eq!(s.ctl_status().queue_rev, same, "the clock is not the queue");
+        let other: Vec<Song> = (11..=16).map(|i| song(&i.to_string())).collect();
+        s.play_list(&other, 0, "Replay 2026");
+        changed(&s, "another source from the app");
+        s.play_list(&other, 1, "Replay 2026 again");
+        changed(&s, "the same songs from another source");
+        s.set_shuffle(true);
+        changed(&s, "shuffle on");
+        s.set_shuffle(false);
+        changed(&s, "shuffle off");
+        s.ctl_move(0, 2).unwrap();
+        changed(&s, "a reorder");
+        s.ctl_remove(&[0]).unwrap();
+        changed(&s, "a removal");
+        s.add_to_queue(&[song("99")]);
+        changed(&s, "an insert");
+        // Next and Previous move the queue when MusicKit says the song changed.
+        let up = s.ctl_queue().up_next[0].id.clone();
+        s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song(&up)))));
+        changed(&s, "the next song (and the history)");
+        s.apply_msg(Msg::Bridge(Event::NowPlaying(Some(song("13")))));
+        changed(&s, "a jump");
+    }
+
     #[test]
     fn a_queued_song_playing_has_no_list_index() {
         let mut s = State::offline();

@@ -155,6 +155,9 @@ impl State {
                 .map(|p| p.to_string_lossy().into_owned()),
             autoplay: self.autoplay_offered().then_some(self.settings.autoplay),
             airplay: self.ctl_airplay_now(),
+            // The whole answer to `Queue`, so every change of it shows (a client's polls cost a
+            // fingerprint, not the list).
+            queue_rev: Some(self.ctl_queue().rev()),
         }
     }
 
