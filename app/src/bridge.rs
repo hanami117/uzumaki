@@ -440,6 +440,16 @@ impl<M: From<Event> + Send + 'static> Bridge<M> {
                     }
                 }
                 let silent = reader.silent.load(Ordering::SeqCst);
+                // Requests still waiting get their answer now, so pages that were loading don't
+                // wait for ever (only for a crash: a stop on purpose already moved on).
+                let pending: Vec<_> = reader.pending.lock().unwrap().drain().map(|(_, h)| h).collect();
+                if !silent {
+                    for h in pending {
+                        if let Some(m) = h(Err("The playback engine stopped".into())) {
+                            sink(m);
+                        }
+                    }
+                }
                 sink(M::from(if silent { Event::Stopped } else { Event::Exited }));
             })?;
         Ok(Self { inner })
@@ -658,6 +668,8 @@ impl<M: From<Event> + Send + 'static> Engine<M> {
     pub fn shutdown(&self) {
         let b = self.current.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(b) = b {
+            // Quitting: not a crash, so nothing restarts it.
+            b.inner.silent.store(true, Ordering::SeqCst);
             b.shutdown();
         }
     }

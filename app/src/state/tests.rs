@@ -3317,3 +3317,29 @@ fn review_edges_a_playlist_edited_elsewhere_mid_session_is_checked_again_later()
     s.navigate(Route::Collection { kind: CollectionKind::Playlist, id: "p.1".into() });
     assert!(sent_matching(&s, "/v1/me/library/playlists") > lists, "nothing asks Apple again: {:?}", s.sent.borrow());
 }
+
+/// After a crash the song waits paused where it was (Play re-primes it on the new engine), a
+/// restart is pending for the first crashes, and past the limit the banner's Restart is offered.
+#[test]
+fn a_crashed_engine_restarts_a_few_times_then_waits_for_the_user() {
+    let (mut s, starts) = with_engine();
+    s.start_bridge();
+    s.session.bridge_up = true;
+    s.session.authorized = true;
+    s.play_songs(&[song("a"), song("b")], 0);
+    s.apply_msg(Msg::Bridge(Event::PlayState(PlayState::Playing)));
+    s.apply_msg(Msg::Bridge(Event::Exited));
+    assert_eq!(s.playback.state, PlayState::Paused);
+    assert!(s.resume.is_some(), "Play picks the song up again on the new engine");
+    assert!(s.revive.waiting && !s.engine_needs_restart(), "an automatic restart is due");
+    for _ in 0..3 {
+        s.revive.waiting = false; // the timer fired (no handle in tests)
+        s.start_bridge();
+        s.apply_msg(Msg::Bridge(Event::Exited));
+    }
+    assert!(!s.revive.waiting && s.engine_needs_restart(), "after three restarts it's the user's call");
+    s.restart_engine();
+    assert!(s.bridge.is_some() && s.session.error.is_none());
+    assert_eq!(started(&starts), 5);
+    s.engine.as_ref().unwrap().shutdown();
+}

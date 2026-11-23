@@ -593,6 +593,8 @@ pub struct State {
     pub resume: Option<resume::Pending>,
     /// What `resume.rs` was last given, and when (see `State::resume_changed`).
     resume_out: resume::Published,
+    /// Crashes of the playback engine and the restart waiting for its backoff (`state/source.rs`).
+    revive: source::Revive,
     /// Last play request and when, to swallow double-clicks.
     last_play: Option<(String, Instant)>,
     /// A Play or Shuffle of an album or playlist whose songs are loading (`load_then_play`).
@@ -708,6 +710,7 @@ impl State {
             update_auto: Default::default(),
             resume: None,
             resume_out: Default::default(),
+            revive: Default::default(),
             last_play: None,
             pending_play: None,
             growing: None,
@@ -1269,12 +1272,7 @@ impl State {
                 return false;
             }
             Event::AirPlayTainted => return self.airplay_tainted(),
-            Event::Exited => {
-                self.session.bridge_up = false;
-                if self.session.error.is_none() {
-                    self.session.error = Some(format!("The playback engine (Electron) stopped. See {}.", crate::bridge::log_path().display()));
-                }
-            }
+            Event::Exited => self.bridge_exited(),
         }
         true
     }

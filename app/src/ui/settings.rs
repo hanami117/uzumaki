@@ -801,7 +801,9 @@ fn music_source(s: &State, narrow: bool) -> El {
 /// Account → Apple Music: the sign-in state, Sign in / Sign out, and the "really sign out?" box.
 fn apple_music(s: &State, narrow: bool) -> El {
     let ses = &s.session;
-    let status = if !ses.bridge_up {
+    let status = if s.engine_needs_restart() {
+        "Playback engine stopped".to_string()
+    } else if !ses.bridge_up {
         "Playback engine starting\u{2026}".to_string()
     } else if ses.authorized {
         // Read-only: the account's store, saved after sign-in.
@@ -814,7 +816,9 @@ fn apple_music(s: &State, narrow: bool) -> El {
     } else {
         "Not signed in".to_string()
     };
-    let control = if !ses.bridge_up {
+    let control = if s.engine_needs_restart() {
+        row().child(small_button("settings/restart-engine", "Restart").on_press(|s: &mut State| s.restart_engine()))
+    } else if !ses.bridge_up {
         row()
     } else if ses.signing_out {
         row().child(text("Signing out\u{2026}").font(SMALL13).color(PAL.dim))

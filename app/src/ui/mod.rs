@@ -389,7 +389,11 @@ fn banners(s: &State) -> El {
     if s.local_only() {
         // No Apple Music: nothing to start or sign in to.
     } else if let Some(err) = &ses.error {
-        list.push(banner("banner-error", PAL.danger_bg).child(msg(err.clone(), PAL.danger_text)));
+        let mut b = banner("banner-error", PAL.danger_bg).child(msg(err.clone(), PAL.danger_text));
+        if s.engine_needs_restart() {
+            b = b.child(small_button("restart-engine", "Restart").on_press(|s: &mut State| s.restart_engine()));
+        }
+        list.push(b);
     } else if !ses.bridge_up {
         list.push(banner("banner-starting", PAL.chip).child(msg("Starting playback engine\u{2026}".into(), PAL.dim)));
     } else if !ses.authorized {

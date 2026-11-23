@@ -367,7 +367,7 @@ fn main() {
         move |msg: Msg| {
             if let Some(m) = mpris_slot.get() {
                 let local = local_active.load(Ordering::SeqCst);
-                let playback = |e: &Event| matches!(e, Event::NowPlaying(_) | Event::PlayState(_) | Event::Time { .. } | Event::Stopped);
+                let playback = |e: &Event| matches!(e, Event::NowPlaying(_) | Event::PlayState(_) | Event::Time { .. } | Event::Stopped | Event::Exited);
                 match &msg {
                     Msg::Bridge(e) if !(local && playback(e)) => m.observe(e),
                     Msg::Local { event, .. } if local => m.observe(event),

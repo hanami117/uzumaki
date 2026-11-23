@@ -48,7 +48,106 @@ pub fn local_only_answer(what: &str) -> String {
     format!("Uzumaki is in local only mode, so {what} needs Apple Music. Switch in Settings \u{2192} Account.")
 }
 
+/// Crashes this close together are counted toward the automatic restarts' limit.
+const CRASH_WINDOW: Duration = Duration::from_secs(10 * 60);
+/// Waits before each automatic restart after a crash; past the last, the banner's Restart button.
+const REVIVE_AFTER: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(5), Duration::from_secs(20)];
+
+/// The playback engine's crashes (`bridge_exited`).
+#[derive(Debug, Default)]
+pub struct Revive {
+    crashes: Vec<Instant>,
+    /// Bumped by every crash and restart: a timer from an older one does nothing.
+    generation: u64,
+    /// An automatic restart is waiting for its backoff.
+    pub waiting: bool,
+}
+
 impl State {
+    /// Electron ended on its own (crash, OOM kill, killed by hand). The dead bridge goes, an
+    /// Apple song stops where it was (Play picks it up again once a new engine is up, as a
+    /// resumed song does), and a new engine starts after a backoff; after a few crashes in a
+    /// row the banner's Restart button is left to the user.
+    pub(super) fn bridge_exited(&mut self) {
+        if let Some(b) = self.bridge.take() {
+            match &self.engine {
+                Some(engine) => engine.stop(b),
+                None => drop(b),
+            }
+        }
+        self.airplay_bridge_changed();
+        let ses = &mut self.session;
+        ses.bridge_up = false;
+        ses.login_window = false;
+        ses.signing_out = false;
+        self.syncing = false;
+        if !self.playback.local {
+            self.starting = None;
+            self.playback.seek_target = None;
+            self.playback.seek_preview = None;
+            if self.playback.song.is_some() {
+                self.playback.position = self.playback.position_now();
+                self.playback.position_at = Some(crate::clock::now());
+                self.playback.slew = 0.0;
+                self.playback.set_state(PlayState::Paused);
+                self.resume = Some(super::resume::Pending::default());
+            } else {
+                self.playback.set_state(PlayState::Stopped);
+            }
+            if let Some(t) = &mut self.tray {
+                t.set_playing(false);
+            }
+            self.discord_sync();
+        }
+        let now = Instant::now();
+        let local_only = self.local_only();
+        let r = &mut self.revive;
+        r.crashes.retain(|t| now.duration_since(*t) < CRASH_WINDOW);
+        r.crashes.push(now);
+        r.generation += 1;
+        let generation = r.generation;
+        let log = crate::bridge::log_path().display().to_string();
+        match REVIVE_AFTER.get(r.crashes.len() - 1) {
+            Some(&wait) if !local_only => {
+                r.waiting = true;
+                self.session.error = Some("The playback engine stopped. Restarting it\u{2026}".into());
+                self.revive_after(wait, generation);
+            }
+            _ => {
+                self.revive.waiting = false;
+                self.session.error = Some(format!("The playback engine (Electron) stopped. See {log}."));
+            }
+        }
+    }
+
+    /// Starts a new engine after `wait`, unless something else started or stopped it meanwhile.
+    fn revive_after(&self, wait: Duration, generation: u64) {
+        let Some(handle) = self.handle.clone() else { return };
+        let _ = std::thread::Builder::new().name("bridge-revive".into()).spawn(move || {
+            std::thread::sleep(wait);
+            handle.update_if(move |s: &mut State, _tx| {
+                if s.revive.generation != generation || !s.revive.waiting {
+                    return false;
+                }
+                s.revive.waiting = false;
+                s.start_bridge();
+                true
+            });
+        });
+    }
+
+    /// The banner's and Settings' Restart: a new engine now.
+    pub fn restart_engine(&mut self) {
+        self.revive.generation += 1;
+        self.revive.waiting = false;
+        self.restart_bridge();
+    }
+
+    /// The engine is down and waits for the user (no restart pending): the banner offers Restart.
+    pub fn engine_needs_restart(&self) -> bool {
+        self.bridge.is_none() && !self.revive.waiting && !self.local_only() && self.engine.is_some() && self.session.error.is_some()
+    }
+
     /// Local files only: no bridge, no Apple pages.
     pub fn local_only(&self) -> bool {
         self.settings.music_source == MusicSource::LocalOnly

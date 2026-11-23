@@ -345,7 +345,13 @@ function createWindow(show) {
   });
   win.webContents.on('render-process-gone', (_e, d) => {
     pageReady = false;
-    send({ event: 'error', message: `renderer gone: ${d.reason}` });
+    if (quitting || d.reason === 'clean-exit') return;
+    // The page crashed (often out of memory on a long session). A dead webContents never comes
+    // back by itself, and the app would keep thinking it plays: end this process instead, so the
+    // app sees the engine stop, pauses the song where it was and starts a fresh engine (with
+    // its own backoff and limit).
+    log(`renderer gone (${d.reason}, exit code ${d.exitCode}); exiting so the app restarts the engine`);
+    app.exit(1);
   });
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     // -3 (ERR_ABORTED) is a navigation replaced by another one, e.g. during sign-in redirects.

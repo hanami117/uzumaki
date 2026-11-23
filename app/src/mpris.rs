@@ -361,8 +361,8 @@ impl Mpris {
                     s.position = *current;
                     s.position_at = Some(Instant::now());
                 }
-                // Stopped for local only mode: nothing plays any more.
-                Event::Stopped if s.status != "Stopped" => {
+                // Stopped for local only mode, or the engine crashed: nothing plays any more.
+                Event::Stopped | Event::Exited if s.status != "Stopped" => {
                     s.position = s.expected_position();
                     s.position_at = Some(Instant::now());
                     s.status = "Stopped";
