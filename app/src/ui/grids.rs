@@ -16,7 +16,7 @@ use crate::state::{Load, State};
 #[derive(Clone)]
 pub enum GridSrc {
     Albums,
-    /// Library playlists, Favourite Songs first.
+    /// Library playlists, Favourite Songs first, then the Uzumaki ones (kept on this computer).
     Playlists,
     Recent,
     Artist(String),
@@ -41,10 +41,18 @@ impl GridSrc {
         }
     }
 
+    /// How many cards the grid has (`items` plus, for playlists, the Uzumaki ones).
+    fn len(&self, s: &State) -> usize {
+        self.items(s).len() + if let GridSrc::Playlists = self { s.mixed.cards.len() } else { 0 }
+    }
+
     /// Item `k` in display order.
     fn nth<'a>(&self, s: &'a State, k: usize) -> Option<&'a Collection> {
         let items = self.items(s);
         if let GridSrc::Playlists = self {
+            if k >= items.len() {
+                return s.mixed.cards.get(k - items.len());
+            }
             if let Some(f) = items.iter().position(|c| c.favorites) {
                 return match k {
                     0 => items.get(f),
@@ -60,7 +68,7 @@ impl GridSrc {
 /// `shown` lists indices into the source list (a filtered view). `tag` goes into the key version: change
 /// it when the shown items change without changing their number.
 pub fn grid(s: &State, key: String, src: GridSrc, g: Grid, loading: bool, shown: Option<Rc<Vec<usize>>>, tag: String) -> El {
-    let n_items = shown.as_ref().map_or_else(|| src.items(s).len(), |v| v.len());
+    let n_items = shown.as_ref().map_or_else(|| src.len(s), |v| v.len());
     let count = n_items.div_ceil(g.n) + usize::from(loading && shown.is_none());
     let first = shown.as_ref().map_or(0, |v| v.first().copied().unwrap_or(0));
     scroll_page(
@@ -124,4 +132,46 @@ pub fn artist_page(s: &State, id: &str, name: &str, g: Grid) -> El {
         None => col().w_full().px(PAGE_PX).child(status("Loading\u{2026}", false)),
     };
     col().key(format!("artist-page-{id}")).grow(1.0).min_h(0.0).w_full().child(head).child(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{LibraryTab, Route};
+
+    fn scene(name: &str) -> State {
+        let mut s = State::offline();
+        (crate::scenes::SCENES.iter().find(|(n, _)| *n == name).unwrap().1)(&mut s);
+        s
+    }
+
+    fn titles(s: &State) -> Vec<String> {
+        (0..GridSrc::Playlists.len(s)).filter_map(|k| GridSrc::Playlists.nth(s, k)).map(|c| c.title.clone()).collect()
+    }
+
+    #[test]
+    fn all_playlists_lists_favourites_then_apple_then_uzumaki() {
+        let s = scene("all-playlists");
+        assert_eq!(s.route, Route::Library(LibraryTab::Playlists));
+        assert_eq!(
+            titles(&s),
+            ["Favourite Songs", "Morning commute", "Focus", "Late night", "Summer 2026", "Ripped CDs", "Road trip", "Late night mix"]
+        );
+        assert!(GridSrc::Playlists.nth(&s, 8).is_none());
+        let uzu: Vec<_> = (0..8).filter_map(|k| GridSrc::Playlists.nth(&s, k)).filter(|c| crate::mixed::is_uzu_id(&c.id)).collect();
+        assert_eq!(uzu.len(), 3);
+    }
+
+    #[test]
+    fn all_playlists_shows_uzumaki_playlists_without_apple_and_follows_a_rename() {
+        let mut s = scene("all-playlists-local-only");
+        assert!(s.library_playlists.items.is_empty());
+        assert_eq!(titles(&s), ["Ripped CDs", "Road trip", "Late night mix"]);
+        let (id, rev) = (s.mixed.cards[1].id.clone(), s.mixed.rev);
+        s.rename_uzu_playlist(&id, "Long drive", "");
+        assert!(s.mixed.rev > rev, "the grid's version moves, so the card redraws");
+        assert_eq!(titles(&s)[1], "Long drive");
+        s.delete_uzu_playlist(&id);
+        assert_eq!(titles(&s), ["Ripped CDs", "Late night mix"]);
+    }
 }

@@ -28,7 +28,9 @@ pub(super) fn placeholder<T>(s: &State, items: &[T], load: &Load<()>, what: &str
 fn grid(s: &State, tab: LibraryTab, g: Grid, loading: bool) -> El {
     let shown = (tab == LibraryTab::Albums).then(|| lists::album_matches(s)).flatten();
     let src = if tab == LibraryTab::Playlists { GridSrc::Playlists } else { GridSrc::Albums };
-    grids::grid(s, format!("lib-{tab:?}"), src, g, loading, shown, lists::query(s))
+    // Playlists: the Uzumaki ones changing (renamed, picture) without their number changing.
+    let tag = if tab == LibraryTab::Playlists { s.mixed.rev.to_string() } else { lists::query(s) };
+    grids::grid(s, format!("lib-{tab:?}"), src, g, loading, shown, tag)
 }
 
 /// Library > Songs: the sortable table (fixed header, virtual rows).
@@ -87,6 +89,10 @@ pub fn page(s: &State, tab: LibraryTab, g: Grid, avail: f32) -> El {
             Some(p) => p,
             None => grid(s, tab, g, matches!(s.library_albums.load, Load::Loading)),
         },
+        // Uzumaki playlists show without Apple's (signed out, local only mode).
+        LibraryTab::Playlists if !s.mixed.cards.is_empty() && s.library_playlists.items.is_empty() => {
+            grid(s, tab, g, false)
+        }
         LibraryTab::Playlists => match placeholder(s, &s.library_playlists.items, &s.library_playlists.load, "playlists") {
             Some(p) => p,
             None => grid(s, tab, g, matches!(s.library_playlists.load, Load::Loading)),
