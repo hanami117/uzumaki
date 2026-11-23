@@ -23,7 +23,7 @@ use crate::run::Backend;
 
 /// Between `Status` polls.
 const STATUS_EVERY: Duration = Duration::from_millis(500);
-/// Between `Queue` fetches when nothing else asked for one.
+/// Between `Queue` fetches when nothing else asked for one (apps without `Status::queue_rev`).
 const QUEUE_EVERY: Duration = Duration::from_secs(3);
 /// How long a message replaces the status line.
 const MESSAGE_FOR: Duration = Duration::from_secs(2);
@@ -687,7 +687,14 @@ impl App {
         }
         let changed = match &self.status {
             None => true,
-            Some(old) => old.song.as_ref().map(|s| &s.id) != st.song.as_ref().map(|s| &s.id) || old.queued != st.queued || old.shuffle != st.shuffle || old.repeat != st.repeat || old.autoplay != st.autoplay,
+            Some(old) => {
+                old.song.as_ref().map(|s| &s.id) != st.song.as_ref().map(|s| &s.id)
+                    || old.queued != st.queued
+                    || old.shuffle != st.shuffle
+                    || old.repeat != st.repeat
+                    || old.autoplay != st.autoplay
+                    || old.queue_rev != st.queue_rev
+            }
         };
         self.queue_dirty |= changed;
         self.status = Some(st);
@@ -817,7 +824,10 @@ impl App {
             self.send(be, Request::Status, now);
             talked = true;
         }
-        let due = self.queue_dirty || self.last_queue.is_none_or(|t| now.saturating_duration_since(t) >= QUEUE_EVERY);
+        // An app that sends `queue_rev` says when the queue changed (the status above marks it
+        // dirty); only an older one is polled every few seconds.
+        let polled = self.status.as_ref().is_none_or(|st| st.queue_rev.is_none());
+        let due = self.queue_dirty || (polled && self.last_queue.is_none_or(|t| now.saturating_duration_since(t) >= QUEUE_EVERY));
         if due && !self.away && self.screen == Screen::Queue && !self.solo() {
             self.last_queue = Some(now);
             self.send(be, Request::Queue, now);

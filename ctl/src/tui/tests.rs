@@ -4148,3 +4148,92 @@ fn the_wheel_and_clicks_work_in_the_unfolded_history() {
     rig.app.handle_mouse(click(first + 2), &mut rig.client, rig.now + Duration::from_millis(100));
     assert_eq!(rig.last(), Request::History { index: 49 }, "a double click replays it");
 }
+
+// ------------------------------------------------------------- a queue replaced under the screen
+
+/// A fake app whose queue the test replaces, as the app's window would; its status carries the
+/// queue's `queue_rev` when `rev` is set (an app from before the field sends none).
+fn replaceable(name: &str, first: Queue, rev: bool) -> (Rig, Arc<Mutex<Queue>>) {
+    let log: Arc<Mutex<Vec<Request>>> = Arc::default();
+    let queue = Arc::new(Mutex::new(first));
+    let (q, inner, log2) = (queue.clone(), fake_handler_logged(log.clone()), log.clone());
+    let rig = Rig::serving(name, log, move |req| {
+        let q = q.lock().unwrap().clone();
+        match req {
+            Request::Queue => {
+                log2.lock().unwrap().push(req);
+                uzumaki_ctl::Reply::Queue(q)
+            }
+            other => match inner(other) {
+                uzumaki_ctl::Reply::Status(st) => uzumaki_ctl::Reply::Status(Status { song: q.current.clone(), queue_rev: rev.then(|| q.rev()), ..st }),
+                reply => reply,
+            },
+        }
+    });
+    (rig, queue)
+}
+
+fn songs_of(tag: &str, title: &str, artist: &str, n: std::ops::Range<usize>) -> Vec<SongInfo> {
+    n.map(|i| s(&format!("{tag}{i}"), &format!("{title} {i}"), artist, "", 200.0)).collect()
+}
+
+/// Search results for Linkin Park playing, then (from the app's window) the Replay playlist with
+/// shuffle and repeat all; the Linkin Park songs heard are its history.
+fn linkin_park_then_replay() -> (Queue, Queue) {
+    let lp = songs_of("lp", "Numb", "Linkin Park", 0..12);
+    let search = Queue { current: Some(lp[2].clone()), up_next: lp[3..].to_vec(), history: lp[..2].to_vec(), source: "Linkin Park".into(), repeat: RepeatMode::All, next_lap: lp.clone(), ..Default::default() };
+    let replay = songs_of("rp", "Replay", "Various", 0..30);
+    let playlist = Queue { current: Some(replay[0].clone()), up_next: replay[1..].to_vec(), history: lp[..3].to_vec(), source: "Replay 2026".into(), shuffle: true, repeat: RepeatMode::All, next_lap: replay.clone(), ..Default::default() };
+    (search, playlist)
+}
+
+/// With `queue_rev` in the status, any change of the queue shows at the next status poll (half
+/// a second), whatever changed; while nothing changes the queue isn't fetched at all.
+#[test]
+fn the_queue_is_fetched_when_its_rev_changes_and_only_then() {
+    let (search, playlist) = linkin_park_then_replay();
+    let (mut rig, queue) = replaceable("queue-rev", search.clone(), true);
+    let fetches = |rig: &Rig| rig.log.lock().unwrap().iter().filter(|r| **r == Request::Queue).count();
+    assert_eq!(fetches(&rig), 1);
+    for _ in 0..40 {
+        rig.advance(500);
+    }
+    assert_eq!(fetches(&rig), 1, "20 s at rest: statuses only");
+    // Changes the status fields alone don't show: same song, same counts and flags.
+    let mut reordered = search.clone();
+    reordered.up_next.swap(0, 4);
+    let mut renamed = reordered.clone();
+    renamed.up_next[6].title = "Numb (Live)".into();
+    let mut lap = renamed.clone();
+    lap.next_lap.reverse();
+    let mut suggested = lap.clone();
+    suggested.autoplay = songs_of("ap", "Similar", "Someone", 0..3);
+    let mut heard = suggested.clone();
+    heard.history.insert(0, s("old", "Earlier", "Someone", "", 100.0));
+    for (what, q) in [("reorder", reordered), ("metadata", renamed), ("next lap", lap), ("AutoPlay", suggested), ("history", heard), ("new source", playlist)] {
+        let before = fetches(&rig);
+        *queue.lock().unwrap() = q.clone();
+        rig.advance(500);
+        assert_eq!(fetches(&rig), before + 1, "{what}: fetched at the next status");
+        assert_eq!(rig.app.queue, q, "{what}");
+        rig.advance(500);
+        assert_eq!(fetches(&rig), before + 1, "{what}: once");
+    }
+}
+
+/// An app without `queue_rev` (0.4.1 and older) is still polled every 3 s.
+#[test]
+fn an_app_without_queue_rev_is_polled_every_three_seconds() {
+    let (search, playlist) = linkin_park_then_replay();
+    let (mut rig, queue) = replaceable("queue-no-rev", search, false);
+    let mut reordered = playlist.clone();
+    reordered.up_next.swap(0, 1);
+    *queue.lock().unwrap() = playlist;
+    rig.advance(500); // the song changed: fetched now
+    assert_eq!(rig.app.queue.source, "Replay 2026");
+    *queue.lock().unwrap() = reordered.clone();
+    rig.advance(2000);
+    assert_ne!(rig.app.queue, reordered, "nothing told it yet");
+    rig.advance(1100);
+    assert_eq!(rig.app.queue, reordered, "the 3 s poll");
+}
