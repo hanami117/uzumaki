@@ -9,6 +9,24 @@ takes each release's notes from its section here.
 - **uzu:** the Queue screen kept showing an old list when a filter (`/`) was on and another playlist started from
   the window. A queue from another source now clears the filter and says so. With this app version the screen also
   follows every queue change within half a second, instead of every 3 s.
+- A settings file with one value this version doesn't know (written by a newer Uzumaki, for example) no longer resets
+  every setting and shows the onboarding again: only that value goes back to its default, and the original file is
+  kept as `settings.json.bak`.
+- A `playlists.json` that can't be read (permissions, a disk error) is no longer taken for a first run and replaced
+  at the next change: the app says so and leaves the file alone.
+- When the playback engine (Electron) crashes, the player no longer keeps saying Playing: the song pauses where it
+  was, and the engine starts again by itself (a Restart button appears if it keeps crashing). A crashed Apple Music
+  page now restarts the engine too, instead of leaving playback dead until the app was restarted.
+- A local file deleted, renamed or on a drive that's gone while it waits in the queue is skipped, instead of
+  stopping the queue. Greyed songs (missing files, unavailable songs) are passed over after a local file too.
+- Previous on a song added with Play Next goes back to the song you heard before it.
+- Library pages, Home and the browse pages that failed to load (offline at launch, after waking the computer) load
+  again when you open them, come back to the window, or the network returns.
+- Playlists edited on another device show their changes while the app keeps running (checked every 15 minutes), and
+  local songs in them stay merged.
+- Covers that failed to load while offline load again later instead of staying grey until a restart.
+- Chromecast: `uzu status`, Discord and keyboard seeks follow the position you hear, like the window.
+- macOS and Linux: two launches at the same moment no longer start two copies of the app.
 
 ## [0.4.1] - 2026-11-23
 
