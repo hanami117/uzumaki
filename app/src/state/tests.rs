@@ -3307,12 +3307,14 @@ fn review_edges_a_failed_library_list_is_asked_again_when_the_page_is_opened_aga
 /// queues) stay on the old copy until the app is restarted.
 #[test]
 fn review_edges_a_playlist_edited_elsewhere_mid_session_is_checked_again_later() {
+    crate::clock::freeze();
     let mut s = cached_playlist_state("v1");
     let mut fresh = playlist("p.1", "v1");
     fresh.tracks.clear();
     s.apply_msg(Msg::LibraryPlaylists(Ok(Page { items: vec![fresh], next: None, total: None })));
     let lists = sent_matching(&s, "/v1/me/library/playlists");
     // Hours later (another device edits p.1 meanwhile), the user opens it again.
+    crate::clock::advance(std::time::Duration::from_secs(3 * 3600));
     s.navigate(Route::Home);
     s.navigate(Route::Collection { kind: CollectionKind::Playlist, id: "p.1".into() });
     assert!(sent_matching(&s, "/v1/me/library/playlists") > lists, "nothing asks Apple again: {:?}", s.sent.borrow());
@@ -3353,4 +3355,30 @@ fn only_greyed_rows_left_after_a_local_file_end_the_list_in_place() {
     from_local(&mut s, Event::PlayState(PlayState::Ended));
     assert_eq!(s.queue.pos, 0);
     assert_eq!(local_sent(&s), ["play x"]);
+}
+
+/// A list that keeps failing is asked again at most every few seconds, however often its page
+/// opens; the network coming back (`online`) asks at once.
+#[test]
+fn a_failing_list_is_not_hammered() {
+    crate::clock::freeze();
+    let mut s = State::offline();
+    s.session.bridge_up = true;
+    s.session.authorized = true;
+    let albums = |s: &State| sent_matching(s, "/v1/me/library/albums");
+    s.navigate(Route::Library(LibraryTab::Albums));
+    s.apply_msg(Msg::LibraryAlbums(Err("Failed to fetch".into())));
+    s.navigate(Route::Home);
+    s.navigate(Route::Library(LibraryTab::Albums));
+    assert_eq!(albums(&s), 2);
+    s.apply_msg(Msg::LibraryAlbums(Err("Failed to fetch".into())));
+    s.navigate(Route::Home);
+    s.navigate(Route::Library(LibraryTab::Albums));
+    assert_eq!(albums(&s), 2, "too soon");
+    s.apply_msg(Msg::Bridge(Event::Online));
+    assert_eq!(albums(&s), 3, "online asks again");
+    s.apply_msg(Msg::LibraryAlbums(Err("Failed to fetch".into())));
+    crate::clock::advance(std::time::Duration::from_secs(11));
+    s.set_window_focused(true);
+    assert_eq!(albums(&s), 4, "focus after the gap asks again");
 }

@@ -426,6 +426,50 @@ impl State {
         }
     }
 
+    /// Lists that failed (offline at launch, after wake, an Apple 5xx) go back to Idle so this
+    /// pass asks for them again: each at most once per `RETRY_GAP`, so a page opened again and
+    /// again (or every reply that re-runs `load_route_data`) doesn't hammer Apple.
+    fn retry_failed(&mut self) {
+        fn reopen<T>(load: &mut Load<T>, key: &'static str, retried: &mut HashMap<&'static str, Instant>) {
+            if matches!(load, Load::Failed(_)) && retried.get(key).is_none_or(|t| crate::clock::since(*t) >= RETRY_GAP) {
+                retried.insert(key, crate::clock::now());
+                *load = Load::Idle;
+            }
+        }
+        let r = &mut self.retried;
+        reopen(&mut self.library_albums.load, "albums", r);
+        reopen(&mut self.library_songs.load, "songs", r);
+        reopen(&mut self.library_artists.load, "artists", r);
+        reopen(&mut self.library_playlists.load, "playlists", r);
+        reopen(&mut self.recently_added.load, "recently added", r);
+        let [a, b] = &mut self.shelves;
+        reopen(a, "shelf 0", r);
+        reopen(b, "shelf 1", r);
+        reopen(&mut self.browse_new, "new", r);
+        reopen(&mut self.made_for_you, "made for you", r);
+        let [a, b] = &mut self.radio;
+        reopen(a, "radio 0", r);
+        reopen(b, "radio 1", r);
+    }
+
+    /// Playlists can be edited on another device while the app runs for days: once
+    /// `PLAYLIST_RECHECK` has passed since the list was asked for, it is asked again, and the
+    /// playlist pages already checked this session are compared with it again (the
+    /// `lastModifiedDate` compare, so an unchanged page costs nothing more). A page that
+    /// changed reloads, and a mixed playlist's overlay merges with the new list.
+    pub(super) fn recheck_playlists(&mut self) {
+        let due = self.playlists_checked.is_some_and(|t| crate::clock::since(t) >= PLAYLIST_RECHECK);
+        if !due || !self.session.authorized || self.library_playlists.load != Load::Ready(()) || self.library_playlists.refreshing {
+            return;
+        }
+        self.library_playlists.stale = true;
+        for (id, c) in self.coll_cache.iter_mut() {
+            if id.starts_with("p.") && matches!(c, CollCache::Verified) && matches!(self.collections.get(id), Some(Load::Ready(_))) {
+                *c = CollCache::Cached(0);
+            }
+        }
+    }
+
     fn ensure_library_artists(&mut self) {
         if self.library_artists.load == Load::Idle {
             self.library_artists.load = Load::Loading;
@@ -446,8 +490,13 @@ impl State {
             return;
         }
         let me = self.session.authorized;
+        self.retry_failed();
+        self.recheck_playlists();
         // The sidebar lists library playlists on every page.
         if me {
+            if self.library_playlists.load == Load::Idle || self.library_playlists.stale {
+                self.playlists_checked = Some(crate::clock::now());
+            }
             let l = &mut self.library_playlists;
             // Always re-fetched (one page); a cached list stays shown until the new one lands.
             let fetch = l.load == Load::Idle || l.stale;
@@ -604,6 +653,10 @@ fn first_page(v: &Value) -> Result<(Collection, Option<String>), String> {
 
 /// Playlists the sync fetches at once.
 const PLAYLIST_SYNC_PARALLEL: usize = 2;
+/// A list that failed is asked again at most this often (`retry_failed`).
+const RETRY_GAP: Duration = Duration::from_secs(10);
+/// How long the library playlists stay trusted while the app runs (`recheck_playlists`).
+const PLAYLIST_RECHECK: Duration = Duration::from_secs(15 * 60);
 
 /// The library sync's second half (`State::start_playlist_sync`): each library playlist's
 /// songs, saved to disk so it opens at once, then its covers (`Art::warm`). Nothing is kept

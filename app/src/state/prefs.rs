@@ -251,6 +251,11 @@ impl State {
     /// `App::on_focus`: the window gained or lost focus (a hidden or minimised one lost it).
     pub fn set_window_focused(&mut self, focused: bool) {
         self.notifier.set_focused(focused);
+        // (Pages from this computer have nothing to ask Apple, and rebuild on each visit.)
+        if focused && !self.route.local_library() && !self.route.uzumaki() {
+            // Back at the window: lists that failed and playlists due for a check are asked again.
+            self.load_route_data();
+        }
     }
 
     /// Closing the window hides it to the tray (music keeps playing) instead of quitting.

@@ -82,6 +82,8 @@ pub enum Event {
     /// hint only: the player's CONTENT_RESTRICTED error is what the app can rely on.
     Restricted(bool),
     Error(String),
+    /// The page's network came back (`online`): lists that failed can be asked again.
+    Online,
     /// The Electron process is gone.
     Exited,
     /// The bridge was stopped on purpose (local only mode, `Engine::stop`): its last word,
@@ -773,6 +775,7 @@ fn parse_event(name: &str, msg: &Value) -> Option<Event> {
         "airplayTainted" => Event::AirPlayTainted,
         "restricted" => Event::Restricted(msg["value"].as_bool()?),
         "error" => Event::Error(msg["message"].as_str().unwrap_or("unknown error").to_string()),
+        "online" => Event::Online,
         _ => return None,
     })
 }

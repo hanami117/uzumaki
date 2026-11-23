@@ -510,6 +510,10 @@ pub struct State {
     cache: Option<Cache>,
     handle: Option<Handle>,
     coll_cache: HashMap<String, CollCache>,
+    /// Lists that failed to load, retried at most this often (`library::retry_failed`).
+    retried: HashMap<&'static str, Instant>,
+    /// When the library playlists were last asked for (`library::recheck_playlists`).
+    playlists_checked: Option<Instant>,
     /// Detail pages being re-fetched behind a cached copy; the value holds the fresh copy
     /// (first page of tracks) until the last page arrives.
     coll_refresh: HashMap<String, Option<Collection>>,
@@ -697,6 +701,8 @@ impl State {
             cache: handle.as_ref().map(|_| Cache::default_location()),
             handle,
             coll_cache: HashMap::new(),
+            retried: HashMap::new(),
+            playlists_checked: None,
             coll_refresh: HashMap::new(),
             pl_rewrites: HashMap::new(),
             shelf_stale: [false; 2],
@@ -1266,6 +1272,11 @@ impl State {
             }
             // Stopped on purpose (`stop_bridge` already did what the app needs).
             Event::Stopped => return false,
+            // The computer is back online: lists that failed meanwhile are asked again.
+            Event::Online => {
+                self.retried.clear();
+                self.load_route_data();
+            }
             Event::AirPlayCapture { ready, error } => {
                 self.airplay_capture_ready(ready, error.as_deref());
                 self.cast_capture_ready(ready, error.as_deref());

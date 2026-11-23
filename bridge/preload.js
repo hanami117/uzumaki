@@ -23,6 +23,9 @@ ipcRenderer.on('cadence:cmd', async (_e, msg) => {
   ipcRenderer.send('cadence:out', { id: msg.id ?? null, ...reply });
 });
 
+// The network came back (Wi-Fi joined, wake from sleep): the app asks again for what failed.
+window.addEventListener('online', () => ipcRenderer.send('cadence:out', { event: 'online' }));
+
 webFrame.executeJavaScript(`(${uploadCorsHook})(window);`);
 webFrame.executeJavaScript(`(${pageBridge})();`);
 
