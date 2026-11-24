@@ -137,10 +137,10 @@ impl State {
     fn lrclib_done(&mut self, note: String) {
         self.lrclib_batch = BatchView { running: None, note: Some(note), cancel: None };
         // The playing song may have just got lyrics.
-        if let Some(song) = self.playback.song.clone().filter(|s| s.is_local()) {
-            if matches!(self.lyrics_of(&song), Some(Load::Ready(None))) {
-                self.want_lyrics(&song);
-            }
+        if let Some(song) = self.playback.song.clone().filter(|s| s.is_local())
+            && matches!(self.lyrics_of(&song), Some(Load::Ready(None)))
+        {
+            self.want_lyrics(&song);
         }
     }
 }
@@ -156,40 +156,40 @@ fn run_batch(lr: &Lrclib, songs: &[Song], save: bool, cancel: &AtomicBool, progr
             break;
         }
         let mut asked = false;
-        if let (Some(path), Some(q)) = (song.local_path(), Query::of(song)) {
-            if crate::local::lyrics::read(path).is_none() {
-                let mut busy = 0;
-                loop {
-                    // Wait out a hold (a 429's Retry-After), still listening for Stop.
-                    while let Some(t) = lr.client.held_until() {
-                        if cancel.load(Ordering::Relaxed) {
-                            stopped = Some("Stopped.");
-                            break 'songs;
-                        }
-                        std::thread::sleep(t.saturating_duration_since(Instant::now()).min(Duration::from_millis(200)));
+        if let (Some(path), Some(q)) = (song.local_path(), Query::of(song))
+            && crate::local::lyrics::read(path).is_none()
+        {
+            let mut busy = 0;
+            loop {
+                // Wait out a hold (a 429's Retry-After), still listening for Stop.
+                while let Some(t) = lr.client.held_until() {
+                    if cancel.load(Ordering::Relaxed) {
+                        stopped = Some("Stopped.");
+                        break 'songs;
                     }
-                    match lr.find(path, &q, save) {
-                        Outcome::Answer { answer, cached } => {
-                            asked = !cached;
-                            if answer.lyrics().is_some() {
-                                p.found += 1;
-                            }
-                            break;
+                    std::thread::sleep(t.saturating_duration_since(Instant::now()).min(Duration::from_millis(200)));
+                }
+                match lr.find(path, &q, save) {
+                    Outcome::Answer { answer, cached } => {
+                        asked = !cached;
+                        if answer.lyrics().is_some() {
+                            p.found += 1;
                         }
-                        Outcome::Later(Failure::Held(_)) => {}
-                        Outcome::Later(Failure::Busy(code)) => {
-                            busy += 1;
-                            if busy >= BATCH_BUSY_MAX {
-                                eprintln!("uzumaki: lyrics: LRCLIB busy (HTTP {code}), batch stopped");
-                                stopped = Some("LRCLIB is busy. Try again later.");
-                                break 'songs;
-                            }
-                        }
-                        Outcome::Later(Failure::Network(e)) => {
-                            eprintln!("uzumaki: lyrics: can't reach LRCLIB ({e}), batch stopped");
-                            stopped = Some("Couldn\u{2019}t reach lrclib.net. Try again later.");
+                        break;
+                    }
+                    Outcome::Later(Failure::Held(_)) => {}
+                    Outcome::Later(Failure::Busy(code)) => {
+                        busy += 1;
+                        if busy >= BATCH_BUSY_MAX {
+                            eprintln!("uzumaki: lyrics: LRCLIB busy (HTTP {code}), batch stopped");
+                            stopped = Some("LRCLIB is busy. Try again later.");
                             break 'songs;
                         }
+                    }
+                    Outcome::Later(Failure::Network(e)) => {
+                        eprintln!("uzumaki: lyrics: can't reach LRCLIB ({e}), batch stopped");
+                        stopped = Some("Couldn\u{2019}t reach lrclib.net. Try again later.");
+                        break 'songs;
                     }
                 }
             }
