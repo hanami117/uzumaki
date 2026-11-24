@@ -216,15 +216,6 @@ pub fn parse_lrc(text: &str) -> Option<Lyrics> {
     (!lines.is_empty()).then_some(Lyrics { synced: true, lines })
 }
 
-/// The `.lrc` next to a local song's file, when there is one (up to 1 MB, UTF-8).
-pub fn read_lrc_beside(song_file: &std::path::Path) -> Option<Lyrics> {
-    let path = song_file.with_extension("lrc");
-    if std::fs::metadata(&path).ok()?.len() > 1 << 20 {
-        return None;
-    }
-    parse_lrc(&std::fs::read_to_string(path).ok()?)
-}
-
 /// Text of `n` with `<br/>` as a space (XML entities are already decoded by the parser).
 fn collect_text(n: roxmltree::Node<'_, '_>, out: &mut String) {
     for c in n.children() {

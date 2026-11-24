@@ -82,6 +82,10 @@ impl State {
             }
             return;
         }
+        if crate::local::favourites::is_page_id(&c.id) {
+            let full = self.local_favourites_page();
+            return self.play_loaded(&full, start);
+        }
         // A card or sidebar row has no songs; the page may have them loaded already.
         let known = if c.tracks.is_empty() {
             self.collections.get(&c.id).and_then(|l| l.ready()).filter(|x| !x.tracks.is_empty()).cloned()

@@ -147,7 +147,7 @@ impl std::ops::Deref for Songs<'_> {
 pub fn songs(s: &State) -> Songs<'_> {
     Songs::Slice(match &s.route {
         Route::Collection { id, .. } => match s.collections.get(id).and_then(Load::ready) {
-            Some(c) if s.mixed.has_overlay(id) => return Songs::Merged(s.merged(c)),
+            Some(c) if s.has_local_rows(c) => return Songs::Merged(s.merged(c)),
             Some(c) => &c.tracks,
             None => &[],
         },

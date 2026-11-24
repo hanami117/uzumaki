@@ -38,18 +38,14 @@ pub fn close(s: &mut State) {
     s.motion.park();
 }
 
-/// Catalog id lyrics are keyed by.
-fn lyrics_key(song: &Song) -> Option<&str> {
-    match &song.catalog_id {
-        Some(c) => Some(c),
-        None if song.is_local() => None, // lyrics are Apple's only
-        None if !song.id.starts_with("i.") => Some(&song.id),
-        None => None,
-    }
+/// Apple is asked for this song's lyrics (a catalog song, or a library song Apple matched). A
+/// local file's are read from disk at once, so the column waits for them instead of opening.
+fn asks_apple(song: &Song) -> bool {
+    song.catalog_id.is_some() || (!song.is_local() && !song.id.starts_with("i."))
 }
 
 fn lyrics_load<'a>(s: &'a State, song: &Song) -> Option<&'a Load<Option<Lyrics>>> {
-    s.lyrics.get(lyrics_key(song)?)
+    s.lyrics_of(song)
 }
 
 /// The current song's lyrics, when loaded and non-empty.
@@ -408,7 +404,7 @@ pub fn overlay(s: &State, cx: &mut Cx<State>) -> Option<El> {
 
     let load = lyrics_load(s, song);
     let has = matches!(load, Some(Load::Ready(Some(l))) if !l.lines.is_empty());
-    let pending = matches!(load, Some(Load::Loading) | Some(Load::Idle) | None) && lyrics_key(song).is_some();
+    let pending = matches!(load, Some(Load::Loading) | Some(Load::Idle) | None) && asks_apple(song);
     let show_queue = s.settings.now_playing_queue;
     let show_lyrics = lyrics_on(s) && (has || pending);
     let side = show_queue || show_lyrics;

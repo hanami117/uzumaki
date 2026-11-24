@@ -5,7 +5,22 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **Local files:** favourites. Star your own songs anywhere (song rows, menus, Now Playing), signed in or not.
+  They are kept on this computer only (`local-favourites.json` beside `playlists.json`) and never sent to Apple.
+  They show at the end of Apple's Favourite Songs, or on their own Favourite Songs page in local files only mode.
+- **Local files:** lyrics. A `.lrc` beside the file (synced), the file's own lyrics tags (ID3 `SYLT`/`USLT`,
+  Vorbis `LYRICS`, MP4), or a `.txt` beside it, in Now Playing, the side panel and uzu's lyrics screen.
+- **Playlists:** export an Uzumaki playlist, the local Favourite Songs or the local songs of a mixed playlist as
+  `.m3u8`, and import a `.m3u8` as a new Uzumaki playlist (right-click the + beside Playlists). Only files in your
+  music folders are imported.
+
 ### Changed
+- **Local files:** better albums. A compilation flag without an album artist makes the album "Various Artists";
+  an album without album artist tags stays one album (by the artist most of its songs share, else Various
+  Artists) instead of one per artist; track and disc numbers like `3/12` are read; a disc folder (`CD1`,
+  `Disc 2`) takes the cover beside it in the album folder, and covers from any of a file's tags count. Your
+  music folders are read once again after the update to pick these up.
 - **Chromecast is no longer Beta** (still off by default: Settings → Speakers → Chromecast; macOS and Linux).
 - **Chromecast: local files are played by the TV itself** when it can (MP3, AAC, FLAC up to 96 kHz/24-bit, Ogg,
   WAV): no delay behind the app, seeks are the TV's own, the file's own quality. Other files (ALAC, AIFF, …) and
@@ -24,6 +39,9 @@ takes each release's notes from its section here.
   where it was. When the output device goes away, the song moves to the default one, or pauses (the bar no longer
   stays on Playing at a frozen time); Play tries again.
 - **uzu:** `uzu pause` and `uzu vol` (no value) no longer start Uzumaki just to find nothing playing.
+- **Local files:** a music folder on a drive that isn't connected keeps its songs (and their places in your
+  playlists) instead of dropping them; Settings → Local files says "Not connected".
+- **Mixed playlists:** a song found unavailable shows greyed in the merged list at once.
 - **Chromecast: a lost connection comes back.** TV switched off and on, Wi-Fi dropping or the computer waking from
   sleep: Uzumaki pauses where you stopped hearing the music, tries again for a minute and plays on. If the TV doesn't
   come back, the music waits, paused, on this computer at that spot.

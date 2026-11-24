@@ -72,6 +72,7 @@ impl State {
         if let Some(p) = &self.local {
             p.play(self.local_gen, song, at, self.playback.volume);
         }
+        self.want_lyrics(song);
     }
 
     /// Hands playback back to the bridge: stops the in-process player and closes the device.
@@ -341,6 +342,11 @@ impl State {
                 self.collections.insert(id.clone(), load);
                 return;
             }
+            Route::Collection { id, .. } if crate::local::favourites::is_page_id(id) => {
+                let c = self.local_favourites_page();
+                self.collections.insert(id.clone(), Load::Ready(c));
+                return;
+            }
             Route::Collection { id, .. } if view::is_album_id(id) => {
                 if !matches!(self.collections.get(id), Some(Load::Ready(_))) {
                     let load = match self.local_album(id) {
@@ -394,7 +400,8 @@ fn spawn_scan(handle: Handle, folders: Vec<PathBuf>, show_cached: bool) {
                 scan::save_index(&index, &tracks);
             }
             // Grouping runs here, once per scan, never on the UI thread.
-            let (songs, view) = view::from_index(&tracks, &folders);
+            let (songs, mut view) = view::from_index(&tracks, &folders);
+            view.offline = scan::offline_roots(&folders);
             handle.update(move |s: &mut State, tx| {
                 s.landing(tx);
                 s.apply_msg(Msg::LocalIndex { songs, view: Box::new(view), scanning: false });

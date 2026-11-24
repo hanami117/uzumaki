@@ -864,10 +864,13 @@ fn music_folders(s: &State, narrow: bool) -> El {
         v = v.child(text("No folders yet.").font(SMALL13).color(PAL.dim).mb(8.0));
     }
     for (i, f) in folders.iter().enumerate() {
+        // An unmounted drive: its songs are kept from the last scan until it is back.
+        let offline = s.local_lib.view.offline.contains(f);
         v = v.child(
             row().key(format!("settings/folder/{i}")).w_full().min_h(40.0).px(12.0).gap(10.0).center_y().radius(8.0).fill(PAL.chip).mb(6.0)
                 .child(icon(&icons::LOCAL_FILES, 16.0).color(PAL.dim))
-                .child(text(tilde(f)).font(BODY14).color(PAL.text2).truncate().grow(1.0).min_w(0.0))
+                .child(text(tilde(f)).font(BODY14).color(if offline { PAL.dim } else { PAL.text2 }).truncate().grow(1.0).min_w(0.0))
+                .children(offline.then(|| text("Not connected").font(SMALL13).color(PAL.dim)))
                 .child(
                     el().key(format!("settings/folder-x/{i}")).role("button").label("Remove folder").focusable(true).size(28.0, 28.0)
                         .radius(14.0).center().hover(crate::theme::ov(0.1)).cursor(Cursor::Pointer)

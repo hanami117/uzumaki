@@ -153,12 +153,16 @@ fn items_of_collection(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
     if crate::mixed::is_uzu_id(&c.id) {
         return uzu_items(s, c, pin);
     }
+    if crate::local::favourites::is_page_id(&c.id) {
+        return local_favourites_items(s);
+    }
     // With the local songs of its overlay (`mixed.rs`), as its page lists them.
     let tracks: Vec<Song> = if c.tracks.is_empty() {
         s.collections.get(&c.id).and_then(|l| l.ready()).map(|x| s.playlist_songs(x)).unwrap_or_default()
     } else {
         s.playlist_songs(c)
     };
+    let has_local = tracks.iter().any(Song::is_local);
     let c1 = c.clone();
     let c2 = c.clone();
     let mut v = vec![
@@ -189,6 +193,10 @@ fn items_of_collection(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
         v.push(it("Add to Library", move |s| s.add_collection_to_library(&c4)));
     }
     v.extend(share_item(crate::share::collection_link(c, s.session.storefront.as_deref())));
+    if has_local {
+        let c8 = c.clone();
+        v.push(it("Export Local Songs as .m3u8\u{2026}", move |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Export(Box::new(c8.clone())))));
+    }
     if crate::state::in_library(&c.id) && (c.id.starts_with("l.") || (c.id.starts_with("p.") && c.editable)) {
         let c5 = c.clone();
         let (label, confirm) = if c.id.starts_with("p.") {
@@ -220,10 +228,31 @@ fn uzu_items(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
         let c4 = c.clone();
         v.push(pin_item(s, &c.id, move |s| s.pin_collection(&c4)));
     }
+    let c5 = c.clone();
+    v.push(it("Export as .m3u8\u{2026}", move |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Export(Box::new(c5.clone())))));
     let id = c.id.clone();
     v.push(sep());
     v.push(danger("Delete Playlist", "Click again to delete it", move |s| s.delete_uzu_playlist(&id)));
     v
+}
+
+/// The local Favourite Songs page's menu: playing only (it lives on this computer, has no
+/// picture or name to edit, and isn't pinned).
+fn local_favourites_items(s: &State) -> Vec<CtxItem> {
+    let tracks: Vec<Song> = s.local_favourites_page().tracks.into_iter().filter(|t| t.playable).collect();
+    if tracks.is_empty() {
+        return vec![it("No favourites yet", |_s| {})];
+    }
+    let (t1, t2) = (tracks.clone(), tracks);
+    let c = crate::local::favourites::card();
+    vec![
+        it("Play", move |s| s.play_collection(c, 0)),
+        it("Shuffle", move |s| s.shuffle_collection(c)),
+        it("Play Next", move |s| s.play_next(&t1)),
+        it("Add to Queue", move |s| s.add_to_queue(&t2)),
+        sep(),
+        it("Export as .m3u8\u{2026}", move |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Export(Box::new(c.clone())))),
+    ]
 }
 
 pub fn open_collection(s: &mut State, c: &Collection, at: [f32; 2]) {
@@ -279,6 +308,15 @@ pub fn open_station(s: &mut State, st: &Station, at: [f32; 2]) {
     let (s1, s2) = (st.clone(), st.clone());
     let mut items = vec![it("Play", move |s| s.play_station(&s1)), sep(), pin_item(s, &st.id, move |s| s.pin_station(&s2))];
     items.extend(share_item(crate::share::station_link(st, s.session.storefront.as_deref())));
+    open(s, at, items);
+}
+
+/// Right-click on the sidebar's New Playlist button.
+pub fn open_new_playlist(s: &mut State, at: [f32; 2]) {
+    let items = vec![
+        it("New Playlist\u{2026}", |s| super::new_playlist::open(s, Vec::new())),
+        it("Import Playlist (.m3u8)\u{2026}", |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Import)),
+    ];
     open(s, at, items);
 }
 

@@ -787,7 +787,9 @@ fn local_songs_never_ask_for_lyrics_or_go_to_apple_playlists() {
     let mut s = State::offline();
     s.session.authorized = true;
     s.play_list(&[local("x")], 0, "L");
-    assert!(s.lyrics.is_empty());
+    // Its lyrics are looked for beside the file (none here), never asked of Apple.
+    assert!(s.lyrics.values().all(|l| matches!(l, Load::Ready(None))));
+    assert!(!s.sent.borrow().iter().any(|r| r.contains("lyrics")), "{:?}", s.sent.borrow());
     s.go_to_album(&local("x"));
     assert_eq!(s.route, Route::LocalFiles);
 }

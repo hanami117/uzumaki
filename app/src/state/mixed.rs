@@ -17,9 +17,29 @@ use std::rc::Rc;
 use super::*;
 use crate::mixed::{self as mx, Found, LocalIndex, LocalRef, Merged, Origin, Store, UzuEntry, UzuPlaylist};
 
-/// What a merged list was built from: Apple's list (its buffer, length and ends), the store's
-/// revision and the music folders' index generation.
-type MergeKey = (usize, usize, String, String, u64, u64, bool);
+/// What a merged list was built from: Apple's list (a fingerprint of its songs, see
+/// `fingerprint`), the store's revision, the music folders' index generation and, for Favourite
+/// Songs, the local favourites' revision.
+type MergeKey = (u64, usize, u64, u64, bool, u64);
+
+/// A fingerprint of a list's songs and the flags edited in place (`playable` when a song turns
+/// out unavailable, `explicit`): a reload or an in-place edit changes it, and no address is kept
+/// (a freed list's memory can come back for another). FNV-1a over a few bytes a song: tens of
+/// microseconds for thousands of songs, and only on the pages that merge.
+fn fingerprint(tracks: &[Song]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |b: &[u8]| {
+        for &x in b {
+            h ^= u64::from(x);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    for t in tracks {
+        eat(t.id.as_bytes());
+        eat(&[0, u8::from(t.playable), u8::from(t.explicit)]);
+    }
+    h
+}
 
 /// The music folders' index, with the (generation, loaded) it was built for.
 type IndexSlot = Option<((u64, bool), Rc<LocalIndex>)>;
@@ -102,6 +122,10 @@ fn card(p: &UzuPlaylist, tracks: Vec<Song>) -> Collection {
     }
 }
 
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
 /// Song counts in a toast: "“Song”" or "3 songs".
 fn what(songs: &[Song]) -> String {
     match songs {
@@ -136,14 +160,23 @@ impl State {
     pub fn merged(&self, c: &Collection) -> Rc<Merged> {
         let entries = self.mixed.store.overlay(&c.id);
         let t = &c.tracks;
-        let end = |s: Option<&Song>| s.map(|s| s.id.clone()).unwrap_or_default();
-        let key: MergeKey = (t.as_ptr() as usize, t.len(), end(t.first()), end(t.last()), self.mixed.rev, self.local_lib.generation, self.local_lib.loaded);
+        let favs = if c.favorites { self.local_favs.rev } else { 0 };
+        let key: MergeKey = (fingerprint(t), t.len(), self.mixed.rev, self.local_lib.generation, self.local_lib.loaded, favs);
         if let Some((k, m)) = self.mixed.merged.borrow().get(&c.id)
             && *k == key
         {
             return m.clone();
         }
-        let m = if entries.is_empty() || mx::is_uzu_id(&c.id) {
+        let m = if c.favorites && !mx::is_uzu_id(&c.id) {
+            // Apple's Favourite Songs, then the local favourites (`Origin::Local` = their index).
+            let mut m = Merged::plain(t);
+            let ix = self.local_index();
+            for (k, e) in self.local_favs.entries().iter().enumerate() {
+                m.tracks.push(self.resolve_local(&e.file, &ix));
+                m.origin.push(Origin::Local(k));
+            }
+            m
+        } else if entries.is_empty() || mx::is_uzu_id(&c.id) {
             Merged::plain(t)
         } else {
             let ix = self.local_index();
@@ -158,9 +191,24 @@ impl State {
         m
     }
 
+    /// Whether playlist `c` lists local songs beside Apple's: its overlay, or the local
+    /// favourites at the end of Apple's Favourite Songs.
+    pub fn has_local_rows(&self, c: &Collection) -> bool {
+        self.mixed.has_overlay(&c.id) || (c.favorites && !self.local_favs.is_empty() && !crate::local::favourites::is_page_id(&c.id))
+    }
+
     /// `c`'s songs to play or list: merged with its overlay when it has one.
     pub fn playlist_songs(&self, c: &Collection) -> Vec<Song> {
-        if self.mixed.has_overlay(&c.id) { self.merged(c).tracks.clone() } else { c.tracks.clone() }
+        if self.has_local_rows(c) { self.merged(c).tracks.clone() } else { c.tracks.clone() }
+    }
+
+    /// The page of local favourites (`local::favourites::PAGE_ID`), oldest first.
+    pub fn local_favourites_page(&self) -> Collection {
+        let ix = self.local_index();
+        let mut c = crate::local::favourites::card().clone();
+        c.tracks = self.local_favs.entries().iter().map(|e| self.resolve_local(&e.file, &ix)).collect();
+        c.track_count = Some(c.tracks.len() as u32);
+        c
     }
 
     /// The Uzumaki playlist `id` with its songs resolved.
@@ -250,6 +298,88 @@ impl State {
         n
     }
 
+    /// The songs `.m3u8` export writes for playlist `c`: an Uzumaki playlist's, the local
+    /// favourites', or an Apple playlist merged with its overlay (only the files are written).
+    pub fn export_songs(&self, c: &Collection) -> Vec<Song> {
+        if mx::is_uzu_id(&c.id) {
+            return self.uzu_collection(&c.id).map(|x| x.tracks).unwrap_or_default();
+        }
+        if crate::local::favourites::is_page_id(&c.id) {
+            return self.local_favourites_page().tracks;
+        }
+        let full = self.collections.get(&c.id).and_then(Load::ready).unwrap_or(c);
+        self.playlist_songs(full)
+    }
+
+    /// Writes the local songs of playlist `c` to `path` as `.m3u8` (Apple songs left out).
+    pub fn export_m3u8(&mut self, c: &Collection, path: &std::path::Path) {
+        let songs = self.export_songs(c);
+        let (text, n) = crate::local::m3u::write(&songs);
+        let left = songs.iter().filter(|s| !s.is_local()).count();
+        if n == 0 {
+            self.toast = Some(format!("“{}” has no songs from this computer to export.", c.title));
+            return;
+        }
+        let name = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        self.toast = Some(match std::fs::write(path, text) {
+            Err(e) => format!("Couldn't save {name}: {e}"),
+            Ok(()) if left > 0 => format!("Exported {n} song{} to {name} ({left} Apple Music song{} left out)", plural(n), plural(left)),
+            Ok(()) => format!("Exported {n} song{} to {name}", plural(n)),
+        });
+    }
+
+    /// Reads a `.m3u8` (or `.m3u`) and makes an Uzumaki playlist, named after the file, of the
+    /// files it lists that are in the music folders (by path; the others are counted in the
+    /// toast). Opens it. Returns its id.
+    pub fn import_m3u8(&mut self, path: &std::path::Path) -> Option<String> {
+        let name = path.file_stem().map(|f| f.to_string_lossy().into_owned()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Imported playlist".into());
+        let file = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        match std::fs::metadata(path) {
+            Ok(m) if m.len() > crate::local::m3u::MAX_BYTES => {
+                self.toast = Some(format!("{file} is too big to import (1 MB at most)."));
+                return None;
+            }
+            Err(e) => {
+                self.toast = Some(format!("Couldn't read {file}: {e}"));
+                return None;
+            }
+            Ok(_) => {}
+        }
+        let text = match std::fs::read(path) {
+            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+            Err(e) => {
+                self.toast = Some(format!("Couldn't read {file}: {e}"));
+                return None;
+            }
+        };
+        let dir = path.parent().unwrap_or(std::path::Path::new("/"));
+        let listed = crate::local::m3u::parse(&text, dir);
+        let ix = self.local_index();
+        let mut found: Vec<Song> = Vec::new();
+        for p in &listed {
+            let r = LocalRef { path: p.clone(), title: String::new(), artist: String::new(), album: String::new(), duration: 0.0 };
+            if let Found::Here(i) = ix.find(&self.local_lib.songs, &r) {
+                found.push(self.local_lib.songs[i].clone());
+            }
+        }
+        if found.is_empty() {
+            self.toast = Some(if listed.is_empty() {
+                format!("{file} lists no songs.")
+            } else {
+                format!("None of the {} songs in {file} are in your music folders.", listed.len())
+            });
+            return None;
+        }
+        let id = self.create_uzu_playlist(&name, "", &found)?;
+        let skipped = listed.len() - found.len();
+        self.toast = Some(if skipped > 0 {
+            format!("Imported “{name}”: {} song{}, {skipped} not in your music folders", found.len(), plural(found.len()))
+        } else {
+            format!("Imported “{name}”: {} song{}", found.len(), plural(found.len()))
+        });
+        Some(id)
+    }
+
     /// Creates an Uzumaki playlist holding `songs` and opens it. Returns its id.
     pub fn create_uzu_playlist(&mut self, name: &str, description: &str, songs: &[Song]) -> Option<String> {
         let name = name.trim();
@@ -332,6 +462,11 @@ impl State {
         if mx::is_uzu_id(&c.id) {
             return self.remove_uzu_rows(&c.id, rows);
         }
+        if c.favorites {
+            // Favourite Songs: un-starring is what removes a song from it.
+            let songs: Vec<Song> = rows.iter().map(|(_, s)| s.clone()).collect();
+            return self.set_favourite_songs(&songs, false);
+        }
         if !self.mixed.has_overlay(&c.id) {
             return self.remove_from_playlist(c, rows);
         }
@@ -395,6 +530,9 @@ impl State {
         if mx::is_uzu_id(&c.id) {
             return self.mixed.store.playlist(&c.id).is_some_and(|p| m < p.entries.len() && to < p.entries.len());
         }
+        if c.favorites {
+            return false;
+        }
         let merged = self.merged(c);
         matches!(merged.origin.get(m), Some(Origin::Local(_))) && to < merged.origin.len()
     }
@@ -446,9 +584,15 @@ impl State {
                 }
             }
         }
+        self.local_favs.relink(|r| match ix.find(songs, r) {
+            Found::Moved(i) => LocalRef::of(&songs[i]).map(|new| *r = new).is_some(),
+            _ => false,
+        });
         if changed {
             self.mixed_changed();
         }
+        // The page of local favourites shows the index's songs (new tags, files back or gone).
+        self.local_favourites_changed();
     }
 }
 
@@ -508,6 +652,10 @@ mod tests {
         let full = s.collections["p.1"].ready().unwrap().clone();
         assert_eq!(full.tracks.len(), 2, "Apple's list is untouched");
         assert_eq!(titles(&s.merged(&full).tracks), ["One", "Two", "x"]);
+        // A song edited in place (found unavailable) shows in the merged rows at once.
+        let mut edited = full.clone();
+        edited.tracks[0].playable = false;
+        assert!(!s.merged(&edited).tracks[0].playable);
         assert_eq!(titles(&s.playlist_songs(&full)), ["One", "Two", "x"]);
         assert!(s.toast.as_deref().unwrap().contains("this computer"), "{:?}", s.toast);
     }
@@ -610,5 +758,39 @@ mod tests {
         s.delete_uzu_playlist(&id);
         assert!(s.mixed.cards.is_empty() && !s.collections.contains_key(&id));
         assert_ne!(s.route, Route::Collection { kind: CollectionKind::Playlist, id });
+    }
+
+    #[test]
+    fn a_playlist_exports_its_files_and_imports_back() {
+        let d = std::env::temp_dir().join(format!("uzumaki-m3u-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut s = State::offline();
+        let a = song("file:///m/a.flac", "A");
+        let b = song("file:///m/b.flac", "B");
+        s.local_lib.songs = vec![a.clone(), b.clone()];
+        s.local_lib.loaded = true;
+        s.local_lib.generation += 1;
+        let id = s.create_uzu_playlist("Road trip", "", &[a.clone(), song("123", "Apple song"), b.clone()]).unwrap();
+        let c = s.uzu_collection(&id).unwrap();
+        let file = d.join("Road trip.m3u8");
+        s.export_m3u8(&c, &file);
+        assert_eq!(s.toast.as_deref(), Some("Exported 2 songs to Road trip.m3u8 (1 Apple Music song left out)"));
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.starts_with("#EXTM3U\n") && text.contains("/m/a.flac\n") && !text.contains("Apple song"), "{text}");
+        // Back in, with a line for a file that isn't in the music folders.
+        std::fs::write(&file, format!("{text}/elsewhere/x.mp3\n")).unwrap();
+        let back = s.import_m3u8(&file).expect("imported");
+        let got = s.uzu_collection(&back).unwrap();
+        assert_eq!(got.title, "Road trip");
+        assert_eq!(got.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), [a.id.as_str(), b.id.as_str()]);
+        assert_eq!(s.toast.as_deref(), Some("Imported “Road trip”: 2 songs, 1 not in your music folders"));
+        // Nothing to take: no playlist.
+        let none = d.join("none.m3u8");
+        std::fs::write(&none, "/elsewhere/x.mp3\n").unwrap();
+        let before = s.mixed.store.playlists.len();
+        assert_eq!(s.import_m3u8(&none), None);
+        assert_eq!(s.mixed.store.playlists.len(), before);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

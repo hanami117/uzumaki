@@ -6,10 +6,18 @@
 //!   and reads tags + duration with lofty. A file whose path, mtime and size match an entry of
 //!   `previous` reuses it without opening the file, so a rescan of an unchanged library only
 //!   stats files.
-//! - Covers: the embedded front cover, else `cover|folder|front|album.(jpg|jpeg|png)` beside
-//!   the file. One thumbnail per album (max 600 px, JPEG) in `art_dir`, named by a hash of
-//!   album artist + album (else the folder). `LocalTrack::cover` is that file's path.
+//! - Covers: the embedded front cover (from any of the file's tags), else
+//!   `cover|folder|front|album.(jpg|jpeg|png)` beside the file, else in the folder above when the
+//!   file sits in a disc folder (`CD1`, `Disc 2`). Each folder is looked at once per scan. One
+//!   thumbnail per album (max 600 px, JPEG) in `art_dir`, named by a hash of album artist +
+//!   album (else the folder). `LocalTrack::cover` is that file's path.
 //! - Missing tags fall back: title → file stem, artist → "Unknown Artist", album → folder name.
+//!   Track and disc numbers read the leading number (`3/12`, `03 of 12`); a compilation flag
+//!   (`TCMP`, `cpil`, `COMPILATION`) without an album artist makes it "Various Artists".
+//! - A music folder that can't be read (an unmounted drive, a network share that's away) keeps
+//!   its entries of `previous` as they were, so its songs, their stars and playlist places stay
+//!   put (nothing is relinked to a copy elsewhere) and nothing is read again when it's back.
+//!   `offline_roots` names those folders (Settings says "Not connected").
 //! - Runs on a background thread; `progress(done)` is called every 100 files or so.
 
 use std::collections::{HashMap, HashSet};
@@ -39,8 +47,14 @@ pub struct LocalTrack {
     /// `album` is the folder's name, the file having no album tag.
     #[serde(default)]
     pub album_fallback: bool,
-    /// Album artist when tagged (else the artist), for grouping albums.
+    /// Album artist when tagged (else the artist, or "Various Artists" for a compilation).
     pub album_artist: String,
+    /// `album_artist` came from an album artist tag (or the compilation flag), not the artist.
+    #[serde(default)]
+    pub album_artist_tagged: bool,
+    /// Flagged as a compilation (`TCMP`, `cpil`, `COMPILATION`).
+    #[serde(default)]
+    pub compilation: bool,
     pub track: Option<u32>,
     pub disc: Option<u32>,
     pub year: Option<String>,
@@ -87,7 +101,10 @@ pub fn art_dir() -> PathBuf {
 }
 
 /// Version of the index file; another version reads as empty (a rescan rebuilds it).
-const INDEX_VERSION: u32 = 2;
+const INDEX_VERSION: u32 = 3;
+
+/// The album artist of a compilation without an album artist tag.
+pub const VARIOUS_ARTISTS: &str = "Various Artists";
 
 /// Longest side of a cover thumbnail, pixels.
 const COVER_MAX: u32 = 600;
@@ -140,14 +157,19 @@ pub fn save_index(path: &Path, tracks: &[LocalTrack]) {
 pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut progress: impl FnMut(usize)) -> Vec<LocalTrack> {
     let mut files = Vec::new();
     let mut seen = HashSet::new();
+    let mut offline: Vec<PathBuf> = Vec::new();
     for folder in folders {
         let root = std::path::absolute(folder).unwrap_or_else(|_| folder.clone());
+        if fs::read_dir(&root).is_err() {
+            offline.push(root);
+            continue;
+        }
         walk(&root, &mut files, &mut seen);
     }
 
     let prev: HashMap<&Path, &LocalTrack> = previous.iter().map(|t| (t.path.as_path(), t)).collect();
     // Thumbnails of this scan by file stem (the album hash), shared by all tracks of the album.
-    let mut covers: HashMap<String, PathBuf> = HashMap::new();
+    let mut covers = Covers::default();
     let mut tracks = Vec::with_capacity(files.len());
     for (n, (path, mtime, size)) in files.into_iter().enumerate() {
         let reused = prev
@@ -158,7 +180,7 @@ pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut pr
             Some(t) => {
                 if let Some(c) = &t.cover {
                     if let Some(stem) = c.file_stem().and_then(|s| s.to_str()) {
-                        covers.entry(stem.to_string()).or_insert_with(|| c.clone());
+                        covers.thumbs.entry(stem.to_string()).or_insert_with(|| c.clone());
                     }
                 }
                 t
@@ -170,13 +192,19 @@ pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut pr
             progress(n + 1);
         }
     }
+    // An unreachable music folder's songs stay as the last scan found them.
+    for t in previous {
+        if offline.iter().any(|r| t.path.starts_with(r)) && seen.insert(t.path.clone()) {
+            tracks.push(t.clone());
+        }
+    }
     progress(tracks.len());
 
     // A track without a cover of its own takes its album's thumbnail when another track made one.
     for t in &mut tracks {
         if t.cover.is_none() {
-            let key = album_key(t, !t.album.is_empty());
-            if let Some(c) = covers.get(&key) {
+            let key = album_key(t, !t.album_fallback);
+            if let Some(c) = covers.thumbs.get(&key) {
                 t.cover = Some(c.clone());
             }
         }
@@ -187,6 +215,11 @@ pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut pr
         key(a).cmp(&key(b)).then_with(|| a.path.cmp(&b.path))
     });
     tracks
+}
+
+/// The music folders that can't be read now (see the module docs).
+pub fn offline_roots(folders: &[PathBuf]) -> Vec<PathBuf> {
+    folders.iter().filter(|f| fs::read_dir(f).is_err()).cloned().collect()
 }
 
 /// Collects audio files below `dir`: (path, mtime seconds, size).
@@ -236,6 +269,25 @@ fn has_audio_extension(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
+/// What a scan learnt about covers: thumbnails by album hash, and each folder's cover file.
+#[derive(Default)]
+struct Covers {
+    thumbs: HashMap<String, PathBuf>,
+    /// A folder's cover picture (None: it has none), so each folder is listed once per scan.
+    folders: HashMap<PathBuf, Option<PathBuf>>,
+}
+
+/// The leading number of a track or disc tag: "3", "03/12", "3 of 12". None for 0 or no digits.
+fn leading_number(s: &str) -> Option<u32> {
+    let digits: String = s.trim().chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok().filter(|&n| n > 0)
+}
+
+/// A flag tag: "1", "true", "yes".
+fn flag(s: &str) -> bool {
+    matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes")
+}
+
 fn clean(s: Option<impl AsRef<str>>) -> Option<String> {
     s.map(|s| s.as_ref().trim().to_string()).filter(|s| !s.is_empty())
 }
@@ -259,9 +311,14 @@ fn album_key(t: &LocalTrack, has_album: bool) -> String {
     }
 }
 
-fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut HashMap<String, PathBuf>) -> LocalTrack {
+fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut Covers) -> LocalTrack {
     let tagged = lofty::read_from_path(path).ok();
     let tag: Option<&Tag> = tagged.as_ref().and_then(|f| f.primary_tag().or_else(|| f.first_tag()));
+    // A value from the primary tag, else from any other tag of the file (an ID3 tag on a FLAC).
+    let any = |key: ItemKey| -> Option<String> {
+        let f = tagged.as_ref()?;
+        tag.and_then(|t| clean(t.get_string(key))).or_else(|| f.tags().iter().find_map(|t| clean(t.get_string(key))))
+    };
     let duration = tagged.as_ref().map_or(0.0, |f| f.properties().duration().as_secs_f64());
 
     let folder_name = path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
@@ -269,7 +326,10 @@ fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut H
     let album_tag = tag.and_then(|t| clean(t.album()));
     let artist_tag = tag.and_then(|t| clean(t.artist()));
     let artist = artist_tag.unwrap_or_else(|| "Unknown Artist".into());
-    let album_artist = tag.and_then(|t| clean(t.get_string(ItemKey::AlbumArtist))).unwrap_or_else(|| artist.clone());
+    let compilation = any(ItemKey::FlagCompilation).is_some_and(|v| flag(&v));
+    let album_artist_tag = any(ItemKey::AlbumArtist);
+    let album_artist_tagged = album_artist_tag.is_some() || compilation;
+    let album_artist = album_artist_tag.unwrap_or_else(|| if compilation { VARIOUS_ARTISTS.into() } else { artist.clone() });
     let year = tag.and_then(|t| {
         t.date()
             .map(|d| d.year.to_string())
@@ -285,8 +345,10 @@ fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut H
         album: album_tag.clone().or(folder_name).unwrap_or_default(),
         album_fallback: album_tag.is_none(),
         album_artist,
-        track: tag.and_then(|t| t.track()),
-        disc: tag.and_then(|t| t.disk()),
+        album_artist_tagged,
+        compilation,
+        track: tag.and_then(|t| t.track()).or_else(|| any(ItemKey::TrackNumber).as_deref().and_then(leading_number)),
+        disc: tag.and_then(|t| t.disk()).or_else(|| any(ItemKey::DiscNumber).as_deref().and_then(leading_number)),
         year,
         genre: tag.and_then(|t| clean(t.genre())),
         duration,
@@ -294,17 +356,18 @@ fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut H
     };
 
     let key = album_key(&track, album_tag.is_some());
-    track.cover = match covers.get(&key) {
+    track.cover = match covers.thumbs.get(&key) {
         Some(c) => Some(c.clone()),
         None => {
             let thumb = art_dir.join(format!("{key}.jpg"));
             if thumb.exists() {
-                covers.insert(key, thumb.clone());
+                covers.thumbs.insert(key, thumb.clone());
                 Some(thumb)
             } else {
-                let data = tag.and_then(embedded_cover).or_else(|| folder_cover(path));
+                let embedded = tagged.as_ref().and_then(|f| tag.and_then(embedded_cover).or_else(|| f.tags().iter().find_map(embedded_cover)));
+                let data = embedded.or_else(|| folder_cover(path, &mut covers.folders));
                 data.filter(|d| write_thumbnail(d, art_dir, &thumb)).map(|_| {
-                    covers.insert(key, thumb.clone());
+                    covers.thumbs.insert(key, thumb.clone());
                     thumb
                 })
             }
@@ -319,22 +382,47 @@ fn embedded_cover(tag: &Tag) -> Option<Vec<u8>> {
     Some(pic.data().to_vec())
 }
 
-/// `cover|folder|front|album.(jpg|jpeg|png)` beside the file (case-insensitive).
-fn folder_cover(file: &Path) -> Option<Vec<u8>> {
-    let dir = file.parent()?;
+/// A disc folder of a multi-disc album: "CD1", "CD 2", "Disc 1", "Disk 03" (any case).
+pub(crate) fn is_disc_folder(dir: &Path) -> bool {
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else { return false };
+    let name = name.trim().to_ascii_lowercase();
+    ["cd", "disc", "disk"].iter().any(|p| {
+        name.strip_prefix(p).is_some_and(|rest| {
+            let rest = rest.trim_start_matches([' ', '_', '-', '.']);
+            !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+        })
+    })
+}
+
+/// The cover picture in `dir`: `cover|folder|front|album.(jpg|jpeg|png)`, in that order of names
+/// (case-insensitive). Each folder is listed once per scan (`seen`).
+fn cover_in(dir: &Path, seen: &mut HashMap<PathBuf, Option<PathBuf>>) -> Option<PathBuf> {
+    if let Some(found) = seen.get(dir) {
+        return found.clone();
+    }
     let mut found: Vec<(usize, PathBuf)> = Vec::new();
-    for e in fs::read_dir(dir).ok()?.flatten() {
+    for e in fs::read_dir(dir).into_iter().flatten().flatten() {
         let p = e.path();
         let (Some(stem), Some(ext)) = (p.file_stem().and_then(|s| s.to_str()), p.extension().and_then(|s| s.to_str())) else { continue };
         let (stem, ext) = (stem.to_ascii_lowercase(), ext.to_ascii_lowercase());
-        if let Some(rank) = COVER_NAMES.iter().position(|n| *n == stem) {
-            if COVER_EXTS.contains(&ext.as_str()) && p.is_file() {
-                found.push((rank, p));
-            }
+        if let Some(rank) = COVER_NAMES.iter().position(|n| *n == stem)
+            && COVER_EXTS.contains(&ext.as_str())
+            && p.is_file()
+        {
+            found.push((rank, p));
         }
     }
     found.sort();
-    found.into_iter().find_map(|(_, p)| fs::read(p).ok())
+    let best = found.into_iter().next().map(|(_, p)| p);
+    seen.insert(dir.to_path_buf(), best.clone());
+    best
+}
+
+/// The cover picture beside the file, else (in a disc folder) in the album's folder above.
+fn folder_cover(file: &Path, seen: &mut HashMap<PathBuf, Option<PathBuf>>) -> Option<Vec<u8>> {
+    let dir = file.parent()?;
+    let pic = cover_in(dir, seen).or_else(|| dir.parent().filter(|_| is_disc_folder(dir)).and_then(|up| cover_in(up, seen)))?;
+    fs::read(pic).ok()
 }
 
 /// Decodes `data`, shrinks it to at most `COVER_MAX` px and saves a JPEG at `thumb` (atomically).
@@ -418,6 +506,9 @@ mod tests {
                 "year" => {
                     tag.insert_text(ItemKey::RecordingDate, v.to_string());
                 }
+                "compilation" => {
+                    tag.insert_text(ItemKey::FlagCompilation, v.to_string());
+                }
                 _ => panic!("tag {k}"),
             }
         }
@@ -435,7 +526,7 @@ mod tests {
     fn fallbacks_without_tags() {
         let d = tmp_dir("fallback");
         make(&d.join("Some Album").join("01 song.WAV"), &[], None);
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].title, "01 song");
         assert_eq!(t[0].artist, "Unknown Artist");
@@ -456,7 +547,7 @@ mod tests {
             &[("title", "Hello"), ("artist", "Me"), ("album", "Al"), ("albumartist", "Various"), ("track", "3"), ("disc", "2"), ("genre", "Pop"), ("year", "1999-05-01")],
             None,
         );
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         let t = &t[0];
         assert_eq!((t.title.as_str(), t.artist.as_str(), t.album.as_str(), t.album_artist.as_str()), ("Hello", "Me", "Al", "Various"));
         assert_eq!((t.track, t.disc), (Some(3), Some(2)));
@@ -474,7 +565,7 @@ mod tests {
         make(&d.join("2.wav"), &[("title", "Z2"), ("artist", "abe"), ("album", "Y"), ("disc", "2"), ("track", "1")], None);
         make(&d.join("3.wav"), &[("title", "Z1"), ("artist", "abe"), ("album", "Y"), ("disc", "1"), ("track", "9")], None);
         make(&d.join("4.wav"), &[("title", "A0"), ("artist", "abe"), ("album", "y"), ("disc", "1"), ("track", "2")], None);
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         let titles: Vec<_> = t.iter().map(|t| t.title.as_str()).collect();
         // abe/Y/d1/t2 (A0, album "y" sorts equal to "Y" case-insensitively) < t9 < disc 2 < Zed.
         assert_eq!(titles, ["A0", "Z1", "Z2", "b"]);
@@ -495,11 +586,11 @@ mod tests {
             let real = tmp_dir("skip-real");
             make(&real.join("linked.wav"), &[], None);
             std::os::unix::fs::symlink(&real, d.join("linkdir")).unwrap();
-            let t = run(&[d.clone()], &[], &d.join("art"));
+            let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
             assert_eq!(t.len(), 1, "{t:?}");
             let _ = fs::remove_dir_all(&real);
         }
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         assert_eq!(t.len(), 1);
         assert!(t[0].path.ends_with("ok.wav"));
         let _ = fs::remove_dir_all(&d);
@@ -510,18 +601,18 @@ mod tests {
         let d = tmp_dir("reuse");
         make(&d.join("a.wav"), &[("title", "Real")], None);
         let art = d.join("art");
-        let mut first = run(&[d.clone()], &[], &art);
+        let mut first = run(std::slice::from_ref(&d), &[], &art);
         first[0].title = "Fake".into();
-        let again = run(&[d.clone()], &first, &art);
+        let again = run(std::slice::from_ref(&d), &first, &art);
         assert_eq!(again[0].title, "Fake");
         // A changed size makes it re-read.
         first[0].size += 1;
-        let again = run(&[d.clone()], &first, &art);
+        let again = run(std::slice::from_ref(&d), &first, &art);
         assert_eq!(again[0].title, "Real");
         // So does a changed mtime.
         first[0].size -= 1;
         first[0].mtime += 1;
-        assert_eq!(run(&[d.clone()], &first, &art)[0].title, "Real");
+        assert_eq!(run(std::slice::from_ref(&d), &first, &art)[0].title, "Real");
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -530,13 +621,13 @@ mod tests {
         let d = tmp_dir("reusecover");
         make(&d.join("a.wav"), &[("title", "Real"), ("album", "Al"), ("artist", "Me")], Some(png(50, 50)));
         let art = d.join("art");
-        let mut first = run(&[d.clone()], &[], &art);
+        let mut first = run(std::slice::from_ref(&d), &[], &art);
         let cover = first[0].cover.clone().expect("cover");
         assert!(cover.exists());
         first[0].title = "Fake".into();
-        assert_eq!(run(&[d.clone()], &first, &art)[0].title, "Fake");
+        assert_eq!(run(std::slice::from_ref(&d), &first, &art)[0].title, "Fake");
         fs::remove_file(&cover).unwrap();
-        let again = run(&[d.clone()], &first, &art);
+        let again = run(std::slice::from_ref(&d), &first, &art);
         assert_eq!(again[0].title, "Real");
         assert!(again[0].cover.as_ref().unwrap().exists());
         let _ = fs::remove_dir_all(&d);
@@ -549,7 +640,7 @@ mod tests {
         let tags = [("album", "Al"), ("albumartist", "Me")];
         make(&d.join("a.wav"), &[tags[0], tags[1], ("title", "1")], Some(png(1200, 800)));
         make(&d.join("b.wav"), &[tags[0], tags[1], ("title", "2")], None);
-        let t = run(&[d.clone()], &[], &art);
+        let t = run(std::slice::from_ref(&d), &[], &art);
         assert_eq!(t[0].cover, t[1].cover);
         let cover = t[0].cover.clone().expect("cover");
         assert_eq!(cover.parent().unwrap(), art);
@@ -561,7 +652,7 @@ mod tests {
         assert_eq!(fs::read_dir(&art).unwrap().count(), 1);
         // An existing thumbnail isn't rewritten.
         fs::write(&cover, b"marker").unwrap();
-        let t = run(&[d.clone()], &[], &art);
+        let t = run(std::slice::from_ref(&d), &[], &art);
         assert_eq!(t[0].cover.as_ref(), Some(&cover));
         assert_eq!(fs::read(&cover).unwrap(), b"marker");
         let _ = fs::remove_dir_all(&d);
@@ -573,14 +664,67 @@ mod tests {
         let art = d.join("art");
         make(&d.join("alb").join("a.wav"), &[], None);
         fs::write(d.join("alb").join("Folder.PNG"), png(40, 40)).unwrap();
-        let t = run(&[d.clone()], &[], &art);
+        let t = run(std::slice::from_ref(&d), &[], &art);
         let c = t[0].cover.clone().expect("cover");
         assert!(c.starts_with(&art) && c.exists());
         // The cover file isn't an audio file, and a second folder without one has no cover.
         make(&d.join("other").join("b.wav"), &[], None);
-        let t = run(&[d.clone()], &[], &art);
+        let t = run(std::slice::from_ref(&d), &[], &art);
         assert_eq!(t.len(), 2);
         assert_eq!(t.iter().filter(|t| t.cover.is_some()).count(), 1);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_compilation_without_an_album_artist_is_by_various_artists() {
+        let d = tmp_dir("compilation");
+        make(&d.join("a.wav"), &[("title", "A"), ("artist", "Ann"), ("album", "Hits"), ("compilation", "1")], None);
+        make(&d.join("b.wav"), &[("title", "B"), ("artist", "Bo"), ("album", "Solo")], None);
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
+        let a = t.iter().find(|t| t.title == "A").unwrap();
+        assert!(a.compilation && a.album_artist_tagged);
+        assert_eq!(a.album_artist, VARIOUS_ARTISTS);
+        let b = t.iter().find(|t| t.title == "B").unwrap();
+        assert!(!b.compilation && !b.album_artist_tagged);
+        assert_eq!(b.album_artist, "Bo");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn numbers_and_flags_read_leniently() {
+        assert_eq!(leading_number("3/12"), Some(3));
+        assert_eq!(leading_number(" 03 of 12"), Some(3));
+        assert_eq!(leading_number("0"), None);
+        assert_eq!(leading_number("A1"), None);
+        assert!(flag("1") && flag("TRUE") && !flag("0") && !flag(""));
+        for yes in ["CD1", "cd 2", "Disc 1", "disk_03", "DISC-4"] {
+            assert!(is_disc_folder(Path::new(yes)), "{yes}");
+        }
+        for no in ["CD", "Discography", "Disco 2", "1"] {
+            assert!(!is_disc_folder(Path::new(no)), "{no}");
+        }
+    }
+
+    #[test]
+    fn a_disc_folder_takes_the_cover_of_the_album_folder() {
+        let d = tmp_dir("disccover");
+        let art = d.join("art");
+        make(&d.join("Album").join("CD1").join("a.wav"), &[("title", "A"), ("album", "Al"), ("artist", "Me")], None);
+        make(&d.join("Album").join("CD2").join("b.wav"), &[("title", "B"), ("album", "Al"), ("artist", "Me")], None);
+        fs::write(d.join("Album").join("front.jpeg"), {
+            let img = image::RgbImage::from_pixel(8, 8, image::Rgb([1, 2, 3]));
+            let mut out = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgb8(img).write_to(&mut out, image::ImageFormat::Jpeg).unwrap();
+            out.into_inner()
+        })
+        .unwrap();
+        // Not a disc folder: the folder above is not looked at.
+        make(&d.join("Album").join("Bonus").join("c.wav"), &[("title", "C"), ("album", "Other"), ("artist", "Me")], None);
+        let t = run(std::slice::from_ref(&d), &[], &art);
+        let cover = |title: &str| t.iter().find(|t| t.title == title).unwrap().cover.clone();
+        assert!(cover("A").is_some());
+        assert_eq!(cover("A"), cover("B"));
+        assert_eq!(cover("C"), None);
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -588,10 +732,62 @@ mod tests {
     fn unreadable_file_still_gets_an_entry() {
         let d = tmp_dir("broken");
         fs::write(d.join("junk.mp3"), b"not audio").unwrap();
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].title, "junk");
         assert_eq!(t[0].duration, 0.0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_unreachable_music_folder_keeps_its_songs() {
+        let d = tmp_dir("offline");
+        let (drive, home) = (d.join("drive"), d.join("home"));
+        make(&drive.join("a.wav"), &[("title", "On the drive")], None);
+        make(&home.join("b.wav"), &[("title", "At home")], None);
+        let folders = [drive.clone(), home.clone()];
+        let art = d.join("art");
+        let first = run(&folders, &[], &art);
+        assert_eq!(first.len(), 2);
+        assert!(offline_roots(&folders).is_empty());
+        // The drive is unplugged: its song stays as it was, the other folder is scanned.
+        fs::rename(&drive, d.join("away")).unwrap();
+        assert_eq!(offline_roots(&folders), [drive.clone()]);
+        let again = run(&folders, &first, &art);
+        assert_eq!(again, first);
+        // A file gone from a folder that is there does leave.
+        fs::remove_file(home.join("b.wav")).unwrap();
+        let again = run(&folders, &first, &art);
+        assert_eq!(again.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), ["On the drive"]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Timing of a first scan and a rescan of 3000 tagged files (run by hand:
+    /// `cargo test -p uzumaki scan_timing -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn scan_timing() {
+        let d = tmp_dir("timing");
+        for i in 0..3000 {
+            let album = i / 12;
+            make(
+                &d.join(format!("Artist {}", album / 8)).join(format!("Album {album}")).join(format!("{i}.wav")),
+                &[("title", &format!("Song {i}")), ("artist", &format!("Artist {}", album / 8)), ("album", &format!("Album {album}")), ("track", &format!("{}", i % 12 + 1))],
+                None,
+            );
+        }
+        let art = d.join("art");
+        let t = std::time::Instant::now();
+        let first = run(std::slice::from_ref(&d), &[], &art);
+        let first_took = t.elapsed();
+        let t = std::time::Instant::now();
+        let again = run(std::slice::from_ref(&d), &first, &art);
+        let again_took = t.elapsed();
+        let t = std::time::Instant::now();
+        let (songs, view) = crate::local::view::from_index(&again, std::slice::from_ref(&d));
+        let derive_took = t.elapsed();
+        eprintln!("3000 files: first scan {first_took:?}, rescan {again_took:?}, derive {derive_took:?} ({} songs, {} albums)", songs.len(), view.albums.len());
+        assert_eq!(again, first);
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -602,7 +798,7 @@ mod tests {
             fs::write(d.join(format!("{i}.mp3")), b"x").unwrap();
         }
         let mut calls = Vec::new();
-        scan(&[d.clone()], &[], &d.join("art"), |n| calls.push(n));
+        scan(std::slice::from_ref(&d), &[], &d.join("art"), |n| calls.push(n));
         assert_eq!(calls.last(), Some(&3));
         let _ = fs::remove_dir_all(&d);
     }
@@ -621,6 +817,8 @@ mod tests {
             album: "B".into(),
             album_fallback: false,
             album_artist: "A".into(),
+            album_artist_tagged: true,
+            compilation: true,
             track: Some(1),
             disc: None,
             year: Some("2001".into()),
@@ -631,9 +829,9 @@ mod tests {
         save_index(&p, &t);
         assert_eq!(load_index(&p), t);
         assert!(!d.join("sub").join("idx.json.tmp").exists());
-        fs::write(&p, r#"{"version": 2, "tracks": []}"#).unwrap();
-        assert!(load_index(&p).is_empty());
-        fs::write(&p, r#"{"version": 2, "tracks": [{"bogus": 1}]}"#).unwrap();
+        fs::write(&p, r#"{"version": 2, "tracks": [{"path": "/m/a.flac"}]}"#).unwrap();
+        assert!(load_index(&p).is_empty(), "an older index is read again from the files");
+        fs::write(&p, r#"{"version": 3, "tracks": [{"bogus": 1}]}"#).unwrap();
         assert!(load_index(&p).is_empty());
         fs::write(&p, "garbage").unwrap();
         assert!(load_index(&p).is_empty());

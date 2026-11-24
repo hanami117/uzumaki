@@ -10,7 +10,9 @@ impl Route {
     pub fn needs_apple(&self) -> bool {
         match self {
             Route::Search | Route::LocalFiles => false,
-            Route::Collection { id, .. } => !crate::local::view::is_album_id(id) && !crate::mixed::is_uzu_id(id),
+            Route::Collection { id, .. } => {
+                !crate::local::view::is_album_id(id) && !crate::mixed::is_uzu_id(id) && !crate::local::favourites::is_page_id(id)
+            }
             Route::Artist { id, .. } => !crate::local::view::is_artist_id(id),
             r => !r.local_library(),
         }
