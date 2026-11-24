@@ -185,6 +185,7 @@ impl Client {
     }
 
     /// Network or server failures in a row.
+    #[cfg(test)]
     pub fn strikes(&self) -> u32 {
         self.gate.lock().unwrap_or_else(|e| e.into_inner()).strikes
     }

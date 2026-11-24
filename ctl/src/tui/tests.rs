@@ -2299,7 +2299,7 @@ mod lyrics_screen {
             let mut s = lab.script.lock().unwrap();
             s.status.song = Some(s_song("d"));
             s.status.position = 1.0;
-            s.lyrics = Reply::Lyrics { song_id: "d".into(), status: LyricsStatus::Loading, lines: vec![] };
+            s.lyrics = Reply::Lyrics { song_id: "d".into(), status: LyricsStatus::Loading, lines: vec![], credit: None };
         }
         lab.advance(500); // the status says "d"; the screen asks for its lyrics
         assert_eq!(lab.asks(), 2);
@@ -2330,14 +2330,14 @@ mod lyrics_screen {
             let (frame, _) = lab.frame();
             assert!(frame.iter().any(|l| l.contains(text)), "wanted {text:?}");
         };
-        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::None, lines: vec![] };
+        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::None, lines: vec![], credit: None };
         lab.script.lock().unwrap().status.song = Some(s_song("e"));
-        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "e".into(), status: LyricsStatus::None, lines: vec![] };
+        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "e".into(), status: LyricsStatus::None, lines: vec![], credit: None };
         lab.advance(500);
         say(&mut lab, "No lyrics");
         lab.script.lock().unwrap().status.song = Some(s_song("f"));
         lab.script.lock().unwrap().status.signed_in = false;
-        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "f".into(), status: LyricsStatus::None, lines: vec![] };
+        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "f".into(), status: LyricsStatus::None, lines: vec![], credit: None };
         lab.advance(500);
         say(&mut lab, "Sign in for lyrics");
         lab.script.lock().unwrap().status.state = PlayState::Stopped;
@@ -2365,11 +2365,11 @@ mod lyrics_screen {
         let mut lab = Lab::new(5.0);
         let many: Vec<LyricLine> = (0..40).map(|i| LyricLine { text: format!("verse line {i}"), ..Default::default() }).collect();
         lab.script.lock().unwrap().status.song = Some(s_song("h"));
-        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "h".into(), status: LyricsStatus::Plain, lines: many };
+        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "h".into(), status: LyricsStatus::Plain, lines: many, credit: Some("Lyrics from LRCLIB".into()) };
         lab.advance(500);
         let (text, buf) = lab.frame();
         assert!(text[10].contains("verse line 0"), "starts at the top: {}", text[10]);
-        assert!(text[8].contains("not time-synced"), "{}", text[8]);
+        assert!(text[8].contains("not time-synced · from LRCLIB"), "the credit on the context line: {}", text[8]);
         let st = style_of(&buf, &text, "verse line 0");
         assert!(st.fg != Some(CORAL) && !st.add_modifier.contains(Modifier::BOLD) && !st.add_modifier.contains(Modifier::DIM), "no highlight");
         // Time passing changes nothing.
@@ -2391,7 +2391,7 @@ mod lyrics_screen {
         let mut lab = Lab::new(5.0);
         let long = "this is a very long line of a song that will not fit on a narrow terminal at all ever".to_string();
         lab.script.lock().unwrap().status.song = Some(s_song("i"));
-        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "i".into(), status: LyricsStatus::Synced, lines: vec![LyricLine { start: 1.0, end: 9.0, text: long.clone(), ..Default::default() }, LyricLine { start: 9.0, end: 12.0, text: "short".into(), ..Default::default() }] };
+        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "i".into(), status: LyricsStatus::Synced, lines: vec![LyricLine { start: 1.0, end: 9.0, text: long.clone(), ..Default::default() }, LyricLine { start: 9.0, end: 12.0, text: "short".into(), ..Default::default() }], credit: None };
         lab.app.resize_to(40, 24);
         lab.advance(500);
         let buf = draw(&lab.app, lab.now, 40, 24);
@@ -2542,7 +2542,7 @@ mod lyrics_screen {
     fn no_lyrics_leaves_solo_as_it_was_with_a_dim_hint() {
         let mut lab = Lab::solo(12.5, 120, 34);
         let plain = lab.app.solo_geometry().unwrap();
-        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::None, lines: vec![] };
+        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::None, lines: vec![], credit: None };
         lab.press(&[ch('l')]);
         lab.advance(3000); // the "Lyrics: on" message is gone
         assert_eq!(lab.app.solo_geometry(), Some(plain));
@@ -2601,7 +2601,7 @@ mod lyrics_screen {
     #[test]
     fn a_none_answer_is_asked_again_and_a_later_plain_one_shows() {
         let mut lab = Lab::bare(5.0);
-        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::None, lines: vec![] };
+        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::None, lines: vec![], credit: None };
         lab.press(&[ch('5')]);
         assert!(lab.frame().0.iter().any(|l| l.contains("No lyrics")));
         let asks = lab.asks();
@@ -2654,7 +2654,7 @@ mod lyrics_screen {
     fn loading_shows_the_hint_then_the_layout_changes_and_the_cover_follows() {
         let mut lab = Lab::solo(12.5, 120, 34);
         let plain = lab.app.solo_geometry().unwrap();
-        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::Loading, lines: vec![] };
+        lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::Loading, lines: vec![], credit: None };
         lab.press(&[ch('l')]);
         lab.advance(3000);
         assert_eq!(lab.app.solo_geometry(), Some(plain));
@@ -2678,7 +2678,7 @@ mod lyrics_screen {
         {
             let mut sc = lab.script.lock().unwrap();
             sc.status.song = Some(s("d", "Other Song", "Daft Punk", "Random Access Memories", 200.0));
-            sc.lyrics = Reply::Lyrics { song_id: "d".into(), status: LyricsStatus::Loading, lines: vec![] };
+            sc.lyrics = Reply::Lyrics { song_id: "d".into(), status: LyricsStatus::Loading, lines: vec![], credit: None };
         }
         lab.advance(500);
         assert_eq!(lab.app.solo_geometry(), Some(with), "no jumping cover");
@@ -2743,7 +2743,7 @@ mod lyrics_screen {
     fn l_puts_the_lyrics_right_of_the_cover_in_a_roughly_square_window() {
         for (w, h) in [(100u16, 40u16), (105, 40), (110, 44), (120, 48), (120, 40)] {
             let mut lab = Lab::solo(12.5, w, h);
-            lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::Loading, lines: vec![] };
+            lab.script.lock().unwrap().lyrics = Reply::Lyrics { song_id: "c".into(), status: LyricsStatus::Loading, lines: vec![], credit: None };
             lab.press(&[ch('l')]);
             assert!(!lab.app.solo_lyrics_shown());
             lab.script.lock().unwrap().lyrics = fake_lyrics("c");

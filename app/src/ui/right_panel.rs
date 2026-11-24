@@ -78,6 +78,7 @@ fn body_of<'a>(s: &'a State) -> Body<'a> {
     let Some(song) = s.playback.song.as_ref() else { return Body::Message("Nothing is playing") };
     match s.lyrics_of(song) {
         // A local file without lyrics beside it or in its tags.
+        Some(Load::Ready(None)) if song.is_local() && s.settings.lrclib => Body::Message("No lyrics in this file, beside it or on LRCLIB"),
         Some(Load::Ready(None)) if song.is_local() => Body::Message("No lyrics in this file or beside it"),
         Some(Load::Idle) | Some(Load::Loading) => Body::Message("Loading lyrics\u{2026}"),
         Some(Load::Ready(Some(l))) if !l.lines.is_empty() => {
@@ -297,10 +298,16 @@ fn synced(s: &State, l: &Lyrics, cx: &Cx<State>) -> El {
 }
 
 fn lyrics_tab(s: &State, cx: &Cx<State>) -> El {
-    match body_of(s) {
-        Body::Message(m) => message(m),
-        Body::Plain(l) => plain(l),
-        Body::Synced(l) => synced(s, l, cx),
+    let (body, credit) = match body_of(s) {
+        Body::Message(m) => (message(m), None),
+        Body::Plain(l) => (plain(l), l.credit),
+        Body::Synced(l) => (synced(s, l, cx), l.credit),
+    };
+    match credit {
+        // Lyrics from LRCLIB: a small credit under them.
+        Some(c) => col().grow(1.0).min_h(0.0).w_full().child(body)
+            .child(text(c).font(SECTION11).color(PAL.dim).px(20.0).py(10.0).key("rp-lyrics-credit")),
+        None => body,
     }
 }
 

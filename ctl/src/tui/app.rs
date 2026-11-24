@@ -1359,9 +1359,10 @@ impl App {
     fn fetch_lyrics(&mut self, be: &mut dyn Backend, now: Instant) {
         self.lyrics.asked_now(now);
         match be.request(&Request::Lyrics) {
-            Ok(Reply::Lyrics { song_id, status, lines }) => {
+            Ok(Reply::Lyrics { song_id, status, lines, credit }) => {
                 self.away = false;
                 self.lyrics.set(song_id, status, lines);
+                self.lyrics.credit = credit;
             }
             // An app from before lyrics answers every request it can't read like this.
             Ok(Reply::Error { message }) if message.starts_with("bad request") => self.lyrics.unsupported = true,

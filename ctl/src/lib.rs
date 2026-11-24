@@ -433,6 +433,10 @@ pub enum Reply {
         status: LyricsStatus,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lines: Vec<LyricLine>,
+        /// Where the lyrics came from when it should be shown ("Lyrics from LRCLIB"); None for
+        /// Apple's and a local file's own (and from apps before 0.4.4).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credit: Option<String>,
     },
     /// The speakers found and the one in use (`None`: this computer).
     #[serde(rename = "airplay")]
@@ -1142,13 +1146,15 @@ mod tests {
                 LyricLine { start: 1.0, end: 2.0, text: "la di".into(), second_voice: false, words: vec![LyricWord { start: 1.0, end: 1.5, text: "la ".into() }, LyricWord { start: 1.5, end: 2.0, text: "di".into() }] },
                 LyricLine { start: 3.0, end: 4.0, text: "da".into(), second_voice: true, words: vec![] },
             ],
+            credit: Some("Lyrics from LRCLIB".into()),
         };
         let text = serde_json::to_string(&reply).unwrap();
         assert!(text.starts_with(r#"{"reply":"lyrics","song_id":"i.1","status":"synced","lines":[{"start":1.0,"end":2.0,"text":"la di","second_voice":false,"words":[{"#), "{text}");
         assert!(text.contains(r#"{"start":3.0,"end":4.0,"text":"da","second_voice":true}"#), "no empty words: {text}");
+        assert!(text.ends_with(r#"],"credit":"Lyrics from LRCLIB"}"#), "{text}");
         assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), reply);
         // Without lines (loading, none) the field is left out and reads back as empty.
-        let loading = Reply::Lyrics { song_id: "i.1".into(), status: LyricsStatus::Loading, lines: vec![] };
+        let loading = Reply::Lyrics { song_id: "i.1".into(), status: LyricsStatus::Loading, lines: vec![], credit: None };
         let text = serde_json::to_string(&loading).unwrap();
         assert_eq!(text, r#"{"reply":"lyrics","song_id":"i.1","status":"loading"}"#);
         assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), loading);

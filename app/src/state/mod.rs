@@ -31,7 +31,7 @@ mod edits;
 mod favourites;
 mod library;
 mod local;
-mod lrclib;
+pub mod lrclib;
 mod lyrics;
 pub mod mixed;
 pub mod motion;
