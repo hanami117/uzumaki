@@ -78,7 +78,7 @@ pub fn from_index(tracks: &[LocalTrack], folders: &[PathBuf]) -> (Vec<Song>, Loc
     let inside = |p: &Path| folders.iter().any(|f| p.starts_with(f));
     let kept: Vec<&LocalTrack> = tracks.iter().filter(|t| inside(&t.path)).collect();
     let mut songs: Vec<Song> = kept.iter().map(|t| t.to_song()).collect();
-    let album_artists: Vec<String> = kept.iter().map(|t| t.album_artist.clone()).collect();
+    let album_artists: Vec<String> = kept.iter().map(|t| if t.album_artist_tagged { t.album_artist.clone() } else { String::new() }).collect();
     let view = derive(&mut songs, &album_artists, folders);
     (songs, view)
 }
@@ -92,8 +92,45 @@ fn file_name(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
+/// The folder an album's files sit in: their own, or the one above a disc folder (`CD1`).
+fn album_dir(path: &Path) -> PathBuf {
+    let dir = path.parent().unwrap_or(Path::new(""));
+    match dir.parent() {
+        Some(up) if super::scan::is_disc_folder(dir) => up.to_path_buf(),
+        _ => dir.to_path_buf(),
+    }
+}
+
+/// The album artist of songs of one album in one folder without an album artist tag: the artist
+/// most of them share (or the one the others start with, "Ann" for "Ann feat. Bo"), else
+/// "Various Artists".
+fn shared_artist(songs: &[Song], members: &[usize]) -> String {
+    let mut counts: Vec<(String, &str, usize)> = Vec::new();
+    for &i in members {
+        let name = songs[i].artist.as_str();
+        let f = fold(name);
+        match counts.iter_mut().find(|c| c.0 == f) {
+            Some(c) => c.2 += 1,
+            None => counts.push((f, name, 1)),
+        }
+    }
+    if counts.len() == 1 {
+        return counts[0].1.to_string();
+    }
+    let best = counts.iter().max_by_key(|c| c.2).expect("members is not empty");
+    if best.2 * 2 > members.len() {
+        return best.1.to_string();
+    }
+    let shortest = counts.iter().min_by_key(|c| c.0.len()).expect("members is not empty");
+    if counts.iter().all(|c| c.0.starts_with(&shortest.0)) {
+        return shortest.1.to_string();
+    }
+    super::scan::VARIOUS_ARTISTS.to_string()
+}
+
 /// Fills in missing tags, sets each song's `album_id` and builds the view. `album_artists[i]` is
-/// song `i`'s album artist ("" when unknown).
+/// song `i`'s album artist ("" when untagged: the songs of one album in one folder then share
+/// one, see `shared_artist`, so a compilation or a song with a guest stays one album).
 pub fn derive(songs: &mut [Song], album_artists: &[String], roots: &[PathBuf]) -> LocalView {
     let n = songs.len();
     let mut aa: Vec<String> = Vec::with_capacity(n);
@@ -103,6 +140,8 @@ pub fn derive(songs: &mut [Song], album_artists: &[String], roots: &[PathBuf]) -
     let mut members: Vec<Vec<u32>> = Vec::new();
     let mut song_album = vec![0u32; n];
 
+    // Missing tags first; songs with an album tag but no album artist, by album and folder.
+    let mut untagged: HashMap<(String, PathBuf), Vec<usize>> = HashMap::new();
     for (i, song) in songs.iter_mut().enumerate() {
         let path = song.local_path().map(Path::to_path_buf).unwrap_or_default();
         let folder = path.parent().map(file_name).unwrap_or_default();
@@ -116,7 +155,32 @@ pub fn derive(songs: &mut [Song], album_artists: &[String], roots: &[PathBuf]) -
             song.album = folder.clone();
             song.album_is_fallback = true;
         }
-        let album_artist = album_artists.get(i).and_then(|a| clean(a)).unwrap_or(&song.artist).to_string();
+        match album_artists.get(i).and_then(|a| clean(a)) {
+            Some(a) => aa.push(a.to_string()),
+            None => {
+                aa.push(String::new());
+                if !song.album_is_fallback {
+                    untagged.entry((fold(&song.album), album_dir(&path))).or_default().push(i);
+                }
+            }
+        }
+    }
+    for list in untagged.values() {
+        let name = shared_artist(songs, list);
+        for &i in list {
+            aa[i] = name.clone();
+        }
+    }
+    for (i, song) in songs.iter().enumerate() {
+        if aa[i].is_empty() {
+            aa[i] = song.artist.clone();
+        }
+    }
+
+    for (i, song) in songs.iter().enumerate() {
+        let path = song.local_path().map(Path::to_path_buf).unwrap_or_default();
+        let folder = path.parent().map(file_name).unwrap_or_default();
+        let album_artist = aa[i].clone();
         // An untagged album is its folder (named after it, by Unknown Artist): two folders called
         // "CD1" stay two albums. A tagged album keeps its discs' folders together.
         let mut key = format!("{}\0{}", fold(&album_artist), fold(&song.album));
@@ -146,7 +210,6 @@ pub fn derive(songs: &mut [Song], album_artists: &[String], roots: &[PathBuf]) -
             albums.len() - 1
         });
         members[k].push(i as u32);
-        aa.push(album_artist);
     }
 
     // Each album's songs by disc, track, title; its cover, year and genre from the first that has one.
@@ -335,6 +398,8 @@ pub(crate) mod tests {
             album: album.into(),
             album_fallback: false,
             album_artist: album_artist.into(),
+            album_artist_tagged: !album_artist.is_empty(),
+            compilation: false,
             track,
             disc,
             year: None,
@@ -391,6 +456,36 @@ pub(crate) mod tests {
             assert_eq!(s.album_id.as_deref(), Some(v.albums[a].id.as_str()));
             assert_eq!(v.album(&v.albums[a].id), Some(a));
         }
+    }
+
+    #[test]
+    fn an_album_without_album_artist_tags_stays_one_album() {
+        let (_, v) = view(&[
+            // A compilation ripped without album artist tags: one album, by Various Artists.
+            track("/m/Hits/1.flac", "One", "Ann", "Hits", "", None, Some(1)),
+            track("/m/Hits/2.flac", "Two", "Bo", "Hits", "", None, Some(2)),
+            track("/m/Hits/3.flac", "Three", "Cy", "Hits", "", None, Some(3)),
+            // An album with a guest: still the main artist's.
+            track("/m/Debut/1.flac", "A", "Ann", "Debut", "", None, Some(1)),
+            track("/m/Debut/2.flac", "B", "Ann feat. Bo", "Debut", "", None, Some(2)),
+            // Mostly one artist: theirs.
+            track("/m/Mix/1.flac", "M1", "Dee", "Mix", "", None, Some(1)),
+            track("/m/Mix/2.flac", "M2", "Dee", "Mix", "", None, Some(2)),
+            track("/m/Mix/3.flac", "M3", "Eve", "Mix", "", None, Some(3)),
+            // Two discs in disc folders, no album artist: one album.
+            track("/m/Live/CD1/1.flac", "L1", "Fay", "Live", "", Some(1), Some(1)),
+            track("/m/Live/CD2/1.flac", "L2", "Fay", "Live", "", Some(2), Some(1)),
+            // The same album title in another folder by another artist: another album.
+            track("/m/Other/Hits/1.flac", "Solo", "Gus", "Hits", "", None, Some(1)),
+        ]);
+        let names: Vec<_> = v.albums.iter().map(|c| (c.title.as_str(), c.subtitle.as_str(), c.track_count)).collect();
+        assert_eq!(
+            names,
+            [("Debut", "Ann", Some(2)), ("Hits", "Gus", Some(1)), ("Hits", "Various Artists", Some(3)), ("Live", "Fay", Some(2)), ("Mix", "Dee", Some(3))]
+        );
+        // The compilation's artists still list their songs.
+        let bo = v.artist(&artist_id("Bo")).unwrap();
+        assert_eq!(v.artist_songs[bo].len(), 1);
     }
 
     #[test]

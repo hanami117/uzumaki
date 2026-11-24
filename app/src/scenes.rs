@@ -2432,6 +2432,8 @@ fn ltrack(path: std::path::PathBuf, title: &str, artist: &str, album: &str, albu
         album: album.into(),
         album_fallback: album_artist == "Unknown Artist",
         album_artist: album_artist.into(),
+        album_artist_tagged: album_artist != "Unknown Artist" && album_artist != artist || album_artist == "Various Artists",
+        compilation: album_artist == "Various Artists",
         track,
         disc,
         year: year.map(String::from),
