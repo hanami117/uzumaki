@@ -20,11 +20,12 @@
 
 pub mod channel;
 pub mod discover;
+pub mod file;
 pub mod flac;
 pub mod health;
 pub mod pcm;
 pub mod proto;
-mod session;
+pub(crate) mod session;
 pub mod stream;
 pub mod wav;
 
@@ -83,6 +84,9 @@ pub struct Config {
     /// Nothing heard from the device for this long (it answers our PINGs): the connection is lost.
     pub silence_timeout: Duration,
     pub discover_timeout: Duration,
+    /// A lost connection (Wi-Fi gone, the TV off, this computer asleep) is tried again for this
+    /// long before the session ends.
+    pub reconnect_for: Duration,
 }
 
 impl Config {
@@ -112,8 +116,9 @@ impl Config {
             connect_timeout: Duration::from_secs(5),
             launch_timeout: Duration::from_secs(20),
             fetch_timeout: Duration::from_secs(15),
-            silence_timeout: Duration::from_secs(15),
+            silence_timeout: Duration::from_secs(10),
             discover_timeout: Duration::from_secs(6),
+            reconnect_for: Duration::from_secs(60),
         }
     }
 
@@ -143,6 +148,40 @@ pub struct Meta {
     pub image: Option<String>,
 }
 
+/// What the device plays.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum Media {
+    /// The live capture (Apple Music, or a local file the receiver can't play itself).
+    #[default]
+    Live,
+    /// A local file the device plays itself (`BUFFERED`, see `file`).
+    File(FileMedia),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileMedia {
+    pub path: PathBuf,
+    pub content_type: String,
+    /// Seconds (0: unknown).
+    pub duration: f64,
+    /// The app's song id: `Event::Position` names it.
+    pub key: String,
+}
+
+impl Media {
+    /// `path` as a file the device plays itself, when it can (else the live stream).
+    pub fn local(path: &std::path::Path, duration: f64, key: &str) -> Media {
+        match file::probe(path) {
+            Some(ct) => Media::File(FileMedia { path: path.to_path_buf(), content_type: ct.into(), duration, key: key.into() }),
+            None => Media::Live,
+        }
+    }
+
+    pub fn is_file(&self) -> bool {
+        matches!(self, Media::File(_))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum State {
     #[default]
@@ -156,13 +195,15 @@ pub enum State {
     /// `latency_ms`: the device's buffer (median of the last statuses), once measured.
     Playing { name: String, latency_ms: Option<u32> },
     Paused { name: String },
+    /// The connection was lost; trying again (see `Config::reconnect_for`).
+    Reconnecting { name: String },
 }
 
 impl State {
     pub fn name(&self) -> Option<&str> {
         match self {
             State::Off => None,
-            State::Connecting { name } | State::Launching { name } | State::Loading { name } | State::Buffering { name } | State::Playing { name, .. } | State::Paused { name } => Some(name),
+            State::Connecting { name } | State::Launching { name } | State::Loading { name } | State::Buffering { name } | State::Playing { name, .. } | State::Paused { name } | State::Reconnecting { name } => Some(name),
         }
     }
 
@@ -176,6 +217,7 @@ impl State {
             State::Playing { latency_ms: Some(ms), .. } => format!("playing, {ms} ms behind"),
             State::Playing { .. } => "playing".into(),
             State::Paused { .. } => "paused".into(),
+            State::Reconnecting { .. } => "reconnecting".into(),
         }
     }
 }
@@ -202,7 +244,7 @@ impl Why {
             Why::Unreachable => format!("Couldn't connect to “{name}”. Check that it is on and on the same network."),
             Why::Taken => format!("“{name}” is playing something else now."),
             Why::Ended => format!("“{name}” stopped playing."),
-            Why::Lost => format!("The connection to “{name}” was lost."),
+            Why::Lost => format!("Lost the connection to “{name}” and couldn't get it back. Is it on, and on this network?"),
             Why::NoFetch => format!("“{name}” couldn't fetch the music from this computer. A firewall may be blocking it."),
             Why::LoadFailed => format!("“{name}” couldn't play the stream."),
         }
@@ -218,6 +260,12 @@ pub enum Event {
     Failed { name: String, why: Why, detail: String },
     /// The device's own volume (0..1) and mute.
     Volume { level: f64, muted: bool },
+    /// Where the device is in a file it plays itself (`Media::File`, its `key`), at each status
+    /// while it plays: the app's player follows it.
+    Position { key: String, at: f64 },
+    /// The connection was lost (`State::Reconnecting` follows): nothing was heard from the
+    /// device for `silent_ms`, so the listener stopped hearing music about that long ago.
+    Interrupted { silent_ms: u64 },
 }
 
 /// The last numbers of the session, for `uzu cast status` and the log.
@@ -278,6 +326,11 @@ pub(crate) enum Cmd {
     Resume,
     Volume(f64),
     Reload(Option<Meta>),
+    /// Another song: `follow` when it follows on by itself (the device first plays out what it
+    /// still has), else at once; `at`: where a file starts.
+    Play { media: Media, meta: Meta, at: f64, follow: bool },
+    /// A seek to `at` s: the receiver's own SEEK for a file, a fresh start for the live stream.
+    Seek { at: f64, meta: Option<Meta> },
 }
 
 struct Handle {
@@ -495,6 +548,22 @@ impl Controller {
     pub fn restart(&self, meta: Option<Meta>) -> bool {
         self.inner.hub.forget();
         self.reload(meta)
+    }
+
+    /// Another song on the device. `follow`: it follows on by itself (natural end): the device
+    /// plays out the seconds it still has, then starts it (with its title); else (a skip, a
+    /// picked song) at once. A `Media::File` starts `at` seconds in.
+    pub fn play(&self, media: Media, meta: Meta, at: f64, follow: bool) -> bool {
+        if !follow && media == Media::Live {
+            self.inner.hub.forget();
+        }
+        self.send(Cmd::Play { media, meta, at, follow })
+    }
+
+    /// A seek to `at` s of the song playing: a file the device plays itself seeks there; the
+    /// live stream starts afresh (as `restart`).
+    pub fn seek(&self, at: f64, meta: Option<Meta>) -> bool {
+        self.send(Cmd::Seek { at, meta })
     }
 
     /// Drops the recent audio only (a skip whose song is not known yet; `restart` follows).
