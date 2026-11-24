@@ -39,6 +39,7 @@ mod new_playlist;
 mod now_playing;
 pub mod onboarding;
 mod player_bar;
+pub mod playlist_file;
 mod right_panel;
 mod search;
 mod select;
@@ -139,6 +140,8 @@ pub struct UiState {
     caret: caret::Blink,
     /// The AirPlay picker (`airplay.rs`).
     pub airplay: airplay::Picker,
+    /// A `.m3u8` save or open dialog asked for by a menu (`playlist_file.rs`).
+    pub file_ask: Option<playlist_file::FileAsk>,
 }
 
 impl UiState {
@@ -203,6 +206,7 @@ pub fn poll(s: &mut State, t: f64, tx: &mut Tx) -> bool {
     let l = airplay::poll(s, tx);
     let j = caret::poll(s, t, tx);
     let k = collection::poll(s, tx);
+    playlist_file::poll(s, tx);
     a || b || c || d || e || f || g || h || i || j || k || l
 }
 

@@ -241,6 +241,7 @@ fn header(label: &'static str) -> El {
             el().key("new-playlist-btn").role("button").label("New Playlist").focusable(true).size(24.0, 24.0).radius(12.0).center()
                 .hover(crate::theme::ov(0.08)).cursor(Cursor::Pointer)
                 .on_press(|s: &mut State| super::new_playlist::open(s, Vec::new()))
+                .on_secondary_press(|s: &mut State, p, _tx: &mut Tx| ctx_menu::open_new_playlist(s, [p.x, p.y]))
                 .child(icon(&icons::PLUS, 14.0).color(PAL.muted)),
         )
 }

@@ -122,6 +122,10 @@ fn card(p: &UzuPlaylist, tracks: Vec<Song>) -> Collection {
     }
 }
 
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
 /// Song counts in a toast: "“Song”" or "3 songs".
 fn what(songs: &[Song]) -> String {
     match songs {
@@ -292,6 +296,88 @@ impl State {
         mx::append(entries, &apple, count, files);
         self.mixed_changed();
         n
+    }
+
+    /// The songs `.m3u8` export writes for playlist `c`: an Uzumaki playlist's, the local
+    /// favourites', or an Apple playlist merged with its overlay (only the files are written).
+    pub fn export_songs(&self, c: &Collection) -> Vec<Song> {
+        if mx::is_uzu_id(&c.id) {
+            return self.uzu_collection(&c.id).map(|x| x.tracks).unwrap_or_default();
+        }
+        if crate::local::favourites::is_page_id(&c.id) {
+            return self.local_favourites_page().tracks;
+        }
+        let full = self.collections.get(&c.id).and_then(Load::ready).unwrap_or(c);
+        self.playlist_songs(full)
+    }
+
+    /// Writes the local songs of playlist `c` to `path` as `.m3u8` (Apple songs left out).
+    pub fn export_m3u8(&mut self, c: &Collection, path: &std::path::Path) {
+        let songs = self.export_songs(c);
+        let (text, n) = crate::local::m3u::write(&songs);
+        let left = songs.iter().filter(|s| !s.is_local()).count();
+        if n == 0 {
+            self.toast = Some(format!("“{}” has no songs from this computer to export.", c.title));
+            return;
+        }
+        let name = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        self.toast = Some(match std::fs::write(path, text) {
+            Err(e) => format!("Couldn't save {name}: {e}"),
+            Ok(()) if left > 0 => format!("Exported {n} song{} to {name} ({left} Apple Music song{} left out)", plural(n), plural(left)),
+            Ok(()) => format!("Exported {n} song{} to {name}", plural(n)),
+        });
+    }
+
+    /// Reads a `.m3u8` (or `.m3u`) and makes an Uzumaki playlist, named after the file, of the
+    /// files it lists that are in the music folders (by path; the others are counted in the
+    /// toast). Opens it. Returns its id.
+    pub fn import_m3u8(&mut self, path: &std::path::Path) -> Option<String> {
+        let name = path.file_stem().map(|f| f.to_string_lossy().into_owned()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Imported playlist".into());
+        let file = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        match std::fs::metadata(path) {
+            Ok(m) if m.len() > crate::local::m3u::MAX_BYTES => {
+                self.toast = Some(format!("{file} is too big to import (1 MB at most)."));
+                return None;
+            }
+            Err(e) => {
+                self.toast = Some(format!("Couldn't read {file}: {e}"));
+                return None;
+            }
+            Ok(_) => {}
+        }
+        let text = match std::fs::read(path) {
+            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+            Err(e) => {
+                self.toast = Some(format!("Couldn't read {file}: {e}"));
+                return None;
+            }
+        };
+        let dir = path.parent().unwrap_or(std::path::Path::new("/"));
+        let listed = crate::local::m3u::parse(&text, dir);
+        let ix = self.local_index();
+        let mut found: Vec<Song> = Vec::new();
+        for p in &listed {
+            let r = LocalRef { path: p.clone(), title: String::new(), artist: String::new(), album: String::new(), duration: 0.0 };
+            if let Found::Here(i) = ix.find(&self.local_lib.songs, &r) {
+                found.push(self.local_lib.songs[i].clone());
+            }
+        }
+        if found.is_empty() {
+            self.toast = Some(if listed.is_empty() {
+                format!("{file} lists no songs.")
+            } else {
+                format!("None of the {} songs in {file} are in your music folders.", listed.len())
+            });
+            return None;
+        }
+        let id = self.create_uzu_playlist(&name, "", &found)?;
+        let skipped = listed.len() - found.len();
+        self.toast = Some(if skipped > 0 {
+            format!("Imported “{name}”: {} song{}, {skipped} not in your music folders", found.len(), plural(found.len()))
+        } else {
+            format!("Imported “{name}”: {} song{}", found.len(), plural(found.len()))
+        });
+        Some(id)
     }
 
     /// Creates an Uzumaki playlist holding `songs` and opens it. Returns its id.
@@ -672,5 +758,39 @@ mod tests {
         s.delete_uzu_playlist(&id);
         assert!(s.mixed.cards.is_empty() && !s.collections.contains_key(&id));
         assert_ne!(s.route, Route::Collection { kind: CollectionKind::Playlist, id });
+    }
+
+    #[test]
+    fn a_playlist_exports_its_files_and_imports_back() {
+        let d = std::env::temp_dir().join(format!("uzumaki-m3u-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut s = State::offline();
+        let a = song("file:///m/a.flac", "A");
+        let b = song("file:///m/b.flac", "B");
+        s.local_lib.songs = vec![a.clone(), b.clone()];
+        s.local_lib.loaded = true;
+        s.local_lib.generation += 1;
+        let id = s.create_uzu_playlist("Road trip", "", &[a.clone(), song("123", "Apple song"), b.clone()]).unwrap();
+        let c = s.uzu_collection(&id).unwrap();
+        let file = d.join("Road trip.m3u8");
+        s.export_m3u8(&c, &file);
+        assert_eq!(s.toast.as_deref(), Some("Exported 2 songs to Road trip.m3u8 (1 Apple Music song left out)"));
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.starts_with("#EXTM3U\n") && text.contains("/m/a.flac\n") && !text.contains("Apple song"), "{text}");
+        // Back in, with a line for a file that isn't in the music folders.
+        std::fs::write(&file, format!("{text}/elsewhere/x.mp3\n")).unwrap();
+        let back = s.import_m3u8(&file).expect("imported");
+        let got = s.uzu_collection(&back).unwrap();
+        assert_eq!(got.title, "Road trip");
+        assert_eq!(got.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), [a.id.as_str(), b.id.as_str()]);
+        assert_eq!(s.toast.as_deref(), Some("Imported “Road trip”: 2 songs, 1 not in your music folders"));
+        // Nothing to take: no playlist.
+        let none = d.join("none.m3u8");
+        std::fs::write(&none, "/elsewhere/x.mp3\n").unwrap();
+        let before = s.mixed.store.playlists.len();
+        assert_eq!(s.import_m3u8(&none), None);
+        assert_eq!(s.mixed.store.playlists.len(), before);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
