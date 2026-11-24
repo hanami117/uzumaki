@@ -317,7 +317,7 @@ fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut C
     // A value from the primary tag, else from any other tag of the file (an ID3 tag on a FLAC).
     let any = |key: ItemKey| -> Option<String> {
         let f = tagged.as_ref()?;
-        tag.and_then(|t| clean(t.get_string(key.clone()))).or_else(|| f.tags().iter().find_map(|t| clean(t.get_string(key.clone()))))
+        tag.and_then(|t| clean(t.get_string(key))).or_else(|| f.tags().iter().find_map(|t| clean(t.get_string(key))))
     };
     let duration = tagged.as_ref().map_or(0.0, |f| f.properties().duration().as_secs_f64());
 
@@ -405,10 +405,11 @@ fn cover_in(dir: &Path, seen: &mut HashMap<PathBuf, Option<PathBuf>>) -> Option<
         let p = e.path();
         let (Some(stem), Some(ext)) = (p.file_stem().and_then(|s| s.to_str()), p.extension().and_then(|s| s.to_str())) else { continue };
         let (stem, ext) = (stem.to_ascii_lowercase(), ext.to_ascii_lowercase());
-        if let Some(rank) = COVER_NAMES.iter().position(|n| *n == stem) {
-            if COVER_EXTS.contains(&ext.as_str()) && p.is_file() {
-                found.push((rank, p));
-            }
+        if let Some(rank) = COVER_NAMES.iter().position(|n| *n == stem)
+            && COVER_EXTS.contains(&ext.as_str())
+            && p.is_file()
+        {
+            found.push((rank, p));
         }
     }
     found.sort();
@@ -525,7 +526,7 @@ mod tests {
     fn fallbacks_without_tags() {
         let d = tmp_dir("fallback");
         make(&d.join("Some Album").join("01 song.WAV"), &[], None);
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].title, "01 song");
         assert_eq!(t[0].artist, "Unknown Artist");
@@ -546,7 +547,7 @@ mod tests {
             &[("title", "Hello"), ("artist", "Me"), ("album", "Al"), ("albumartist", "Various"), ("track", "3"), ("disc", "2"), ("genre", "Pop"), ("year", "1999-05-01")],
             None,
         );
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         let t = &t[0];
         assert_eq!((t.title.as_str(), t.artist.as_str(), t.album.as_str(), t.album_artist.as_str()), ("Hello", "Me", "Al", "Various"));
         assert_eq!((t.track, t.disc), (Some(3), Some(2)));
@@ -564,7 +565,7 @@ mod tests {
         make(&d.join("2.wav"), &[("title", "Z2"), ("artist", "abe"), ("album", "Y"), ("disc", "2"), ("track", "1")], None);
         make(&d.join("3.wav"), &[("title", "Z1"), ("artist", "abe"), ("album", "Y"), ("disc", "1"), ("track", "9")], None);
         make(&d.join("4.wav"), &[("title", "A0"), ("artist", "abe"), ("album", "y"), ("disc", "1"), ("track", "2")], None);
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         let titles: Vec<_> = t.iter().map(|t| t.title.as_str()).collect();
         // abe/Y/d1/t2 (A0, album "y" sorts equal to "Y" case-insensitively) < t9 < disc 2 < Zed.
         assert_eq!(titles, ["A0", "Z1", "Z2", "b"]);
@@ -585,11 +586,11 @@ mod tests {
             let real = tmp_dir("skip-real");
             make(&real.join("linked.wav"), &[], None);
             std::os::unix::fs::symlink(&real, d.join("linkdir")).unwrap();
-            let t = run(&[d.clone()], &[], &d.join("art"));
+            let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
             assert_eq!(t.len(), 1, "{t:?}");
             let _ = fs::remove_dir_all(&real);
         }
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         assert_eq!(t.len(), 1);
         assert!(t[0].path.ends_with("ok.wav"));
         let _ = fs::remove_dir_all(&d);
@@ -600,18 +601,18 @@ mod tests {
         let d = tmp_dir("reuse");
         make(&d.join("a.wav"), &[("title", "Real")], None);
         let art = d.join("art");
-        let mut first = run(&[d.clone()], &[], &art);
+        let mut first = run(std::slice::from_ref(&d), &[], &art);
         first[0].title = "Fake".into();
-        let again = run(&[d.clone()], &first, &art);
+        let again = run(std::slice::from_ref(&d), &first, &art);
         assert_eq!(again[0].title, "Fake");
         // A changed size makes it re-read.
         first[0].size += 1;
-        let again = run(&[d.clone()], &first, &art);
+        let again = run(std::slice::from_ref(&d), &first, &art);
         assert_eq!(again[0].title, "Real");
         // So does a changed mtime.
         first[0].size -= 1;
         first[0].mtime += 1;
-        assert_eq!(run(&[d.clone()], &first, &art)[0].title, "Real");
+        assert_eq!(run(std::slice::from_ref(&d), &first, &art)[0].title, "Real");
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -620,13 +621,13 @@ mod tests {
         let d = tmp_dir("reusecover");
         make(&d.join("a.wav"), &[("title", "Real"), ("album", "Al"), ("artist", "Me")], Some(png(50, 50)));
         let art = d.join("art");
-        let mut first = run(&[d.clone()], &[], &art);
+        let mut first = run(std::slice::from_ref(&d), &[], &art);
         let cover = first[0].cover.clone().expect("cover");
         assert!(cover.exists());
         first[0].title = "Fake".into();
-        assert_eq!(run(&[d.clone()], &first, &art)[0].title, "Fake");
+        assert_eq!(run(std::slice::from_ref(&d), &first, &art)[0].title, "Fake");
         fs::remove_file(&cover).unwrap();
-        let again = run(&[d.clone()], &first, &art);
+        let again = run(std::slice::from_ref(&d), &first, &art);
         assert_eq!(again[0].title, "Real");
         assert!(again[0].cover.as_ref().unwrap().exists());
         let _ = fs::remove_dir_all(&d);
@@ -639,7 +640,7 @@ mod tests {
         let tags = [("album", "Al"), ("albumartist", "Me")];
         make(&d.join("a.wav"), &[tags[0], tags[1], ("title", "1")], Some(png(1200, 800)));
         make(&d.join("b.wav"), &[tags[0], tags[1], ("title", "2")], None);
-        let t = run(&[d.clone()], &[], &art);
+        let t = run(std::slice::from_ref(&d), &[], &art);
         assert_eq!(t[0].cover, t[1].cover);
         let cover = t[0].cover.clone().expect("cover");
         assert_eq!(cover.parent().unwrap(), art);
@@ -651,7 +652,7 @@ mod tests {
         assert_eq!(fs::read_dir(&art).unwrap().count(), 1);
         // An existing thumbnail isn't rewritten.
         fs::write(&cover, b"marker").unwrap();
-        let t = run(&[d.clone()], &[], &art);
+        let t = run(std::slice::from_ref(&d), &[], &art);
         assert_eq!(t[0].cover.as_ref(), Some(&cover));
         assert_eq!(fs::read(&cover).unwrap(), b"marker");
         let _ = fs::remove_dir_all(&d);
@@ -663,12 +664,12 @@ mod tests {
         let art = d.join("art");
         make(&d.join("alb").join("a.wav"), &[], None);
         fs::write(d.join("alb").join("Folder.PNG"), png(40, 40)).unwrap();
-        let t = run(&[d.clone()], &[], &art);
+        let t = run(std::slice::from_ref(&d), &[], &art);
         let c = t[0].cover.clone().expect("cover");
         assert!(c.starts_with(&art) && c.exists());
         // The cover file isn't an audio file, and a second folder without one has no cover.
         make(&d.join("other").join("b.wav"), &[], None);
-        let t = run(&[d.clone()], &[], &art);
+        let t = run(std::slice::from_ref(&d), &[], &art);
         assert_eq!(t.len(), 2);
         assert_eq!(t.iter().filter(|t| t.cover.is_some()).count(), 1);
         let _ = fs::remove_dir_all(&d);
@@ -679,7 +680,7 @@ mod tests {
         let d = tmp_dir("compilation");
         make(&d.join("a.wav"), &[("title", "A"), ("artist", "Ann"), ("album", "Hits"), ("compilation", "1")], None);
         make(&d.join("b.wav"), &[("title", "B"), ("artist", "Bo"), ("album", "Solo")], None);
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         let a = t.iter().find(|t| t.title == "A").unwrap();
         assert!(a.compilation && a.album_artist_tagged);
         assert_eq!(a.album_artist, VARIOUS_ARTISTS);
@@ -719,7 +720,7 @@ mod tests {
         .unwrap();
         // Not a disc folder: the folder above is not looked at.
         make(&d.join("Album").join("Bonus").join("c.wav"), &[("title", "C"), ("album", "Other"), ("artist", "Me")], None);
-        let t = run(&[d.clone()], &[], &art);
+        let t = run(std::slice::from_ref(&d), &[], &art);
         let cover = |title: &str| t.iter().find(|t| t.title == title).unwrap().cover.clone();
         assert!(cover("A").is_some());
         assert_eq!(cover("A"), cover("B"));
@@ -731,7 +732,7 @@ mod tests {
     fn unreadable_file_still_gets_an_entry() {
         let d = tmp_dir("broken");
         fs::write(d.join("junk.mp3"), b"not audio").unwrap();
-        let t = run(&[d.clone()], &[], &d.join("art"));
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].title, "junk");
         assert_eq!(t[0].duration, 0.0);
@@ -777,13 +778,13 @@ mod tests {
         }
         let art = d.join("art");
         let t = std::time::Instant::now();
-        let first = run(&[d.clone()], &[], &art);
+        let first = run(std::slice::from_ref(&d), &[], &art);
         let first_took = t.elapsed();
         let t = std::time::Instant::now();
-        let again = run(&[d.clone()], &first, &art);
+        let again = run(std::slice::from_ref(&d), &first, &art);
         let again_took = t.elapsed();
         let t = std::time::Instant::now();
-        let (songs, view) = crate::local::view::from_index(&again, &[d.clone()]);
+        let (songs, view) = crate::local::view::from_index(&again, std::slice::from_ref(&d));
         let derive_took = t.elapsed();
         eprintln!("3000 files: first scan {first_took:?}, rescan {again_took:?}, derive {derive_took:?} ({} songs, {} albums)", songs.len(), view.albums.len());
         assert_eq!(again, first);
@@ -797,7 +798,7 @@ mod tests {
             fs::write(d.join(format!("{i}.mp3")), b"x").unwrap();
         }
         let mut calls = Vec::new();
-        scan(&[d.clone()], &[], &d.join("art"), |n| calls.push(n));
+        scan(std::slice::from_ref(&d), &[], &d.join("art"), |n| calls.push(n));
         assert_eq!(calls.last(), Some(&3));
         let _ = fs::remove_dir_all(&d);
     }

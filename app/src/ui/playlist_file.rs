@@ -9,7 +9,7 @@ use crate::state::State;
 /// A file dialog a menu item asked for.
 pub enum FileAsk {
     /// Save the local songs of this playlist.
-    Export(Collection),
+    Export(Box<Collection>),
     /// Pick a `.m3u8` to make an Uzumaki playlist of.
     Import,
 }

@@ -195,7 +195,7 @@ fn items_of_collection(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
     v.extend(share_item(crate::share::collection_link(c, s.session.storefront.as_deref())));
     if has_local {
         let c8 = c.clone();
-        v.push(it("Export Local Songs as .m3u8\u{2026}", move |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Export(c8.clone()))));
+        v.push(it("Export Local Songs as .m3u8\u{2026}", move |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Export(Box::new(c8.clone())))));
     }
     if crate::state::in_library(&c.id) && (c.id.starts_with("l.") || (c.id.starts_with("p.") && c.editable)) {
         let c5 = c.clone();
@@ -229,7 +229,7 @@ fn uzu_items(s: &State, c: &Collection, pin: bool) -> Vec<CtxItem> {
         v.push(pin_item(s, &c.id, move |s| s.pin_collection(&c4)));
     }
     let c5 = c.clone();
-    v.push(it("Export as .m3u8\u{2026}", move |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Export(c5.clone()))));
+    v.push(it("Export as .m3u8\u{2026}", move |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Export(Box::new(c5.clone())))));
     let id = c.id.clone();
     v.push(sep());
     v.push(danger("Delete Playlist", "Click again to delete it", move |s| s.delete_uzu_playlist(&id)));
@@ -251,7 +251,7 @@ fn local_favourites_items(s: &State) -> Vec<CtxItem> {
         it("Play Next", move |s| s.play_next(&t1)),
         it("Add to Queue", move |s| s.add_to_queue(&t2)),
         sep(),
-        it("Export as .m3u8\u{2026}", move |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Export(c.clone()))),
+        it("Export as .m3u8\u{2026}", move |s| s.ui.file_ask = Some(super::playlist_file::FileAsk::Export(Box::new(c.clone())))),
     ]
 }
 

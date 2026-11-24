@@ -414,10 +414,10 @@ impl State {
         if self.nav_hidden("favourites") {
             return None;
         }
-        if !self.local_only() {
-            if let Some(c) = self.library_playlists.items.iter().find(|c| c.favorites) {
-                return Some(c);
-            }
+        if !self.local_only()
+            && let Some(c) = self.library_playlists.items.iter().find(|c| c.favorites)
+        {
+            return Some(c);
         }
         (self.local_only() || !self.local_favs.is_empty()).then(crate::local::favourites::card)
     }
