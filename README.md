@@ -51,9 +51,12 @@ The screenshots use made-up albums and artists.
 - **Resume where you left off.** The last song, its position and Up Next come back, paused, at the next start.
 - **Your own music files:** FLAC, MP3, AAC/ALAC, Ogg Vorbis and WAV play inside the app, in the same queue as
   Apple Music. You can also use Uzumaki with local files only, without an Apple Music subscription.
+  Star them as favourites (kept on this computer), see their lyrics from a `.lrc` or `.txt` beside the file or
+  from their tags, and browse them by artist and album with album artists, discs, compilations and covers.
 - **Mixed playlists:** put your own files into your Apple Music playlists (they stay on this computer and are
   marked with a small icon; Apple Music never gets them), or make Uzumaki playlists that mix both and live only
-  on this computer.
+  on this computer. Export a playlist's own files as `.m3u8`, or import a `.m3u8` as an Uzumaki playlist
+  (right-click the + beside Playlists).
 - **Make it yours:** dark, light or system theme, three app icons, and backgrounds (the built-in swirl, your
   own picture or the current cover) with dither, ASCII, halftone, scanline or blur effects.
 - **Desktop integration:** media keys and desktop widgets (MPRIS on Linux, Now Playing on macOS, the media overlay on Windows), a tray or
@@ -317,7 +320,8 @@ For the details, see [docs/bridge-protocol.md](docs/bridge-protocol.md).
 - **Show on Discord** (off by default) hands the song you are playing to the Discord app on your own computer,
   through its local socket; Uzumaki itself opens no connection for it, and Discord shows the card to others
   (and fetches the cover from Apple). See [docs/DISCORD.md](docs/DISCORD.md).
-- **Covers and lyrics** come from Apple, the same as in the web player.
+- **Covers and lyrics** come from Apple, the same as in the web player. Your own files' covers and lyrics are read
+  from the files and their folders, and their favourites stay on this computer; none of it goes to Apple.
 
 ## Build from source and contribute
 

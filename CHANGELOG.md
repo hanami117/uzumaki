@@ -5,6 +5,23 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **Local files:** favourites. Star your own songs anywhere (song rows, menus, Now Playing), signed in or not.
+  They are kept on this computer only (`local-favourites.json` beside `playlists.json`) and never sent to Apple.
+  They show at the end of Apple's Favourite Songs, or on their own Favourite Songs page in local files only mode.
+- **Local files:** lyrics. A `.lrc` beside the file (synced), the file's own lyrics tags (ID3 `SYLT`/`USLT`,
+  Vorbis `LYRICS`, MP4), or a `.txt` beside it, in Now Playing, the side panel and uzu's lyrics screen.
+- **Playlists:** export an Uzumaki playlist, the local Favourite Songs or the local songs of a mixed playlist as
+  `.m3u8`, and import a `.m3u8` as a new Uzumaki playlist (right-click the + beside Playlists). Only files in your
+  music folders are imported.
+
+### Changed
+- **Local files:** better albums. A compilation flag without an album artist makes the album "Various Artists";
+  an album without album artist tags stays one album (by the artist most of its songs share, else Various
+  Artists) instead of one per artist; track and disc numbers like `3/12` are read; a disc folder (`CD1`,
+  `Disc 2`) takes the cover beside it in the album folder, and covers from any of a file's tags count. Your
+  music folders are read once again after the update to pick these up.
+
 ### Fixed
 - The system's media controls (media keys, the Linux panel's player widget, macOS Control Center, the Windows media
   overlay) now show exactly what the window shows: the new song while it loads (not the old one paused), a song
@@ -16,6 +33,9 @@ takes each release's notes from its section here.
   where it was. When the output device goes away, the song moves to the default one, or pauses (the bar no longer
   stays on Playing at a frozen time); Play tries again.
 - **uzu:** `uzu pause` and `uzu vol` (no value) no longer start Uzumaki just to find nothing playing.
+- **Local files:** a music folder on a drive that isn't connected keeps its songs (and their places in your
+  playlists) instead of dropping them; Settings → Local files says "Not connected".
+- **Mixed playlists:** a song found unavailable shows greyed in the merged list at once.
 
 ## [0.4.2] - 2026-11-23
 
