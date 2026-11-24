@@ -733,6 +733,7 @@ fn fake_lyrics() -> Lyrics {
     ];
     Lyrics {
         synced: true,
+        credit: None,
         lines: LINES
             .iter()
             .enumerate()

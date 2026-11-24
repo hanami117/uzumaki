@@ -28,6 +28,9 @@ pub struct Lyrics {
     /// False when Apple has only plain text (`itunes:timing="None"`).
     pub synced: bool,
     pub lines: Vec<Line>,
+    /// Shown under the lyrics when they came from elsewhere ("Lyrics from LRCLIB"); None for
+    /// Apple's and a local file's own.
+    pub credit: Option<&'static str>,
 }
 
 impl Lyrics {
@@ -94,7 +97,7 @@ pub fn parse_ttml(ttml: &str) -> Option<Lyrics> {
             l.end = 0.0;
         }
     }
-    Some(Lyrics { synced, lines })
+    Some(Lyrics { synced, lines, credit: None })
 }
 
 /// Timed `<span begin end>` words of a line, each keeping the whitespace after it. Empty unless
@@ -202,7 +205,7 @@ pub fn parse_lrc(text: &str) -> Option<Lyrics> {
     }
     if timed.is_empty() {
         let lines: Vec<Line> = plain.into_iter().map(|text| Line { text, ..Line::default() }).collect();
-        return (!lines.is_empty()).then_some(Lyrics { synced: false, lines });
+        return (!lines.is_empty()).then_some(Lyrics { synced: false, lines, credit: None });
     }
     timed.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut lines: Vec<Line> = Vec::new();
@@ -213,7 +216,7 @@ pub fn parse_lrc(text: &str) -> Option<Lyrics> {
         }
         lines.push(Line { start: *start, end, text: text.clone(), ..Line::default() });
     }
-    (!lines.is_empty()).then_some(Lyrics { synced: true, lines })
+    (!lines.is_empty()).then_some(Lyrics { synced: true, lines, credit: None })
 }
 
 /// Text of `n` with `<br/>` as a space (XML entities are already decoded by the parser).

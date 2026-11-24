@@ -1634,6 +1634,7 @@ mod uzu_lyrics {
         let words = vec![Word { start: 1.0, end: 1.5, text: "la ".into() }, Word { start: 1.5, end: 2.0, text: "di".into() }];
         Lyrics {
             synced: true,
+            credit: None,
             lines: vec![
                 Line { start: 1.0, end: 2.0, text: "la di".into(), second_voice: false, words },
                 Line { start: 3.0, end: 4.0, text: "da".into(), second_voice: true, words: vec![] },
@@ -1676,7 +1677,7 @@ mod uzu_lyrics {
             _ => panic!("not lyrics"),
         };
         assert_eq!(status(&mut s), (ctl::LyricsStatus::Loading, 0));
-        let plain = Lyrics { synced: false, lines: vec![Line { text: "one".into(), ..Default::default() }, Line { text: "two".into(), ..Default::default() }] };
+        let plain = Lyrics { credit: None, synced: false, lines: vec![Line { text: "one".into(), ..Default::default() }, Line { text: "two".into(), ..Default::default() }] };
         s.apply_msg(Msg::Lyrics { id: "123".into(), result: Ok(Some(plain)) });
         assert_eq!(status(&mut s), (ctl::LyricsStatus::Plain, 2));
         // A late "none" (an older request's reply) doesn't hide lyrics already shown.

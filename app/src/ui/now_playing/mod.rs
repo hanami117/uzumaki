@@ -565,7 +565,7 @@ pub fn synthetic_lyrics(words: bool) -> Lyrics {
         out.push(Line { start, end, text: (*text).into(), second_voice: i % 5 == 4, words: ws });
         t += 5.0;
     }
-    Lyrics { synced: true, lines: out }
+    Lyrics { synced: true, lines: out, credit: None }
 }
 
 fn scene_base(s: &mut State, lyr: Lyrics, position: f64) {
