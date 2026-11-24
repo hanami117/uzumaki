@@ -5,6 +5,12 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-24
+
+More for your own music files (favourites, lyrics, better albums, playlist import and export), Chromecast plays local
+files on the TV itself and is no longer Beta, and the system's media controls always show what the window shows. You
+need an Apple Music subscription to stream; local files play without one.
+
 ### Added
 - **Local files:** favourites. Star your own songs anywhere (song rows, menus, Now Playing), signed in or not.
   They are kept on this computer only (`local-favourites.json` beside `playlists.json`) and never sent to Apple.
