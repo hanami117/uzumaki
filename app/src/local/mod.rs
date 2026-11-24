@@ -7,6 +7,7 @@
 //!   sources alike.
 //! - `favourites`: the star on local songs, kept on this computer only.
 //! - `lyrics`: a file's own lyrics (`.lrc`/`.txt` beside it, or its tags).
+//! - `names`: artist, title, album and track guessed from the file name and folders when tags are missing.
 //! - `lrclib`: lyrics from lrclib.net for files without their own (cached, opt-out).
 //! - `m3u`: `.m3u8` export and import of playlists.
 //! - `tap`: AirPlay's copy of the player's output, made only while a speaker takes the audio.
@@ -16,6 +17,7 @@
 pub mod favourites;
 pub mod lrclib;
 pub mod lyrics;
+pub mod names;
 pub mod m3u;
 pub mod player;
 pub mod scan;

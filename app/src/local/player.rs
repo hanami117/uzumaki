@@ -598,7 +598,7 @@ mod tests {
             title: title.into(),
             artist: "A".into(),
             album: "B".into(),
-            album_is_fallback: false,
+            album_is_fallback: false, guessed: Default::default(),
             duration,
             track_number: None,
             disc_number: None,

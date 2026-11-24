@@ -122,7 +122,7 @@ mod tests {
             title: "Redbone".into(),
             artist: "Childish Gambino".into(),
             album: "Awaken, My Love!".into(),
-            album_is_fallback: false,
+            album_is_fallback: false, guessed: Default::default(),
             duration: 327.0,
             track_number: None,
             disc_number: None,

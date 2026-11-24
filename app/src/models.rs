@@ -29,6 +29,22 @@ impl Artwork {
     }
 }
 
+/// The fields of a local song taken from its file name and folders because the tag is missing
+/// (`local::names`). Real tags always win; a guess is only shown, and sent to LRCLIB with care.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Guessed {
+    pub title: bool,
+    pub artist: bool,
+    pub album: bool,
+    pub track: bool,
+}
+
+impl Guessed {
+    pub fn is_none(&self) -> bool {
+        *self == Guessed::default()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Song {
     /// Catalog id ("1440857781") or library id ("i.abc…").
@@ -42,6 +58,10 @@ pub struct Song {
     /// name). Such a name is no use as a label, e.g. for the initials on a cover tile.
     #[serde(default)]
     pub album_is_fallback: bool,
+    /// Which of title, artist, album and track number come from the file's name and folders
+    /// (a local file without that tag), not from its tags. Never written into a file.
+    #[serde(default, skip_serializing_if = "Guessed::is_none")]
+    pub guessed: Guessed,
     /// Seconds.
     pub duration: f64,
     pub track_number: Option<u32>,
@@ -80,7 +100,7 @@ impl Song {
             title: str_of(&a["name"]),
             artist: str_of(&a["artistName"]),
             album: str_of(&a["albumName"]),
-            album_is_fallback: false,
+            album_is_fallback: false, guessed: Default::default(),
             duration: a["durationInMillis"].as_f64().unwrap_or(0.0) / 1000.0,
             track_number: a["trackNumber"].as_u64().map(|n| n as u32),
             disc_number: a["discNumber"].as_u64().map(|n| n as u32),
@@ -102,7 +122,7 @@ impl Song {
             title: str_of(&v["title"]),
             artist: str_of(&v["artist"]),
             album: str_of(&v["album"]),
-            album_is_fallback: false,
+            album_is_fallback: false, guessed: Default::default(),
             duration: v["duration"].as_f64().unwrap_or(0.0),
             track_number: None,
             disc_number: None,

@@ -355,7 +355,7 @@ mod tests {
             title: "Get Lucky (feat. Pharrell)".into(),
             artist: String::new(),
             album: "Random Access Memories".into(),
-            album_is_fallback: false,
+            album_is_fallback: false, guessed: Default::default(),
             duration: 0.0,
             track_number: None,
             disc_number: None,
