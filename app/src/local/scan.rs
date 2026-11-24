@@ -14,6 +14,10 @@
 //! - Missing tags fall back: title → file stem, artist → "Unknown Artist", album → folder name.
 //!   Track and disc numbers read the leading number (`3/12`, `03 of 12`); a compilation flag
 //!   (`TCMP`, `cpil`, `COMPILATION`) without an album artist makes it "Various Artists".
+//! - A music folder that can't be read (an unmounted drive, a network share that's away) keeps
+//!   its entries of `previous` as they were, so its songs, their stars and playlist places stay
+//!   put (nothing is relinked to a copy elsewhere) and nothing is read again when it's back.
+//!   `offline_roots` names those folders (Settings says "Not connected").
 //! - Runs on a background thread; `progress(done)` is called every 100 files or so.
 
 use std::collections::{HashMap, HashSet};
@@ -153,8 +157,13 @@ pub fn save_index(path: &Path, tracks: &[LocalTrack]) {
 pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut progress: impl FnMut(usize)) -> Vec<LocalTrack> {
     let mut files = Vec::new();
     let mut seen = HashSet::new();
+    let mut offline: Vec<PathBuf> = Vec::new();
     for folder in folders {
         let root = std::path::absolute(folder).unwrap_or_else(|_| folder.clone());
+        if fs::read_dir(&root).is_err() {
+            offline.push(root);
+            continue;
+        }
         walk(&root, &mut files, &mut seen);
     }
 
@@ -183,6 +192,12 @@ pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut pr
             progress(n + 1);
         }
     }
+    // An unreachable music folder's songs stay as the last scan found them.
+    for t in previous {
+        if offline.iter().any(|r| t.path.starts_with(r)) && seen.insert(t.path.clone()) {
+            tracks.push(t.clone());
+        }
+    }
     progress(tracks.len());
 
     // A track without a cover of its own takes its album's thumbnail when another track made one.
@@ -200,6 +215,11 @@ pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut pr
         key(a).cmp(&key(b)).then_with(|| a.path.cmp(&b.path))
     });
     tracks
+}
+
+/// The music folders that can't be read now (see the module docs).
+pub fn offline_roots(folders: &[PathBuf]) -> Vec<PathBuf> {
+    folders.iter().filter(|f| fs::read_dir(f).is_err()).cloned().collect()
 }
 
 /// Collects audio files below `dir`: (path, mtime seconds, size).
@@ -715,6 +735,29 @@ mod tests {
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].title, "junk");
         assert_eq!(t[0].duration, 0.0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_unreachable_music_folder_keeps_its_songs() {
+        let d = tmp_dir("offline");
+        let (drive, home) = (d.join("drive"), d.join("home"));
+        make(&drive.join("a.wav"), &[("title", "On the drive")], None);
+        make(&home.join("b.wav"), &[("title", "At home")], None);
+        let folders = [drive.clone(), home.clone()];
+        let art = d.join("art");
+        let first = run(&folders, &[], &art);
+        assert_eq!(first.len(), 2);
+        assert!(offline_roots(&folders).is_empty());
+        // The drive is unplugged: its song stays as it was, the other folder is scanned.
+        fs::rename(&drive, d.join("away")).unwrap();
+        assert_eq!(offline_roots(&folders), [drive.clone()]);
+        let again = run(&folders, &first, &art);
+        assert_eq!(again, first);
+        // A file gone from a folder that is there does leave.
+        fs::remove_file(home.join("b.wav")).unwrap();
+        let again = run(&folders, &first, &art);
+        assert_eq!(again.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), ["On the drive"]);
         let _ = fs::remove_dir_all(&d);
     }
 

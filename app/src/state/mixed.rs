@@ -17,9 +17,29 @@ use std::rc::Rc;
 use super::*;
 use crate::mixed::{self as mx, Found, LocalIndex, LocalRef, Merged, Origin, Store, UzuEntry, UzuPlaylist};
 
-/// What a merged list was built from: Apple's list (its buffer, length and ends), the store's
-/// revision and the music folders' index generation.
-type MergeKey = (usize, usize, String, String, u64, u64, bool, u64);
+/// What a merged list was built from: Apple's list (a fingerprint of its songs, see
+/// `fingerprint`), the store's revision, the music folders' index generation and, for Favourite
+/// Songs, the local favourites' revision.
+type MergeKey = (u64, usize, u64, u64, bool, u64);
+
+/// A fingerprint of a list's songs and the flags edited in place (`playable` when a song turns
+/// out unavailable, `explicit`): a reload or an in-place edit changes it, and no address is kept
+/// (a freed list's memory can come back for another). FNV-1a over a few bytes a song: tens of
+/// microseconds for thousands of songs, and only on the pages that merge.
+fn fingerprint(tracks: &[Song]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |b: &[u8]| {
+        for &x in b {
+            h ^= u64::from(x);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    for t in tracks {
+        eat(t.id.as_bytes());
+        eat(&[0, u8::from(t.playable), u8::from(t.explicit)]);
+    }
+    h
+}
 
 /// The music folders' index, with the (generation, loaded) it was built for.
 type IndexSlot = Option<((u64, bool), Rc<LocalIndex>)>;
@@ -136,9 +156,8 @@ impl State {
     pub fn merged(&self, c: &Collection) -> Rc<Merged> {
         let entries = self.mixed.store.overlay(&c.id);
         let t = &c.tracks;
-        let end = |s: Option<&Song>| s.map(|s| s.id.clone()).unwrap_or_default();
         let favs = if c.favorites { self.local_favs.rev } else { 0 };
-        let key: MergeKey = (t.as_ptr() as usize, t.len(), end(t.first()), end(t.last()), self.mixed.rev, self.local_lib.generation, self.local_lib.loaded, favs);
+        let key: MergeKey = (fingerprint(t), t.len(), self.mixed.rev, self.local_lib.generation, self.local_lib.loaded, favs);
         if let Some((k, m)) = self.mixed.merged.borrow().get(&c.id)
             && *k == key
         {
@@ -547,6 +566,10 @@ mod tests {
         let full = s.collections["p.1"].ready().unwrap().clone();
         assert_eq!(full.tracks.len(), 2, "Apple's list is untouched");
         assert_eq!(titles(&s.merged(&full).tracks), ["One", "Two", "x"]);
+        // A song edited in place (found unavailable) shows in the merged rows at once.
+        let mut edited = full.clone();
+        edited.tracks[0].playable = false;
+        assert!(!s.merged(&edited).tracks[0].playable);
         assert_eq!(titles(&s.playlist_songs(&full)), ["One", "Two", "x"]);
         assert!(s.toast.as_deref().unwrap().contains("this computer"), "{:?}", s.toast);
     }

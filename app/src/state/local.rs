@@ -400,7 +400,8 @@ fn spawn_scan(handle: Handle, folders: Vec<PathBuf>, show_cached: bool) {
                 scan::save_index(&index, &tracks);
             }
             // Grouping runs here, once per scan, never on the UI thread.
-            let (songs, view) = view::from_index(&tracks, &folders);
+            let (songs, mut view) = view::from_index(&tracks, &folders);
+            view.offline = scan::offline_roots(&folders);
             handle.update(move |s: &mut State, tx| {
                 s.landing(tx);
                 s.apply_msg(Msg::LocalIndex { songs, view: Box::new(view), scanning: false });

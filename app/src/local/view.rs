@@ -68,6 +68,8 @@ pub struct LocalView {
     pub folders: HashMap<PathBuf, Folder>,
     /// The music folders, in the settings' order.
     pub roots: Vec<PathBuf>,
+    /// Music folders that couldn't be read at the last scan (`scan::offline_roots`).
+    pub offline: Vec<PathBuf>,
     album_ix: HashMap<String, u32>,
     artist_ix: HashMap<String, u32>,
 }
@@ -304,6 +306,7 @@ pub fn derive(songs: &mut [Song], album_artists: &[String], roots: &[PathBuf]) -
         artist_songs,
         folders,
         roots: roots.to_vec(),
+        offline: Vec::new(),
         album_ix,
         artist_ix,
     }
