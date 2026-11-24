@@ -12,6 +12,10 @@
 //! 2. otherwise a song in the Favourite Songs playlist is a favourite;
 //! 3. otherwise it isn't, or isn't known yet. Both show an empty star.
 //!
+//! Local files have their own star, kept on this computer only (`local::favourites`): they show
+//! at the end of Apple's Favourite Songs, or on their own Favourite Songs page when there is no
+//! Apple one to show them in (local only mode, signed out).
+//!
 //! The playlist is read once a session, so stars show everywhere, Library → Songs included.
 //! The playing song and the open album or playlist page (the page itself and its songs) are
 //! also looked up, once a session each. That catches stars changed on another device.
@@ -116,17 +120,21 @@ type Ask = (String, &'static str, Option<String>);
 impl State {
     /// True when the song carries Apple's star.
     pub fn is_favourite(&self, song: &Song) -> bool {
+        if song.is_local() {
+            return self.local_favs.contains(song);
+        }
         self.favs.song(song) == Some(true)
     }
 
-    /// The star can be set on this song: an Apple song, with the user signed in.
+    /// The star can be set on this song: a local file (kept on this computer), or an Apple song
+    /// with the user signed in.
     pub fn can_favourite(&self, song: &Song) -> bool {
-        self.session.authorized && song_type(song).is_some()
+        song.is_local() || (self.session.authorized && song_type(song).is_some())
     }
 
     /// Changes whenever any star (or signing in) may have: virtual lists rebuild their rows.
     pub fn favourites_rev(&self) -> (u64, bool) {
-        (self.favs.rev, self.session.authorized)
+        (self.favs.rev.wrapping_add(self.local_favs.rev << 32), self.session.authorized)
     }
 
     pub fn is_favourite_collection(&self, c: &Collection) -> bool {
@@ -136,14 +144,30 @@ impl State {
     /// The song menu's item and the star buttons: favourite them all, or, when every one of
     /// them already is, undo it.
     pub fn toggle_favourite_songs(&mut self, songs: &[Song]) {
-        let apple: Vec<&Song> = songs.iter().filter(|s| song_type(s).is_some()).collect();
-        let on = !apple.iter().all(|s| self.is_favourite(s));
+        let starrable: Vec<&Song> = songs.iter().filter(|s| s.is_local() || song_type(s).is_some()).collect();
+        let on = !starrable.iter().all(|s| self.is_favourite(s));
         self.set_favourite_songs(songs, on);
     }
 
-    /// Stars (`on`) or un-stars `songs`. Only the songs whose state changes are sent, so a
-    /// failed request can turn them all back.
+    /// Stars (`on`) or un-stars `songs`. Local files change here at once; for Apple songs only
+    /// the songs whose state changes are sent, so a failed request can turn them all back.
     pub fn set_favourite_songs(&mut self, songs: &[Song], on: bool) {
+        let locals: Vec<&Song> = songs.iter().filter(|s| s.is_local()).collect();
+        if !locals.is_empty() {
+            let changed: Vec<&Song> = locals.iter().copied().filter(|s| self.local_favs.contains(s) != on).collect();
+            if !changed.is_empty() {
+                let what = match changed.as_slice() {
+                    [one] => format!("“{}”", one.title),
+                    many => format!("{} songs", many.len()),
+                };
+                self.local_favs.set(&changed, on);
+                self.local_favourites_changed();
+                self.toast = Some(if on { format!("Added {what} to Favourites") } else { format!("Removed {what} from Favourites") });
+            }
+            if locals.len() == songs.len() {
+                return;
+            }
+        }
         if !self.session.authorized {
             self.toast = Some("Sign in to Apple Music to use favourites.".into());
             return;
@@ -374,6 +398,30 @@ impl State {
         self.favs.rev += 1;
     }
 
+    /// The local favourites changed: the Favourite Songs pages showing them follow.
+    pub(super) fn local_favourites_changed(&mut self) {
+        let id = crate::local::favourites::PAGE_ID;
+        if self.collections.contains_key(id) || matches!(&self.route, Route::Collection { id: x, .. } if x == id) {
+            let c = self.local_favourites_page();
+            self.collections.insert(id.to_string(), Load::Ready(c));
+        }
+    }
+
+    /// The Favourite Songs entry the sidebar shows: Apple's (local favourites join it at its
+    /// end), else, in local only mode or with local favourites and no Apple one, the page of
+    /// local favourites. None when hidden from the sidebar.
+    pub fn favourites_card(&self) -> Option<&Collection> {
+        if self.nav_hidden("favourites") {
+            return None;
+        }
+        if !self.local_only() {
+            if let Some(c) = self.library_playlists.items.iter().find(|c| c.favorites) {
+                return Some(c);
+            }
+        }
+        (self.local_only() || !self.local_favs.is_empty()).then(crate::local::favourites::card)
+    }
+
     /// Signing out (or in as someone else): forget every star.
     pub(super) fn forget_favourites(&mut self) {
         self.favs = Favourites { rev: self.favs.rev + 1, ..Favourites::default() };
@@ -446,6 +494,68 @@ mod tests {
         s.toggle_favourite_songs(&[lib.clone(), song("222")]);
         assert_eq!(s.sent.borrow().last().unwrap(), "DELETE /v1/me/favorites?ids[songs]=222");
         assert!(!s.is_favourite(&lib));
+    }
+
+    fn local(path: &str) -> Song {
+        Song { id: format!("file://{path}"), title: format!("File {path}"), ..song("x") }
+    }
+
+    #[test]
+    fn local_files_star_on_this_computer_even_signed_out() {
+        let mut s = State::offline();
+        s.settings.music_source = crate::settings::MusicSource::LocalOnly;
+        let a = local("/m/a.flac");
+        assert!(s.can_favourite(&a), "no account needed");
+        assert!(s.favourites_card().is_some_and(|c| crate::local::favourites::is_page_id(&c.id)), "local only: always listed");
+        let rev = s.favourites_rev();
+        s.toggle_favourite_songs(std::slice::from_ref(&a));
+        assert!(s.is_favourite(&a));
+        assert_ne!(s.favourites_rev(), rev, "lists showing stars rebuild");
+        assert!(s.sent.borrow().is_empty(), "nothing goes to Apple: {:?}", s.sent.borrow());
+        assert_eq!(s.toast.as_deref(), Some("Added “File /m/a.flac” to Favourites"));
+        // Its page lists it (a stand-in until the music folders are read).
+        s.open_collection(crate::local::favourites::card());
+        let page = s.collections.get(crate::local::favourites::PAGE_ID).and_then(Load::ready).cloned().expect("page");
+        assert_eq!(page.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), [a.id.as_str()]);
+        // Un-starring takes it off the open page at once.
+        s.toggle_favourite_songs(std::slice::from_ref(&a));
+        assert!(!s.is_favourite(&a));
+        let page = s.collections.get(crate::local::favourites::PAGE_ID).and_then(Load::ready).cloned().expect("page");
+        assert!(page.tracks.is_empty());
+    }
+
+    #[test]
+    fn local_favourites_follow_apples_favourite_songs() {
+        let mut s = signed_in();
+        let a = local("/m/a.flac");
+        assert!(s.favourites_card().is_none(), "no Apple list, no local favourites: nothing to show");
+        s.set_favourite_songs(std::slice::from_ref(&a), true);
+        assert!(s.favourites_card().is_some_and(|c| crate::local::favourites::is_page_id(&c.id)), "their own page while Apple has none");
+        let mut fav = fav_playlist();
+        fav.tracks = vec![song("1"), song("2")];
+        s.library_playlists.items = vec![fav.clone()];
+        assert_eq!(s.favourites_card().map(|c| c.id.as_str()), Some("p.fav"), "Apple's, with them at its end");
+        assert!(s.has_local_rows(&fav));
+        let rows: Vec<String> = s.playlist_songs(&fav).into_iter().map(|t| t.id).collect();
+        assert_eq!(rows, ["1", "2", a.id.as_str()]);
+        // Remove from Playlist on the local row un-stars it, and nothing is asked of Apple.
+        let before = s.sent.borrow().len();
+        s.remove_playlist_rows(&fav, &[(2, a.clone())]);
+        assert!(!s.is_favourite(&a));
+        assert_eq!(s.sent.borrow().len(), before);
+        assert_eq!(s.playlist_songs(&fav).len(), 2, "the merged list follows");
+        assert!(!s.can_move_row(&fav, 0, 1));
+    }
+
+    #[test]
+    fn a_mixed_selection_stars_both_kinds() {
+        let mut s = signed_in();
+        let a = local("/m/a.flac");
+        s.toggle_favourite_songs(&[a.clone(), song("222")]);
+        assert!(s.is_favourite(&a) && s.is_favourite(&song("222")));
+        assert_eq!(s.sent.borrow().last().unwrap(), "POST /v1/me/favorites?ids[songs]=222");
+        s.toggle_favourite_songs(&[a.clone(), song("222")]);
+        assert!(!s.is_favourite(&a) && !s.is_favourite(&song("222")));
     }
 
     #[test]

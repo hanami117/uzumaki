@@ -342,6 +342,11 @@ impl State {
                 self.collections.insert(id.clone(), load);
                 return;
             }
+            Route::Collection { id, .. } if crate::local::favourites::is_page_id(id) => {
+                let c = self.local_favourites_page();
+                self.collections.insert(id.clone(), Load::Ready(c));
+                return;
+            }
             Route::Collection { id, .. } if view::is_album_id(id) => {
                 if !matches!(self.collections.get(id), Some(Load::Ready(_))) {
                     let load = match self.local_album(id) {

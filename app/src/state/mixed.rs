@@ -19,7 +19,7 @@ use crate::mixed::{self as mx, Found, LocalIndex, LocalRef, Merged, Origin, Stor
 
 /// What a merged list was built from: Apple's list (its buffer, length and ends), the store's
 /// revision and the music folders' index generation.
-type MergeKey = (usize, usize, String, String, u64, u64, bool);
+type MergeKey = (usize, usize, String, String, u64, u64, bool, u64);
 
 /// The music folders' index, with the (generation, loaded) it was built for.
 type IndexSlot = Option<((u64, bool), Rc<LocalIndex>)>;
@@ -137,13 +137,23 @@ impl State {
         let entries = self.mixed.store.overlay(&c.id);
         let t = &c.tracks;
         let end = |s: Option<&Song>| s.map(|s| s.id.clone()).unwrap_or_default();
-        let key: MergeKey = (t.as_ptr() as usize, t.len(), end(t.first()), end(t.last()), self.mixed.rev, self.local_lib.generation, self.local_lib.loaded);
+        let favs = if c.favorites { self.local_favs.rev } else { 0 };
+        let key: MergeKey = (t.as_ptr() as usize, t.len(), end(t.first()), end(t.last()), self.mixed.rev, self.local_lib.generation, self.local_lib.loaded, favs);
         if let Some((k, m)) = self.mixed.merged.borrow().get(&c.id)
             && *k == key
         {
             return m.clone();
         }
-        let m = if entries.is_empty() || mx::is_uzu_id(&c.id) {
+        let m = if c.favorites && !mx::is_uzu_id(&c.id) {
+            // Apple's Favourite Songs, then the local favourites (`Origin::Local` = their index).
+            let mut m = Merged::plain(t);
+            let ix = self.local_index();
+            for (k, e) in self.local_favs.entries().iter().enumerate() {
+                m.tracks.push(self.resolve_local(&e.file, &ix));
+                m.origin.push(Origin::Local(k));
+            }
+            m
+        } else if entries.is_empty() || mx::is_uzu_id(&c.id) {
             Merged::plain(t)
         } else {
             let ix = self.local_index();
@@ -158,9 +168,24 @@ impl State {
         m
     }
 
+    /// Whether playlist `c` lists local songs beside Apple's: its overlay, or the local
+    /// favourites at the end of Apple's Favourite Songs.
+    pub fn has_local_rows(&self, c: &Collection) -> bool {
+        self.mixed.has_overlay(&c.id) || (c.favorites && !self.local_favs.is_empty() && !crate::local::favourites::is_page_id(&c.id))
+    }
+
     /// `c`'s songs to play or list: merged with its overlay when it has one.
     pub fn playlist_songs(&self, c: &Collection) -> Vec<Song> {
-        if self.mixed.has_overlay(&c.id) { self.merged(c).tracks.clone() } else { c.tracks.clone() }
+        if self.has_local_rows(c) { self.merged(c).tracks.clone() } else { c.tracks.clone() }
+    }
+
+    /// The page of local favourites (`local::favourites::PAGE_ID`), oldest first.
+    pub fn local_favourites_page(&self) -> Collection {
+        let ix = self.local_index();
+        let mut c = crate::local::favourites::card().clone();
+        c.tracks = self.local_favs.entries().iter().map(|e| self.resolve_local(&e.file, &ix)).collect();
+        c.track_count = Some(c.tracks.len() as u32);
+        c
     }
 
     /// The Uzumaki playlist `id` with its songs resolved.
@@ -332,6 +357,11 @@ impl State {
         if mx::is_uzu_id(&c.id) {
             return self.remove_uzu_rows(&c.id, rows);
         }
+        if c.favorites {
+            // Favourite Songs: un-starring is what removes a song from it.
+            let songs: Vec<Song> = rows.iter().map(|(_, s)| s.clone()).collect();
+            return self.set_favourite_songs(&songs, false);
+        }
         if !self.mixed.has_overlay(&c.id) {
             return self.remove_from_playlist(c, rows);
         }
@@ -395,6 +425,9 @@ impl State {
         if mx::is_uzu_id(&c.id) {
             return self.mixed.store.playlist(&c.id).is_some_and(|p| m < p.entries.len() && to < p.entries.len());
         }
+        if c.favorites {
+            return false;
+        }
         let merged = self.merged(c);
         matches!(merged.origin.get(m), Some(Origin::Local(_))) && to < merged.origin.len()
     }
@@ -446,9 +479,15 @@ impl State {
                 }
             }
         }
+        self.local_favs.relink(|r| match ix.find(songs, r) {
+            Found::Moved(i) => LocalRef::of(&songs[i]).map(|new| *r = new).is_some(),
+            _ => false,
+        });
         if changed {
             self.mixed_changed();
         }
+        // The page of local favourites shows the index's songs (new tags, files back or gone).
+        self.local_favourites_changed();
     }
 }
 

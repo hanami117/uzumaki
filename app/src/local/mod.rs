@@ -5,11 +5,13 @@
 //! - `player`: a thread that decodes with symphonia (through rodio) and plays through cpal.
 //!   It speaks the same `bridge::Event`s as the bridge, so state, MPRIS and the tray treat both
 //!   sources alike.
+//! - `favourites`: the star on local songs, kept on this computer only.
 //! - `lyrics`: a file's own lyrics (`.lrc`/`.txt` beside it, or its tags).
 //! - `tap`: AirPlay's copy of the player's output, made only while a speaker takes the audio.
 //!
 //! Songs from here are ordinary `models::Song`s whose id is `file://` + path (`Song::is_local`).
 
+pub mod favourites;
 pub mod lyrics;
 pub mod player;
 pub mod scan;

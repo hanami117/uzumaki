@@ -152,7 +152,7 @@ fn header(s: &State, c: &Collection, fit: Fit) -> El {
         CollectionKind::Playlist => "PLAYLIST",
     };
     // With the local songs of its overlay (`mixed.rs`), as the rows show them.
-    let merged = s.mixed.has_overlay(&c.id).then(|| s.merged(c));
+    let merged = s.has_local_rows(c).then(|| s.merged(c));
     let tracks: &[Song] = merged.as_deref().map_or(&c.tracks, |m| &m.tracks);
     let count = if tracks.is_empty() { c.track_count.unwrap_or(0) as usize } else { tracks.len() };
     let total: f64 = tracks.iter().map(|t| t.duration).sum();

@@ -296,8 +296,8 @@ struct Rows {
     lib: [Nav; 6],
     lib_n: usize,
     all_playlists: bool,
-    /// Index of Favourite Songs in the library playlists.
-    fav: Option<usize>,
+    /// Favourite Songs shows (`State::favourites_card`: Apple's, or the local favourites').
+    fav: bool,
     /// Playlists other than Favourite Songs.
     others: usize,
     note: bool,
@@ -319,7 +319,7 @@ enum Row {
 impl Rows {
     fn of(s: &State) -> Self {
         let items = &s.library_playlists.items;
-        let fav = items.iter().position(|c| c.favorites).filter(|_| shown(s, "favourites"));
+        let fav = s.favourites_card().is_some();
         let mut lib = LIBRARY;
         let mut lib_n = 0;
         for &n in library(s) {
@@ -353,12 +353,12 @@ impl Rows {
 
     /// The "Playlists" heading (with its +) shows while anything under it does.
     fn pl_header(&self) -> bool {
-        self.all_playlists || self.fav.is_some() || self.others > 0 || self.note
+        self.all_playlists || self.fav || self.others > 0 || self.note
     }
 
     fn count(&self) -> usize {
         usize::from(self.lib_header()) + self.pin_rows() + self.lib_n + usize::from(self.pl_header())
-            + usize::from(self.all_playlists) + usize::from(self.fav.is_some()) + self.others + usize::from(self.note) + 1
+            + usize::from(self.all_playlists) + usize::from(self.fav) + self.others + usize::from(self.note) + 1
     }
 
     fn at(&self, i: usize) -> Row {
@@ -397,7 +397,7 @@ impl Rows {
             }
             k -= 1;
         }
-        if self.fav.is_some() {
+        if self.fav {
             if k == 0 {
                 return Row::Favourites;
             }
@@ -416,7 +416,7 @@ impl Rows {
             Row::PinsHead => "pins-head".into(),
             Row::Pin(k) => format!("pin-{}", s.settings.pins.get(k).map_or("", |p| p.id.as_str())),
             Row::Nav(n) => n.info().0.into(),
-            Row::Favourites => format!("pl-{}", self.fav.and_then(|f| s.library_playlists.items.get(f)).map_or("", |c| c.id.as_str())),
+            Row::Favourites => format!("pl-{}", s.favourites_card().map_or("", |c| c.id.as_str())),
             Row::Playlist(k) => format!("pl-{}", playlist_at(s, k).map_or("", |c| c.id.as_str())),
             Row::Note => "note".into(),
             Row::Pad => "pad".into(),
@@ -455,7 +455,7 @@ fn build_row(s: &State, r: &Rows, i: usize) -> El {
             None => col(),
         },
         Row::Nav(n) => wrap(nav_item(n, &s.route)),
-        Row::Favourites => match r.fav.and_then(|f| s.library_playlists.items.get(f)) {
+        Row::Favourites => match s.favourites_card() {
             Some(c) => playlist(c),
             None => col(),
         },
@@ -570,7 +570,7 @@ impl RailRows {
             head.push(RailRow::Nav(Nav::AllPlaylists));
         }
         let items = &s.library_playlists.items;
-        if items.iter().any(|c| c.favorites) && shown(s, "favourites") {
+        if s.favourites_card().is_some() {
             head.push(RailRow::Fav);
         }
         if s.settings.pins_open && !s.settings.pins.is_empty() && shown(s, "pins") {
@@ -627,7 +627,7 @@ fn build_rail_row(s: &State, r: &RailRows, i: usize) -> El {
     match r.at(i) {
         RailRow::Nav(n) => wrap(rail_nav(n, &s.route)),
         RailRow::Sep => row().w_full().py(8.0).justify_center().child(el().w(36.0).h(1.0).fill(PAL.divider)),
-        RailRow::Fav => match s.library_playlists.items.iter().find(|c| c.favorites) {
+        RailRow::Fav => match s.favourites_card() {
             Some(f) => {
                 let f1 = f.clone();
                 wrap(

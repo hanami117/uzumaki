@@ -330,6 +330,10 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("local-only-20k-artists", local_only_big_artists),
     ("local-only-20k-artist", local_only_big_artist),
     ("local-only-20k-folder", local_only_big_folder),
+    ("local-only-favourites", local_only_favourites),
+    ("local-only-songs-stars", local_only_songs_stars),
+    ("favourites-with-local", favourites_with_local),
+    ("now-playing-local-lyrics", now_playing_local_lyrics),
     ("settings-music-source", settings_music_source),
     ("settings-music-source-local", settings_music_source_local),
     ("intro-sync", intro_sync),
@@ -2497,6 +2501,55 @@ fn local_only_with(s: &mut State, tracks: &[LocalTrack], route: Route) {
     let (songs, view) = crate::local::view::from_index(tracks, &s.settings.music_folders);
     s.set_local_index(songs, view);
     s.navigate(route);
+}
+
+/// Stars three songs of the local only library.
+fn star_local(s: &mut State) {
+    let picks: Vec<Song> = [1usize, 4, 9].iter().filter_map(|&i| s.local_lib.songs.get(i).cloned()).collect();
+    s.set_favourite_songs(&picks, true);
+    s.toast = None;
+}
+
+/// Local only mode's Favourite Songs: the starred files, kept on this computer.
+fn local_only_favourites(s: &mut State) {
+    local_only_with(s, &local_index(), Route::LocalFiles);
+    star_local(s);
+    s.navigate(Route::Collection { kind: CollectionKind::Playlist, id: crate::local::favourites::PAGE_ID.into() });
+}
+
+/// Local only Songs with three starred rows.
+fn local_only_songs_stars(s: &mut State) {
+    local_only_with(s, &local_index(), Route::LocalFiles);
+    star_local(s);
+}
+
+/// Apple's Favourite Songs with two local favourites at its end.
+fn favourites_with_local(s: &mut State) {
+    base(s);
+    s.settings.music_folders = vec![home_dir().join("Music")];
+    let (songs, view) = crate::local::view::from_index(&local_index(), &s.settings.music_folders);
+    s.set_local_index(songs, view);
+    let picks: Vec<Song> = [2usize, 6].iter().filter_map(|&i| s.local_lib.songs.get(i).cloned()).collect();
+    s.set_favourite_songs(&picks, true);
+    s.toast = None;
+    let mut fav = s.library_playlists.items.iter().find(|c| c.favorites).cloned().expect("scene favourites");
+    fav.tracks = (0..5).map(|i| song(i % 8, 1)).enumerate().map(|(i, mut t)| {
+        t.id = format!("fav-{i}");
+        t
+    }).collect();
+    s.star_for_scene(&["fav-0", "fav-1", "fav-2", "fav-3", "fav-4"]);
+    s.route = Route::Collection { kind: CollectionKind::Playlist, id: fav.id.clone() };
+    s.collections.insert(fav.id.clone(), Load::Ready(fav));
+}
+
+/// Now Playing on a local file whose lyrics came from a .lrc beside it.
+fn now_playing_local_lyrics(s: &mut State) {
+    now_playing_base(s);
+    let mut now = local_songs()[0].clone();
+    now.duration = 241.0;
+    s.lyrics.insert(now.id.clone(), Load::Ready(Some(fake_lyrics())));
+    s.playback.song = Some(now);
+    s.playback.local = true;
 }
 
 fn local_album_id(s: &State, title: &str) -> String {

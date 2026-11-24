@@ -634,6 +634,8 @@ pub struct State {
     favs: favourites::Favourites,
     /// Local songs inserted into Apple playlists and the Uzumaki playlists (`mixed.rs`).
     pub mixed: mixed::Mixed,
+    /// Stars on local files, kept on this computer (`local::favourites`).
+    pub local_favs: crate::local::favourites::LocalFavs,
     /// Local files given to the New Playlist dialog: they join the new Apple playlist's overlay.
     new_playlist_locals: Vec<Song>,
     /// The picture chosen in the New Playlist dialog, for the playlist Apple is creating.
@@ -741,6 +743,7 @@ impl State {
             favs: Default::default(),
             new_playlist_picture: None,
             mixed: mixed::Mixed::new(persist),
+            local_favs: crate::local::favourites::LocalFavs::new(persist),
             new_playlist_locals: Vec::new(),
             motion: motion::MotionState::default(),
             airplay: airplay::AirPlay::new(persist),
