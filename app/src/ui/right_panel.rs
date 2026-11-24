@@ -76,10 +76,9 @@ enum Body<'a> {
 
 fn body_of<'a>(s: &'a State) -> Body<'a> {
     let Some(song) = s.playback.song.as_ref() else { return Body::Message("Nothing is playing") };
-    if song.is_local() {
-        return Body::Message("Lyrics aren't available for your own files");
-    }
     match s.lyrics_of(song) {
+        // A local file without lyrics beside it or in its tags.
+        Some(Load::Ready(None)) if song.is_local() => Body::Message("No lyrics in this file or beside it"),
         Some(Load::Idle) | Some(Load::Loading) => Body::Message("Loading lyrics\u{2026}"),
         Some(Load::Ready(Some(l))) if !l.lines.is_empty() => {
             if l.synced { Body::Synced(l) } else { Body::Plain(l) }

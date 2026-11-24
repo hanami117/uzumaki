@@ -1,4 +1,6 @@
-//! Lyrics of the playing song, from Apple (`/songs/{id}/syllable-lyrics`, then `/lyrics`).
+//! Lyrics of the playing song, from Apple (`/songs/{id}/syllable-lyrics`, then `/lyrics`), or
+//! for a local file from beside it or its tags (`local::lyrics`, read on a background thread each
+//! time it starts, keyed by its `file://` id; never asked of Apple).
 //!
 //! Only an answer from Apple is kept: lyrics, or "none". An error (the network, a 401/429/5xx, the
 //! page reloading, a reply that never comes) is never taken for "none": the song is asked again
@@ -94,12 +96,12 @@ fn backoff(failures: u32) -> Duration {
     FIRST_BACKOFF.saturating_mul(1 << failures.saturating_sub(1).min(16)).min(MAX_BACKOFF)
 }
 
-/// The id lyrics are asked by: the catalog id (a library song's `playParams.catalogId`), or the
-/// id itself when it is a catalog one. None for local files and library songs Apple didn't match.
+/// The id lyrics are kept by: the catalog id (a library song's `playParams.catalogId`), or the
+/// id itself when it is a catalog one or a local file. None for library songs Apple didn't match.
 pub fn key(song: &Song) -> Option<&str> {
     match &song.catalog_id {
         Some(c) => Some(c),
-        None if song.is_local() || song.id.starts_with("i.") => None,
+        None if song.id.starts_with("i.") => None,
         None => Some(&song.id),
     }
 }
@@ -114,6 +116,9 @@ impl State {
     /// The song starts or shows: asks for its lyrics unless they are known, on their way, or a
     /// "none" still fresh. A failed song is asked again at once.
     pub(super) fn want_lyrics(&mut self, song: &Song) {
+        if song.is_local() {
+            return self.read_local_lyrics(song);
+        }
         let Some(id) = key(song).map(str::to_string) else { return };
         if !self.session.authorized {
             return;
@@ -136,7 +141,7 @@ impl State {
     /// While a song plays (each time report): asks again for its lyrics when a retry is due, and
     /// takes a request that never got a reply as failed.
     pub(super) fn lyrics_due(&mut self) {
-        let Some(id) = self.playback.song.as_ref().and_then(key).map(str::to_string) else { return };
+        let Some(id) = self.playback.song.as_ref().filter(|s| !s.is_local()).and_then(key).map(str::to_string) else { return };
         if !self.session.authorized {
             return;
         }
@@ -157,6 +162,42 @@ impl State {
         if still && !fresh_none && f.sent.is_none() && f.again.is_some_and(|t| now >= t) {
             self.ask_lyrics(id);
         }
+    }
+
+    /// A local file's lyrics, read again each time it starts (an edited `.lrc` shows the next
+    /// time), off the UI thread when the app runs. What shows meanwhile stays.
+    fn read_local_lyrics(&mut self, song: &Song) {
+        let Some(path) = song.local_path().map(std::path::Path::to_path_buf) else { return };
+        let id = song.id.clone();
+        if self.lyrics.len() > MAX_SONGS {
+            self.lyrics.clear();
+            self.lyrics_fetch.clear();
+        }
+        if !self.lyrics.contains_key(&id) {
+            self.lyrics.insert(id.clone(), Load::Loading);
+        }
+        match self.handle.clone() {
+            Some(handle) => {
+                let spawned = std::thread::Builder::new().name("local-lyrics".into()).spawn(move || {
+                    let found = crate::local::lyrics::read(&path);
+                    handle.update(move |s: &mut State, tx| {
+                        s.landing(tx);
+                        s.local_lyrics_read(id, found);
+                    });
+                });
+                if spawned.is_err() {
+                    self.lyrics.insert(song.id.clone(), Load::Ready(None));
+                }
+            }
+            None => {
+                let found = crate::local::lyrics::read(&path);
+                self.local_lyrics_read(id, found);
+            }
+        }
+    }
+
+    pub(super) fn local_lyrics_read(&mut self, id: String, found: Option<Lyrics>) {
+        self.lyrics.insert(id, Load::Ready(found));
     }
 
     fn ask_lyrics(&mut self, id: String) {

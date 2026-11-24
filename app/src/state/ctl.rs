@@ -125,13 +125,7 @@ impl State {
     pub fn ctl_lyrics(&mut self) -> ctl::Reply {
         use ctl::LyricsStatus as L;
         let Some(song) = self.playback.song.clone() else { return lyrics_state("", L::None) };
-        // A local song keeps its lyrics in a `.lrc` beside the file (Apple knows nothing of it).
-        if let Some(file) = song.local_path() {
-            return match crate::lyrics::read_lrc_beside(file) {
-                Some(l) => lyrics_reply(&song.id, &l),
-                None => lyrics_state(&song.id, L::None),
-            };
-        }
+        // A local song's lyrics are read from beside the file or its tags when it starts.
         if self.lyrics_of(&song).is_none() {
             self.want_lyrics(&song);
         }

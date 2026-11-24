@@ -72,6 +72,7 @@ impl State {
         if let Some(p) = &self.local {
             p.play(self.local_gen, song, at, self.playback.volume);
         }
+        self.want_lyrics(song);
     }
 
     /// Hands playback back to the bridge: stops the in-process player and closes the device.
