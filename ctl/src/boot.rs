@@ -23,6 +23,8 @@ pub const BRIDGE_WAIT: Duration = Duration::from_secs(20);
 pub enum Plan {
     /// Don't start the app at all.
     Never,
+    /// Don't start the app: without it nothing plays, so there is nothing to do (`pause`, `vol`).
+    Idle,
     /// Spawn the app but don't wait: the command is answered from the disk cache.
     Cache,
     /// Spawn and wait for the socket.
@@ -37,6 +39,7 @@ pub fn plan(cmd: &Command, has_cache: bool) -> Plan {
         // Quit and Restart are handled by main and never auto-start; this keeps them from starting
         // the app by accident.
         Command::Quit | Command::Restart => Plan::Never,
+        Command::Pause | Command::Vol(None) => Plan::Idle,
         Command::Playlists | Command::Playlist(_) | Command::Albums(_) | Command::Album(_) if has_cache => Plan::Cache,
         Command::Play
         | Command::PlayNumber(_)
@@ -202,11 +205,11 @@ pub fn wait_connected(client: &mut Client, timeout: Duration) {
 
 /// Spawns the app and waits as `plan` says. `Plan::Cache` returns `None` right after the spawn.
 pub fn boot(plan: Plan, quiet: bool) -> Result<Option<Client>, Fail> {
-    if !quiet && plan != Plan::Never {
+    if !quiet && !matches!(plan, Plan::Never | Plan::Idle) {
         eprintln!("Starting Uzumaki…");
     }
     match plan {
-        Plan::Never => Ok(None),
+        Plan::Never | Plan::Idle => Ok(None),
         Plan::Cache => {
             let _ = spawn_app(); // the cache answers either way
             Ok(None)
@@ -237,8 +240,14 @@ mod tests {
         for c in ["play 3", "play mix 2", "toggle", "next", "prev", "seek +10", "jump 2", "jump numb", "pick 1", "insert 1", "add 1", "move 2 1", "del 1", "shuffle", "repeat all", "autoplay", "autoplay off"] {
             assert_eq!(plan(&parse(c), true), Plan::Connected, "{c}");
         }
-        for c in ["status", "watch", "queue", "search x", "show", "vol", "vol 50", "pause"] {
+        for c in ["status", "watch", "queue", "search x", "show", "vol 50"] {
             assert_eq!(plan(&parse(c), true), Plan::Socket, "{c}");
+        }
+        // Nothing plays without the app: these don't start it (review 2026-11-23, uzu nit).
+        for c in ["pause", "stop", "vol"] {
+            for has_cache in [true, false] {
+                assert_eq!(plan(&parse(c), has_cache), Plan::Idle, "{c}");
+            }
         }
         assert_eq!(plan(&Command::Screen, false), Plan::Socket);
         for has_cache in [true, false] {

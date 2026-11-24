@@ -296,7 +296,8 @@ F cycles the queue screen's views: normal, showcase (a big cover beside Up Next)
 (only the cover and the song, centred); Esc goes back. In solo, l shows the lyrics (beside
 the cover whenever there is room (about 70 columns), under it in a narrower one; w words/lines; unsynced ones sit still, j/k scroll). UZUMAKI_VIEW=showcase|solo starts in one.
 'uzu cover-info' shows what the terminal answered and which way was picked.
-In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (to the tray).
+In a pipe it prints the status. If Uzumaki isn't running, uzu starts it hidden (to the tray);
+pause and a bare vol don't (nothing plays without it).
 
   status                      what plays now (the default when piped)
   status --line               one line for a status bar, from status_format in uzu.toml

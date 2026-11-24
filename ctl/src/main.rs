@@ -188,6 +188,10 @@ fn dispatch(inv: &Invocation, mut client: Client, env: &Env, out: &mut dyn Write
 fn start_then_run(inv: &Invocation, env: &Env, out: &mut dyn Write) -> Result<(), Fail> {
     let cache = cache::default_dir().filter(|d| d.is_dir());
     let plan = boot::plan(&inv.cmd, cache.is_some());
+    if plan == boot::Plan::Idle {
+        let _ = writeln!(out, "Uzumaki isn't running.");
+        return Ok(());
+    }
     match boot::boot(plan, inv.quiet)? {
         Some(client) => dispatch(inv, client, env, out),
         None => match cache {
