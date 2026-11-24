@@ -13,8 +13,11 @@
 //!   `PlayState(Ended)` once when the file has played to its end. `pause`/`resume` send
 //!   `PlayState(Paused)`/`PlayState(Playing)`. A file that can't be opened or decoded sends
 //!   `Error("Couldn't play “Title”: …")` then `PlayState(Stopped)`.
-//! - `active` is true from `play` until `stop`; `main.rs` reads it on other threads to decide
-//!   whether MPRIS follows the bridge or this player.
+//! - `active` is true from `play` until `stop` (shared with `main.rs`).
+//! - The output follows the system: when the default device changes (headphones plugged in,
+//!   AirPods taken), or the device stops taking audio (unplugged: the position stops moving for
+//!   `STALL_TICKS`), the song moves to the default device where it was. With no device left it
+//!   pauses (`PlayState(Paused)`); Play tries again.
 //! - `UZUMAKI_MUTE=1` (the agents' test switch, as for the bridge; the old `CADENCE_MUTE=1`
 //!   still works) forces volume 0.
 //! - AirPlay: the decoder is wrapped in a `tap::Tap` that copies the audio to the speaker
@@ -112,33 +115,60 @@ impl LocalPlayer {
 
 /// How often the thread wakes up to report the position and look for the end of the file.
 const TICK: Duration = Duration::from_millis(250);
+/// While playing, the default output device is looked at every this many ticks (2 s).
+const DEVICE_TICKS: u32 = 8;
+/// Playing, but the position hasn't moved for this many ticks (3 s): the device stopped taking
+/// audio (unplugged, Bluetooth gone). The song moves to the default device.
+const STALL_TICKS: u32 = 12;
+/// Reopens for a stall before giving up (paused, `Session::lost`).
+const MAX_STALLS: u32 = 2;
 
 /// Where sinks come from: the real sound card, or (in tests) a device-less queue.
 trait Output {
-    /// A fresh sink, opening the device when it isn't open yet.
+    /// A fresh sink, opening the device when it isn't open yet (or isn't the default any more).
     fn sink(&mut self) -> Result<Sink, String>;
     /// Closes the device.
     fn close(&mut self);
+    /// Whether the system's default device is another one than the device open now.
+    fn moved(&mut self) -> bool;
 }
 
 /// The default output device, opened lazily.
 #[derive(Default)]
 struct DeviceOutput {
     stream: Option<OutputStream>,
+    /// The name the default device had when the stream was opened.
+    device: Option<String>,
+}
+
+/// The system's default output device's name, None when there is none (or no name).
+fn default_device() -> Option<String> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    rodio::cpal::default_host().default_output_device()?.name().ok()
 }
 
 impl Output for DeviceOutput {
     fn sink(&mut self) -> Result<Sink, String> {
+        if self.stream.is_some() && self.moved() {
+            self.close();
+        }
         if self.stream.is_none() {
             let mut stream = OutputStreamBuilder::open_default_stream().map_err(|e| format!("no audio output ({e})"))?;
             stream.log_on_drop(false);
             self.stream = Some(stream);
+            self.device = default_device();
         }
         Ok(Sink::connect_new(self.stream.as_ref().expect("just opened").mixer()))
     }
 
     fn close(&mut self) {
         self.stream = None;
+        self.device = None;
+    }
+
+    fn moved(&mut self) -> bool {
+        // No name (or no device at all) says nothing: the stall check covers a device that's gone.
+        self.stream.is_some() && default_device().is_some_and(|d| self.device.as_ref() != Some(&d))
     }
 }
 
@@ -150,6 +180,23 @@ struct Session {
     ended: bool,
     /// Where the decoder was seeked before it joined the sink (the sink counts from there).
     offset: f64,
+    /// What plays, to open it again on another device.
+    song: Song,
+    path: PathBuf,
+    /// The position at the last tick and for how many ticks it hasn't moved while playing.
+    last_pos: f64,
+    still: u32,
+    /// Reopens for a stall in a row without the position moving since.
+    stalls: u32,
+    /// The device went away and no other could be opened: paused until Play tries again.
+    lost: bool,
+}
+
+impl Session {
+    fn position(&self) -> f64 {
+        let current = self.offset + self.sink.get_pos().as_secs_f64();
+        if self.duration > 0.0 { current.min(self.duration) } else { current }
+    }
 }
 
 /// The playing logic, independent of the sound card.
@@ -162,6 +209,8 @@ struct Engine<O: Output, E: Fn(u64, Event)> {
     /// AirPlay: where the tapped audio goes, and the app's volume for the copy.
     tap: Option<Arc<dyn CastSink>>,
     tap_gain: Gain,
+    /// Ticks since the default device was last looked at.
+    device_ticks: u32,
 }
 
 /// Opens `path` for rodio: byte length and extension hint help seeking and m4a.
@@ -177,7 +226,7 @@ fn open_decoder(path: &Path) -> Result<Decoder<BufReader<File>>, String> {
 
 impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
     fn new(output: O, emit: E, mute: bool) -> Self {
-        Self { output, emit, session: None, volume: 1.0, mute, tap: None, tap_gain: Gain::new(1.0) }
+        Self { output, emit, session: None, volume: 1.0, mute, tap: None, tap_gain: Gain::new(1.0), device_ticks: 0 }
     }
 
     fn with_tap(mut self, tap: Option<Arc<dyn CastSink>>) -> Self {
@@ -207,7 +256,13 @@ impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
                 }
             }
             Cmd::Resume => {
-                if let Some(s) = self.session.as_ref().filter(|s| !s.ended) {
+                let Some(s) = self.session.as_ref().filter(|s| !s.ended) else { return };
+                // Lost, or the default device changed while paused: play on the default one.
+                if s.lost || self.output.moved() {
+                    return self.reopen(false, 0);
+                }
+                if let Some(s) = self.session.as_mut() {
+                    s.still = 0;
                     s.sink.play();
                     (self.emit)(s.generation, Event::PlayState(PlayState::Playing));
                 }
@@ -219,6 +274,8 @@ impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
                     if s.sink.try_seek(Duration::from_secs_f64(target)).is_ok() {
                         s.offset = 0.0;
                     }
+                    s.last_pos = target;
+                    s.still = 0;
                 }
                 // `try_seek` returns once the audio thread has taken the seek: a quiet seek is over.
                 self.tap_gain.hold(false);
@@ -277,30 +334,88 @@ impl<O: Output, E: Fn(u64, Event)> Engine<O, E> {
             None => sink.append(decoder),
         }
         sink.play();
-        Ok(Session { generation, sink, duration, ended: false, offset })
+        let song = song.clone();
+        Ok(Session { generation, sink, duration, ended: false, offset, song, path: path.to_path_buf(), last_pos: offset, still: 0, stalls: 0, lost: false })
     }
 
     fn send_time(&self) {
         if let Some(s) = &self.session {
-            let current = s.offset + s.sink.get_pos().as_secs_f64();
-            let current = if s.duration > 0.0 { current.min(s.duration) } else { current };
-            (self.emit)(s.generation, Event::Time { current, duration: s.duration });
+            (self.emit)(s.generation, Event::Time { current: s.position(), duration: s.duration });
         }
     }
 
-    /// Periodic work: the position, and `Ended` (once) when the sink ran dry.
+    /// Moves the song to the default device, where it was: paused if it was paused, or playing
+    /// (`keep_paused` false: Play). No device: paused and `lost`, until Play tries again.
+    fn reopen(&mut self, keep_paused: bool, stalls: u32) {
+        let Some(old) = self.session.take() else { return };
+        let at = if old.lost { old.last_pos } else { old.position() };
+        let paused = keep_paused && old.sink.is_paused();
+        old.sink.stop();
+        self.output.close();
+        match self.load(old.generation, &old.song, &old.path, at) {
+            Ok(mut s) => {
+                // The new decoder starts at `at` (or at 0 when it can't seek: then it says so).
+                if paused {
+                    s.sink.pause();
+                }
+                s.stalls = stalls;
+                let generation = s.generation;
+                self.session = Some(s);
+                if !keep_paused {
+                    (self.emit)(generation, Event::PlayState(PlayState::Playing));
+                }
+                self.send_time();
+            }
+            Err(_) => {
+                let generation = old.generation;
+                let was_lost = old.lost;
+                self.session = Some(Session { lost: true, last_pos: at, still: 0, ..old });
+                if !was_lost || !keep_paused {
+                    (self.emit)(generation, Event::PlayState(PlayState::Paused));
+                }
+            }
+        }
+    }
+
+    /// Periodic work: the position, `Ended` (once) when the sink ran dry, and the device.
     fn tick(&mut self) {
         let Some(s) = self.session.as_mut() else { return };
-        if s.ended || s.sink.is_paused() {
+        if s.ended || s.lost || s.sink.is_paused() {
             return;
         }
         if s.sink.empty() {
             s.ended = true;
             let generation = s.generation;
             (self.emit)(generation, Event::PlayState(PlayState::Ended));
-        } else {
-            self.send_time();
+            return;
         }
+        let pos = s.position();
+        if (pos - s.last_pos).abs() < 1e-3 {
+            s.still += 1;
+        } else {
+            s.still = 0;
+            s.stalls = 0;
+        }
+        s.last_pos = pos;
+        let stalled = s.still >= STALL_TICKS;
+        if stalled && s.stalls >= MAX_STALLS {
+            // Reopened and still nothing: no device takes audio. Paused until Play.
+            s.lost = true;
+            s.sink.pause();
+            let generation = s.generation;
+            (self.emit)(generation, Event::PlayState(PlayState::Paused));
+            return;
+        }
+        let stalls = s.stalls + u32::from(stalled);
+        self.device_ticks += 1;
+        let moved = self.device_ticks >= DEVICE_TICKS && {
+            self.device_ticks = 0;
+            self.output.moved()
+        };
+        if stalled || moved {
+            return self.reopen(true, stalls);
+        }
+        self.send_time();
     }
 
     fn run(&mut self, rx: mpsc::Receiver<Cmd>) {
@@ -355,16 +470,27 @@ mod tests {
     struct FakeOutput {
         queues: Arc<Mutex<Vec<rodio::queue::SourcesQueueOutput>>>,
         closed: Arc<AtomicBool>,
+        /// The system's default device changed (cleared when a sink is made).
+        moved: Arc<AtomicBool>,
+        /// No device can be opened.
+        none: Arc<AtomicBool>,
     }
 
     impl Output for FakeOutput {
         fn sink(&mut self) -> Result<Sink, String> {
+            if self.none.load(Ordering::SeqCst) {
+                return Err("no audio output".into());
+            }
+            self.moved.store(false, Ordering::SeqCst);
             let (sink, out) = Sink::new();
             self.queues.lock().unwrap().push(out);
             Ok(sink)
         }
         fn close(&mut self) {
             self.closed.store(true, Ordering::SeqCst);
+        }
+        fn moved(&mut self) -> bool {
+            self.moved.load(Ordering::SeqCst)
         }
     }
 
@@ -786,4 +912,96 @@ mod tests {
         assert_eq!(e.session.as_ref().unwrap().sink.volume(), 0.0);
         let _ = std::fs::remove_dir_all(&dir);
     }
+    /// Review 2026-11-23 edges L3: the device stops taking audio (unplugged): the position
+    /// freezes. The bar must not stay on Playing at a frozen time for good.
+    #[test]
+    fn review_edges_a_device_that_stops_taking_audio_does_not_stay_playing() {
+        let dir = tmp_dir("stall");
+        let path = dir.join("a.flac");
+        std::fs::write(&path, flac_bytes(4)).unwrap();
+        let out = FakeOutput::default();
+        let (mut e, log) = engine(out.clone());
+        e.handle(play_cmd(1, "A", 0.0, &path, 0.0));
+        // Nobody pulls the samples (the device is gone) for 10 s of ticks.
+        for _ in 0..40 {
+            e.tick();
+        }
+        let reopened = out.queues.lock().unwrap().len() > 1;
+        let last = states(&log).last().copied();
+        assert!(reopened || last != Some(PlayState::Playing), "still Playing on a dead device: {:?}", states(&log));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Pulls `n` samples from the newest fake device (it plays them).
+    fn pull(out: &FakeOutput, n: usize) {
+        let mut q = out.queues.lock().unwrap();
+        let last = q.last_mut().unwrap();
+        assert_eq!(last.by_ref().take(n).count(), n);
+    }
+
+    /// Review 2026-11-23 edges L3: headphones plugged in (the default device changed): the song
+    /// moves to them where it was, without a word to the app but the time.
+    #[test]
+    fn review_edges_the_song_moves_to_the_new_default_device() {
+        let dir = tmp_dir("moved");
+        let path = dir.join("a.flac");
+        std::fs::write(&path, flac_bytes(4)).unwrap();
+        let out = FakeOutput::default();
+        let (mut e, log) = engine(out.clone());
+        e.handle(play_cmd(1, "A", 0.0, &path, 0.0));
+        pull(&out, 8000); // 1 s heard
+        out.moved.store(true, Ordering::SeqCst);
+        for _ in 0..DEVICE_TICKS {
+            e.tick();
+        }
+        assert_eq!(out.queues.lock().unwrap().len(), 2, "a sink on the new device");
+        assert!(out.closed.load(Ordering::SeqCst), "the old device was closed");
+        assert_eq!(states(&log), [PlayState::Loading, PlayState::Playing], "no state change shown");
+        let Event::Time { current, .. } = log.lock().unwrap().last().unwrap().1 else { panic!() };
+        assert!((current - 1.0).abs() < 0.1, "carries on at 1 s, not {current}");
+        // Play after a pause moves to a device that became the default meanwhile.
+        e.handle(Cmd::Pause);
+        out.moved.store(true, Ordering::SeqCst);
+        e.handle(Cmd::Resume);
+        assert_eq!(out.queues.lock().unwrap().len(), 3);
+        assert_eq!(states(&log).last(), Some(&PlayState::Playing));
+        assert!(!e.session.as_ref().unwrap().sink.is_paused());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// No device takes audio at all: after a few tries the song pauses (the bar says Paused);
+    /// Play tries again and carries on where it stopped once a device is back.
+    #[test]
+    fn review_edges_with_no_device_left_the_song_pauses_and_play_tries_again() {
+        let dir = tmp_dir("lost");
+        let path = dir.join("a.flac");
+        std::fs::write(&path, flac_bytes(4)).unwrap();
+        let out = FakeOutput::default();
+        let (mut e, log) = engine(out.clone());
+        e.handle(play_cmd(1, "A", 0.0, &path, 0.0));
+        pull(&out, 8000);
+        e.tick();
+        out.none.store(true, Ordering::SeqCst);
+        for _ in 0..STALL_TICKS {
+            e.tick();
+        }
+        assert_eq!(states(&log).last(), Some(&PlayState::Paused), "{:?}", states(&log));
+        // Play with still no device: stays paused.
+        e.handle(Cmd::Resume);
+        assert_eq!(states(&log).last(), Some(&PlayState::Paused));
+        out.none.store(false, Ordering::SeqCst);
+        e.handle(Cmd::Resume);
+        assert_eq!(states(&log).last(), Some(&PlayState::Playing));
+        let Event::Time { current, .. } = log.lock().unwrap().last().unwrap().1 else { panic!() };
+        assert!((current - 1.0).abs() < 0.1, "carries on at 1 s, not {current}");
+        // A device that opens but never plays: reopened twice, then paused (no endless retries).
+        let before = out.queues.lock().unwrap().len();
+        for _ in 0..(STALL_TICKS * (MAX_STALLS + 1)) {
+            e.tick();
+        }
+        assert_eq!(out.queues.lock().unwrap().len(), before + MAX_STALLS as usize);
+        assert_eq!(states(&log).last(), Some(&PlayState::Paused));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
 }
