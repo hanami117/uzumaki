@@ -1,5 +1,5 @@
 //! Discord Rich Presence (`crate::discord`): what `State` tells it, and the Settings → Notifications
-//! switches. The snapshot is built after every playback message, but only while the worker runs
+//! switches. Also the system's media controls (`media_sync`), fed from the same playback. The snapshot is built after every playback message, but only while the worker runs
 //! (the setting on): with it off, none of this costs anything.
 
 use super::*;
@@ -12,6 +12,29 @@ impl State {
         if self.discord.active() {
             let snap = self.discord_snapshot();
             self.discord.update(snap.as_ref());
+        }
+    }
+
+    /// Tells the system's media controls (and the tray's Play/Pause) what the window shows now.
+    /// `tick`: a time report was just applied. Cheap; only changes are sent.
+    pub(super) fn media_sync(&mut self, tick: bool) {
+        // The tray sends only changes itself.
+        let active = self.playback.song.is_some() && self.playback.state.is_active();
+        if let Some(t) = &mut self.tray {
+            t.set_playing(active);
+        }
+        let Some(out) = &self.media_out else { return };
+        let p = &self.playback;
+        let events = self.media_feed.update(crate::media::Now {
+            song: p.song.as_ref(),
+            state: p.state,
+            position: p.heard_now(),
+            duration: p.duration,
+            volume: p.volume,
+            tick,
+        });
+        for e in &events {
+            out(e);
         }
     }
 

@@ -229,6 +229,7 @@ impl State {
         self.playback.song = Some(song.clone());
         self.playback.state = PlayState::Loading;
         self.starting = Some(crate::clock::now());
+        self.pause_while_starting = false;
         let at = if at > 0.0 && (song.duration <= 0.0 || at < song.duration) { at } else { 0.0 };
         self.playback.position = at;
         self.playback.position_at = None;
@@ -245,6 +246,7 @@ impl State {
             self.notifier.song_changed(&song, self.playback.state);
         }
         self.discord_sync();
+        self.media_sync(false);
         if song.is_local() {
             self.start_local(&song, at);
         } else {
@@ -505,6 +507,8 @@ impl State {
         if self.resume.is_some() {
             return; // a resumed song is paused until Play
         }
+        // A song still loading: the Paused that follows is this pause, not the old queue ending.
+        self.pause_while_starting = self.starting.is_some();
         self.airplay_flush(); // the speaker goes quiet now, not after what it had queued
         self.cast_pause(true); // the TV pauses now and keeps what comes next
         if self.playback.local {
@@ -551,14 +555,16 @@ impl State {
     /// Restarts the song after 3 s; otherwise the previous song of the list, also one before
     /// the song playback started from (MusicKit doesn't have those, so the queue restarts there).
     pub fn previous(&mut self) {
-        if self.resume.is_some() && self.playback.position <= 3.0 {
+        // What is heard (a Cast device plays seconds behind the player), as the bar shows it.
+        let heard = self.playback.heard_now();
+        if self.resume.is_some() && heard <= 3.0 {
             match self.queue.step_back() {
                 Some(song) => self.begin_current(song),
                 None => self.seek_resumed(0.0),
             }
             return;
         }
-        if self.playback.position > 3.0 {
+        if heard > 3.0 {
             return self.seek_to(0.0);
         }
         // A queued song goes back to the list song before it (MusicKit's own Previous only

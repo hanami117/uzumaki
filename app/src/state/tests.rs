@@ -619,7 +619,7 @@ fn shuffle_repeat_and_data_saver_are_settings() {
 
 // ---------------------------------------------------------------- local files
 
-fn local(name: &str) -> Song {
+pub(super) fn local(name: &str) -> Song {
     Song { id: format!("file:///music/{name}.flac"), title: name.into(), ..song(name) }
 }
 
