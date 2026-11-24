@@ -761,6 +761,35 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// Timing of a first scan and a rescan of 3000 tagged files (run by hand:
+    /// `cargo test -p uzumaki scan_timing -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn scan_timing() {
+        let d = tmp_dir("timing");
+        for i in 0..3000 {
+            let album = i / 12;
+            make(
+                &d.join(format!("Artist {}", album / 8)).join(format!("Album {album}")).join(format!("{i}.wav")),
+                &[("title", &format!("Song {i}")), ("artist", &format!("Artist {}", album / 8)), ("album", &format!("Album {album}")), ("track", &format!("{}", i % 12 + 1))],
+                None,
+            );
+        }
+        let art = d.join("art");
+        let t = std::time::Instant::now();
+        let first = run(&[d.clone()], &[], &art);
+        let first_took = t.elapsed();
+        let t = std::time::Instant::now();
+        let again = run(&[d.clone()], &first, &art);
+        let again_took = t.elapsed();
+        let t = std::time::Instant::now();
+        let (songs, view) = crate::local::view::from_index(&again, &[d.clone()]);
+        let derive_took = t.elapsed();
+        eprintln!("3000 files: first scan {first_took:?}, rescan {again_took:?}, derive {derive_took:?} ({} songs, {} albums)", songs.len(), view.albums.len());
+        assert_eq!(again, first);
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn progress_is_reported() {
         let d = tmp_dir("progress");
