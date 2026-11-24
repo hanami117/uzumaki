@@ -75,6 +75,15 @@ pub fn art(s: &State, artwork: Option<&Artwork>, title: &str, size: Size, radius
     }
 }
 
+/// A song's cover at `side` px square: its artwork, else the tinted tile with initials (colour and
+/// letters from `Song::tile_name`, letters scaled to the size). The one place that draws a song's
+/// thumbnail, so the rows, queue, cards and player bar never differ.
+pub fn song_art(s: &State, song: &crate::models::Song, size: Size, radius: f32) -> El {
+    let side = match size { Size::Fixed(f) | Size::Small(f) => f, Size::Fill => 0.0 };
+    let pt = if song.artwork.is_none() { side * 0.4 } else { 0.0 };
+    art(s, song.artwork.as_ref(), song.tile_name(), size, radius, pt)
+}
+
 /// A small thumbnail that stays on screen (a sidebar playlist or pin; `owner` its id), drawn
 /// from `held`: `Art::held`'s picture for it, looked up by the caller (so a memoized row can key
 /// on it). Its first picture fades in over the tinted tile; after that a new link, an evicted

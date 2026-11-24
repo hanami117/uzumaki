@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use rune::{Drag, El, Live, Phase, PointerEvent, ScrollPos, Spring, Tx, el, row, text};
 
-use super::widgets::{Size, art};
+use super::widgets::{Size, song_art};
 use super::{lists, select};
 use crate::models::Song;
 use crate::settings::{Pin, PinKind};
@@ -527,7 +527,7 @@ pub fn ghost(s: &State) -> El {
     let dd = &s.ui.dnd;
     let lead = dd.songs.first();
     let cover = match lead {
-        Some(song) => art(s, song.artwork.as_ref(), &song.album, Size::Small(26.0), 5.0, 0.0),
+        Some(song) => song_art(s, song, Size::Small(26.0), 5.0),
         None => el().size(26.0, 26.0),
     };
     row().key("dnd-ghost").absolute(0.0, 0.0).raise().live_offset(&dd.ghost).max_w(280.0).gap(8.0).center_y()
