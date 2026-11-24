@@ -6,6 +6,9 @@ takes each release's notes from its section here.
 ## [Unreleased]
 
 ### Fixed
+- **A song without a cover shows the same initials tile everywhere, not a plain square.** Song rows (Songs, album and
+  playlist tracks, Favourite Songs, search, mixed playlists), Up Next and the drag ghost now draw the player bar's tile:
+  same colour, same letters, scaled to the row.
 - **Local files: a song without an album no longer takes another song's cover or a made-up album called after the
   music folder.** A cover is the song's own embedded picture, else an image (`cover`/`folder`/`front`/`album`) in its
   folder (or the album folder above a `CD1`/`Disc 2` folder); songs only borrow each other's art when they share a
