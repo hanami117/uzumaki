@@ -4,7 +4,7 @@ use rune::{Cursor, El, ScrollSpec, col, row, text};
 
 use super::cards::{hero_card, station_card};
 use super::carousel::carousel;
-use super::widgets::{Size, art, card, fmt_time, heading, muted, status};
+use super::widgets::{Size, song_art, card, fmt_time, heading, muted, status};
 use super::PAGE_PX;
 use crate::models::{Shelf, Song, Station};
 use crate::state::{Load, State};
@@ -59,7 +59,7 @@ fn song_cell(s: &State, src: Source, shelf: usize, i: usize, song: &Song, title:
             };
             s.play_list(&songs, i, &title);
         })
-        .child(art(s, song.artwork.as_ref(), &song.album, Size::Small(44.0), 6.0, 0.0))
+        .child(song_art(s, song, Size::Small(44.0), 6.0))
         .child(
             col().grow(1.0).min_w(0.0).gap(1.0)
                 .child(text(song.title.clone()).font(TRACK_TITLE).color(PAL.text2).truncate())

@@ -10,7 +10,7 @@ use rune::{Cursor, El, GrowthSpec, Live, ScrollPos, ScrollSpec, TextStyle, col, 
 use std::borrow::Cow;
 
 use super::{icons, up_next_anim};
-use super::widgets::{Size, art};
+use super::widgets::{Size, song_art};
 use crate::models::Song;
 use crate::state::State;
 use crate::theme::*;
@@ -258,7 +258,7 @@ fn song_row_with(s: &State, song: &Song, key: String, up_next_index: Option<usiz
     let star = super::tracks::star_slot(s, song, &key);
     let r = row().key(key).role("button").label(song.title.clone()).w_full().min_h(52.0).px(12.0).gap(10.0).center_y()
         .radius(8.0).hover_group().cursor(Cursor::Pointer)
-        .child(art(s, song.artwork.as_ref(), &song.album, Size::Small(40.0), 6.0, 0.0))
+        .child(song_art(s, song, Size::Small(40.0), 6.0))
         .child(
             col().grow(1.0).min_w(0.0).gap(1.0)
                 .child({

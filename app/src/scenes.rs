@@ -333,6 +333,7 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("local-only-20k-folder", local_only_big_folder),
     ("local-only-favourites", local_only_favourites),
     ("local-only-songs-stars", local_only_songs_stars),
+    ("local-only-songs-initials", local_only_songs_initials),
     ("favourites-with-local", favourites_with_local),
     ("now-playing-local-lyrics", now_playing_local_lyrics),
     ("now-playing-lrclib", now_playing_lrclib),
@@ -2526,6 +2527,12 @@ fn local_only_favourites(s: &mut State) {
 fn local_only_songs_stars(s: &mut State) {
     local_only_with(s, &local_index(), Route::LocalFiles);
     star_local(s);
+}
+
+/// Local only Songs: rows without a cover (Cartography, the untagged files) show the initials
+/// tile of the player bar, scaled to the row.
+fn local_only_songs_initials(s: &mut State) {
+    local_only_with(s, &local_index(), Route::LocalFiles);
 }
 
 /// Apple's Favourite Songs with two local favourites at its end.

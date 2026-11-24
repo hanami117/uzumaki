@@ -6,7 +6,7 @@ use super::PAGE_PX;
 use super::{artist_link, filter, icons, lists, select};
 use super::songs_table::{self as table, Which};
 use super::tracks::same_song;
-use super::widgets::{Size, art, fmt_time, fmt_total, pill, status};
+use super::widgets::{Size, art, song_art, fmt_time, fmt_total, pill, status};
 use crate::models::{Artist, Collection, CollectionKind, Song};
 use crate::state::{Load, State};
 use crate::theme::*;
@@ -416,7 +416,7 @@ fn track_row(s: &State, c: &Collection, i: usize, t: &Song, list: &str) -> El {
                 .child(el().absolute(0.0, 10.0).group_opacity(0.0, 1.0).child(play_icon(16.0)))
         }
         CollectionKind::Playlist => el().w(44.0).child(
-            art(s, t.artwork.as_ref(), &t.album, Size::Fixed(36.0), 6.0, 0.0).child(
+            song_art(s, t, Size::Fixed(36.0), 6.0).child(
                 el().size(36.0, 36.0).radius(6.0).center().fill(rune::Color::BLACK.alpha(0.5)).group_opacity(0.0, 1.0)
                     .child(play_icon(14.0)),
             ),

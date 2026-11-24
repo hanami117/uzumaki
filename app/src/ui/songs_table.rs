@@ -11,7 +11,7 @@ use rune::{Cursor, El, Spring, TextStyle, col as vstack, el, icon, row, text};
 
 use super::icons;
 use super::tracks::{STAR_W, is_current, star_slot};
-use super::widgets::{Size, art, fmt_time};
+use super::widgets::{Size, song_art, fmt_time};
 use super::artist_link;
 use crate::models::{Artist, Song};
 use crate::state::State;
@@ -412,7 +412,7 @@ pub fn song_row_with(s: &State, song: &Song, n: usize, cols: Cols, key: String, 
         let inner = match col {
             // With the Artist column gone the artist sits under the title, so it never vanishes.
             Col::Title => row().w_full().gap(GAP).center_y()
-                .child(art(s, song.artwork.as_ref(), &song.album, Size::Fixed(36.0), 6.0, 0.0))
+                .child(song_art(s, song, Size::Fixed(36.0), 6.0))
                 .child(vstack().grow(1.0).min_w(0.0).shrink()
                     // Playlists mark their local songs (mixed playlists); the other lists are one kind.
                     .child(super::tracks::title_line(song, cur, list.strip_prefix("coll:").is_some_and(|id| !crate::local::view::is_album_id(id))))

@@ -6,7 +6,7 @@ use std::time::Duration;
 use rune::{Cursor, Drag, El, Live, Phase, col, el, icon, row, text};
 
 use super::{icons, marquee};
-use super::widgets::{Size, art, fmt_time, slider, slider_hit};
+use super::widgets::{Size, song_art, fmt_time, slider, slider_hit};
 use crate::settings::RightTab;
 use crate::state::{Repeat, State};
 use crate::theme::*;
@@ -291,12 +291,6 @@ fn panel_buttons(s: &State, still: bool) -> (El, El) {
     (bind(s, Target::PanelButtons, queue, still), bind(s, Target::PanelButtons, lyrics, still))
 }
 
-/// Initials on the cover tile only for a song with no artwork (as the sidebar's thumbnails draw
-/// them); a cover still loading keeps the plain tile, so a song change doesn't flash letters.
-fn initials_pt(song: &crate::models::Song, size: f32) -> f32 {
-    if song.artwork.is_none() { size * 0.4 } else { 0.0 }
-}
-
 pub fn player_bar(s: &State, compact: bool, still: bool) -> El {
     let Some(song) = &s.playback.song else { return col() };
     let (frac, elapsed, dur) = progress(s);
@@ -309,7 +303,7 @@ pub fn player_bar(s: &State, compact: bool, still: bool) -> El {
         .on_secondary_press(move |s: &mut State, p, _tx: &mut rune::Tx| {
             super::menu::open_song(s, menu_song.clone(), super::menu::MenuContext::NowPlaying, [p.x, p.y])
         })
-        .child(art(s, song.artwork.as_ref(), song.tile_name(), Size::Small(cover), 6.0, initials_pt(song, cover)))
+        .child(song_art(s, song, Size::Small(cover), 6.0))
         .child(now_lines(s, song, true, still));
 
     let time = |t: String, end: bool| {
@@ -408,7 +402,7 @@ pub fn floating_bar(s: &State, win_w: f32, still: bool) -> El {
         .on_secondary_press(move |s: &mut State, p, _tx: &mut rune::Tx| {
             super::menu::open_song(s, menu_song.clone(), super::menu::MenuContext::NowPlaying, [p.x, p.y])
         })
-        .child(art(s, song.artwork.as_ref(), song.tile_name(), Size::Small(36.0), 6.0, initials_pt(song, 36.0)))
+        .child(song_art(s, song, Size::Small(36.0), 6.0))
         .child(lines);
     let seek = if narrow {
         thin_seek(s, "seek", frac)

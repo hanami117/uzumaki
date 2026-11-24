@@ -3,7 +3,7 @@
 use rune::{Cursor, El, col, el, icon, row, text};
 
 use super::{icons, select};
-use super::widgets::{Size, art, fmt_time};
+use super::widgets::{Size, song_art, fmt_time};
 use crate::models::Song;
 use crate::state::State;
 use crate::theme::*;
@@ -64,7 +64,7 @@ pub fn song_row_compact(s: &State, song: &Song, key: String, list: &str, rk: &st
 /// A song row: thumbnail (hover plays), `middle`, star, time.
 fn row_with<const N: usize>(s: &State, song: &Song, key: String, list: &str, rk: &str, middle: [El; N], min_h: f32) -> El {
     let play_key = format!("{key}-play");
-    let thumb = art(s, song.artwork.as_ref(), &song.album, Size::Fixed(36.0), 6.0, 0.0)
+    let thumb = song_art(s, song, Size::Fixed(36.0), 6.0)
         .child(
             el().size(36.0, 36.0).radius(6.0).center().fill(rune::Color::BLACK.alpha(0.5)).group_opacity(0.0, 1.0)
                 .child(icon(&icons::PLAY, 14.0).color(PAL.text)),
