@@ -813,7 +813,7 @@ mod tests {
             title: id.into(),
             artist: String::new(),
             album: String::new(),
-            album_is_fallback: false,
+            album_is_fallback: false, guessed: Default::default(),
             duration: 100.0,
             track_number: None,
             disc_number: None,

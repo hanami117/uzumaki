@@ -234,7 +234,7 @@ mod tests {
         let path = dir.join(name);
         fs::write(&path, b"not really audio").unwrap();
         crate::local::LocalTrack {
-            path, mtime: 1, size: 1, title: title.into(), artist: "Ann".into(), album: "First".into(), album_fallback: false,
+            path, mtime: 1, size: 1, title: title.into(), artist: "Ann".into(), album: "First".into(), album_fallback: false, guessed: Default::default(),
             album_artist: "Ann".into(), album_artist_tagged: false, compilation: false, track: None, disc: None, year: None,
             genre: None, duration: 100.0, cover: None,
         }
@@ -286,6 +286,35 @@ mod tests {
     }
 
     #[test]
+    fn an_untagged_song_is_asked_by_the_name_it_was_given() {
+        let d = tmp("names");
+        let srv = Server::start(|path| {
+            if path.contains("track_name=KRILYA") && path.contains("artist_name=BATPIIICORE") {
+                (200, vec![], record(100.0, Some("[00:01.00]Named"), None, false).to_string())
+            } else {
+                (404, vec![], NOT_FOUND.into())
+            }
+        });
+        let mut s = state(&srv, &d);
+        let mut song = track(&d, "BATPIIICORE - BATPIIICORE VOL.2 - 04 KRILYA.flac", "KRILYA");
+        song.artist = "BATPIIICORE".into();
+        song.album = "BATPIIICORE VOL.2".into();
+        song.guessed = crate::models::Guessed { title: true, artist: true, album: true, track: true };
+        s.want_lyrics(&song);
+        assert_eq!(shown(&s, &song).expect("lyrics").lines[0].text, "Named");
+        assert!(srv.asked().iter().all(|a| !a.contains("album_name")), "{:?}", srv.asked());
+        // A title with no artist and no length is not asked at all.
+        let mut bare = track(&d, "Powerade.wav", "Powerade");
+        bare.artist = "Unknown Artist".into();
+        bare.duration = 0.0;
+        let before = srv.asked().len();
+        s.want_lyrics(&bare);
+        assert_eq!(shown(&s, &bare), None);
+        assert_eq!(srv.asked().len(), before);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn own_lyrics_never_ask_and_off_asks_nothing() {
         let d = tmp("own");
         let srv = server();
@@ -329,7 +358,7 @@ mod tests {
         s.lyrics.insert(song.id.clone(), Load::Ready(Some(l)));
         s.want_lyrics(&song);
         assert!(shown(&s, &song).is_some());
-        assert_eq!(s.lrclib.as_ref().unwrap().cache.get(song.local_path().unwrap()), None, "nothing cached");
+        assert_eq!(s.lrclib.as_ref().unwrap().cache.get(song.local_path().unwrap(), &Query::of(&song).unwrap()), None, "nothing cached");
         let _ = fs::remove_dir_all(&d);
     }
 

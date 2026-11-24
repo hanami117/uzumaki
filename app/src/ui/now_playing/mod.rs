@@ -575,7 +575,7 @@ fn scene_base(s: &mut State, lyr: Lyrics, position: f64) {
         title: "Last Service".into(),
         artist: "Juniper Vale".into(),
         album: "Night Bus Hymns".into(),
-        album_is_fallback: false,
+        album_is_fallback: false, guessed: Default::default(),
         duration: 241.0,
         track_number: Some(1),
         disc_number: Some(1),

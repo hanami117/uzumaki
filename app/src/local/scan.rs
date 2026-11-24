@@ -11,7 +11,9 @@
 //!   file sits in a disc folder (`CD1`, `Disc 2`). Each folder is looked at once per scan. One
 //!   thumbnail per album (max 600 px, JPEG) in `art_dir`, named by a hash of album artist +
 //!   album (else the folder). `LocalTrack::cover` is that file's path.
-//! - Missing tags fall back: title → file stem, artist → "Unknown Artist", album → folder name.
+//! - Missing tags fall back to what the file name and folders say (`names`, marked in
+//!   `LocalTrack::guessed`): `Artist - Title`, `NN - Title`, `Artist/Album/NN Title`. Else title →
+//!   file stem, artist → "Unknown Artist", album → folder name.
 //!   Track and disc numbers read the leading number (`3/12`, `03 of 12`); a compilation flag
 //!   (`TCMP`, `cpil`, `COMPILATION`) without an album artist makes it "Various Artists".
 //! - A music folder that can't be read (an unmounted drive, a network share that's away) keeps
@@ -31,7 +33,9 @@ use lofty::tag::{Accessor, ItemKey, Tag};
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::Song;
+use crate::models::{Guessed, Song};
+
+use super::names;
 
 /// One audio file in the index.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -47,6 +51,9 @@ pub struct LocalTrack {
     /// `album` is the folder's name, the file having no album tag.
     #[serde(default)]
     pub album_fallback: bool,
+    /// Fields read from the file name and folders, the tag being missing (`names`).
+    #[serde(default, skip_serializing_if = "Guessed::is_none")]
+    pub guessed: Guessed,
     /// Album artist when tagged (else the artist, or "Various Artists" for a compilation).
     pub album_artist: String,
     /// `album_artist` came from an album artist tag (or the compilation flag), not the artist.
@@ -76,6 +83,7 @@ impl LocalTrack {
             artist: self.artist.clone(),
             album: self.album.clone(),
             album_is_fallback: self.album_fallback,
+            guessed: self.guessed,
             duration: self.duration,
             track_number: self.track,
             disc_number: self.disc,
@@ -101,7 +109,7 @@ pub fn art_dir() -> PathBuf {
 }
 
 /// Version of the index file; another version reads as empty (a rescan rebuilds it).
-const INDEX_VERSION: u32 = 3;
+const INDEX_VERSION: u32 = 4;
 
 /// The album artist of a compilation without an album artist tag.
 pub const VARIOUS_ARTISTS: &str = "Various Artists";
@@ -167,6 +175,7 @@ pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut pr
         walk(&root, &mut files, &mut seen);
     }
 
+    let roots: Vec<PathBuf> = folders.iter().map(|f| std::path::absolute(f).unwrap_or_else(|_| f.clone())).collect();
     let prev: HashMap<&Path, &LocalTrack> = previous.iter().map(|t| (t.path.as_path(), t)).collect();
     // Thumbnails of this scan by file stem (the album hash), shared by all tracks of the album.
     let mut covers = Covers::default();
@@ -185,7 +194,11 @@ pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut pr
                 }
                 t
             }
-            None => read_track(&path, mtime, size, art_dir, &mut covers),
+            None => {
+                // The music folder it was found in (the longest, when one holds another).
+                let root = roots.iter().filter(|r| path.starts_with(r)).max_by_key(|r| r.as_os_str().len());
+                read_track(&path, mtime, size, root.map(PathBuf::as_path), art_dir, &mut covers)
+            }
         };
         tracks.push(track);
         if (n + 1) % 100 == 0 {
@@ -311,7 +324,7 @@ fn album_key(t: &LocalTrack, has_album: bool) -> String {
     }
 }
 
-fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut Covers) -> LocalTrack {
+fn read_track(path: &Path, mtime: u64, size: u64, root: Option<&Path>, art_dir: &Path, covers: &mut Covers) -> LocalTrack {
     let tagged = lofty::read_from_path(path).ok();
     let tag: Option<&Tag> = tagged.as_ref().and_then(|f| f.primary_tag().or_else(|| f.first_tag()));
     // A value from the primary tag, else from any other tag of the file (an ID3 tag on a FLAC).
@@ -322,10 +335,20 @@ fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut C
     let duration = tagged.as_ref().map_or(0.0, |f| f.properties().duration().as_secs_f64());
 
     let folder_name = path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
-    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let title_tag = tag.and_then(|t| clean(t.title()));
     let album_tag = tag.and_then(|t| clean(t.album()));
     let artist_tag = tag.and_then(|t| clean(t.artist()));
-    let artist = artist_tag.unwrap_or_else(|| "Unknown Artist".into());
+    let track_tag = tag.and_then(|t| t.track()).or_else(|| any(ItemKey::TrackNumber).as_deref().and_then(leading_number));
+    // What the name and folders say, for what the tags don't.
+    let guess = names::guess(path, root, title_tag.as_deref());
+    let guessed = Guessed {
+        title: title_tag.is_none(),
+        artist: artist_tag.is_none() && guess.artist.is_some(),
+        album: album_tag.is_none() && guess.album.is_some(),
+        track: track_tag.is_none() && guess.track.is_some(),
+    };
+    let artist = artist_tag.or(guess.artist).unwrap_or_else(|| "Unknown Artist".into());
+    let album_named = album_tag.is_some() || guessed.album;
     let compilation = any(ItemKey::FlagCompilation).is_some_and(|v| flag(&v));
     let album_artist_tag = any(ItemKey::AlbumArtist);
     let album_artist_tagged = album_artist_tag.is_some() || compilation;
@@ -340,14 +363,15 @@ fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut C
         path: path.to_path_buf(),
         mtime,
         size,
-        title: tag.and_then(|t| clean(t.title())).unwrap_or(stem),
+        title: title_tag.unwrap_or(guess.title),
         artist,
-        album: album_tag.clone().or(folder_name).unwrap_or_default(),
-        album_fallback: album_tag.is_none(),
+        album: album_tag.or(guess.album).or(folder_name).unwrap_or_default(),
+        album_fallback: !album_named,
+        guessed,
         album_artist,
         album_artist_tagged,
         compilation,
-        track: tag.and_then(|t| t.track()).or_else(|| any(ItemKey::TrackNumber).as_deref().and_then(leading_number)),
+        track: track_tag.or(guess.track),
         disc: tag.and_then(|t| t.disk()).or_else(|| any(ItemKey::DiscNumber).as_deref().and_then(leading_number)),
         year,
         genre: tag.and_then(|t| clean(t.genre())),
@@ -355,7 +379,7 @@ fn read_track(path: &Path, mtime: u64, size: u64, art_dir: &Path, covers: &mut C
         cover: None,
     };
 
-    let key = album_key(&track, album_tag.is_some());
+    let key = album_key(&track, album_named);
     track.cover = match covers.thumbs.get(&key) {
         Some(c) => Some(c.clone()),
         None => {
@@ -523,12 +547,57 @@ mod tests {
     }
 
     #[test]
+    fn untagged_files_are_named_from_their_file_names_and_folders() {
+        let d = tmp_dir("names");
+        make(&d.join("Powerade (NOISETIME x Hähnchenteile Remix).wav"), &[], None);
+        make(&d.join("BATPIIICORE - BATPIIICORE VOL.2 - 04 KRILYA.wav"), &[], None);
+        make(&d.join("Daft Punk").join("Homework").join("CD1").join("07 Around the World.wav"), &[], None);
+        // Tags win, field by field: the artist is missing, so the name gives it.
+        make(&d.join("Ann - Real Title.wav"), &[("title", "Real Title"), ("track", "9")], None);
+        // A tagged artist is never replaced.
+        make(&d.join("Wrong - Real Title 2.wav"), &[("title", "Real Title 2"), ("artist", "Right")], None);
+        let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
+        let by = |title: &str| t.iter().find(|t| t.title == title).unwrap_or_else(|| panic!("{title} in {:?}", t.iter().map(|t| &t.title).collect::<Vec<_>>()));
+
+        let p = by("Powerade (NOISETIME x Hähnchenteile Remix)");
+        assert_eq!((p.artist.as_str(), p.track), ("Unknown Artist", None));
+        assert_eq!(p.guessed, Guessed { title: true, ..Guessed::default() });
+        assert!(p.album_fallback);
+
+        let k = by("KRILYA");
+        assert_eq!((k.artist.as_str(), k.album.as_str(), k.track), ("BATPIIICORE", "BATPIIICORE VOL.2", Some(4)));
+        assert_eq!(k.album_artist, "BATPIIICORE");
+        assert!(!k.album_fallback && !k.album_artist_tagged);
+        assert_eq!(k.guessed, Guessed { title: true, artist: true, album: true, track: true });
+        let song = k.to_song();
+        assert_eq!(song.guessed, k.guessed);
+        assert!(!song.album_is_fallback);
+
+        let a = by("Around the World");
+        assert_eq!((a.artist.as_str(), a.album.as_str(), a.track), ("Daft Punk", "Homework", Some(7)));
+
+        let r = by("Real Title");
+        assert_eq!((r.artist.as_str(), r.track), ("Ann", Some(9)));
+        assert_eq!(r.guessed, Guessed { artist: true, ..Guessed::default() });
+
+        let w = by("Real Title 2");
+        assert_eq!(w.artist, "Right");
+        assert!(!w.guessed.artist);
+        assert!(by("KRILYA").cover.is_none());
+
+        // The index keeps the marks.
+        let idx = d.join("index.json");
+        save_index(&idx, &t);
+        assert_eq!(load_index(&idx), t);
+    }
+
+    #[test]
     fn fallbacks_without_tags() {
         let d = tmp_dir("fallback");
         make(&d.join("Some Album").join("01 song.WAV"), &[], None);
         let t = run(std::slice::from_ref(&d), &[], &d.join("art"));
         assert_eq!(t.len(), 1);
-        assert_eq!(t[0].title, "01 song");
+        assert_eq!((t[0].title.as_str(), t[0].track), ("song", Some(1)), "the number is read from the name");
         assert_eq!(t[0].artist, "Unknown Artist");
         assert!(t[0].album_fallback, "no album tag: the folder name is a stand-in");
         assert_eq!(t[0].album, "Some Album");
@@ -815,7 +884,7 @@ mod tests {
             title: "T".into(),
             artist: "A".into(),
             album: "B".into(),
-            album_fallback: false,
+            album_fallback: false, guessed: Default::default(),
             album_artist: "A".into(),
             album_artist_tagged: true,
             compilation: true,

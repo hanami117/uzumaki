@@ -105,7 +105,7 @@ pub(super) fn song(id: &str) -> Song {
         title: format!("Song {id}"),
         artist: "A".into(),
         album: "B".into(),
-        album_is_fallback: false,
+        album_is_fallback: false, guessed: Default::default(),
         duration: 200.0,
         track_number: None,
         disc_number: None,

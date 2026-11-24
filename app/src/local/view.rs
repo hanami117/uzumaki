@@ -399,7 +399,7 @@ pub(crate) mod tests {
             title: title.into(),
             artist: artist.into(),
             album: album.into(),
-            album_fallback: false,
+            album_fallback: false, guessed: Default::default(),
             album_artist: album_artist.into(),
             album_artist_tagged: !album_artist.is_empty(),
             compilation: false,
