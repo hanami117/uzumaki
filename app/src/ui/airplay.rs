@@ -192,6 +192,7 @@ pub fn button(s: &State, key: &'static str, idle: rune::Color) -> Option<El> {
     let label = match (&s.airplay.cast, &s.cast.state) {
         (_, CastState::Connecting { name } | CastState::Launching { name } | CastState::Loading { name }) => format!("Chromecast: connecting to {name}"),
         (_, CastState::Buffering { name } | CastState::Playing { name, .. } | CastState::Paused { name }) => format!("Chromecast: playing on {name}"),
+        (_, CastState::Reconnecting { name }) => format!("Chromecast: reconnecting to {name}"),
         (Cast::Off, CastState::Off) => "AirPlay".to_string(),
         (Cast::Connecting { .. }, _) => format!("AirPlay: connecting to {}", s.airplay.names()),
         (Cast::On { .. }, _) => format!("AirPlay: playing on {}", s.airplay.names()),
@@ -522,7 +523,7 @@ fn cast_mark(s: &State, d: &CastDevice) -> Mark {
     }
     match s.cast.state {
         CastState::Off => Mark::Off,
-        CastState::Connecting { .. } | CastState::Launching { .. } | CastState::Loading { .. } | CastState::Buffering { .. } => Mark::Connecting,
+        CastState::Connecting { .. } | CastState::Launching { .. } | CastState::Loading { .. } | CastState::Buffering { .. } | CastState::Reconnecting { .. } => Mark::Connecting,
         CastState::Playing { .. } | CastState::Paused { .. } => Mark::On,
     }
 }
@@ -541,8 +542,9 @@ fn cast_rows(s: &State, mut panel: El, titled: bool) -> El {
             (CastState::Connecting { .. }, Mark::Connecting) => "Connecting\u{2026}".to_string(),
             (CastState::Launching { .. } | CastState::Loading { .. }, Mark::Connecting) => "Starting\u{2026}".to_string(),
             (CastState::Buffering { .. }, Mark::Connecting) => "Buffering\u{2026}".to_string(),
+            (CastState::Reconnecting { .. }, Mark::Connecting) => "Reconnecting\u{2026}".to_string(),
             (CastState::Paused { .. }, Mark::On) => "Chromecast \u{b7} Paused".to_string(),
-            (CastState::Playing { latency_ms: Some(ms), .. }, Mark::On) => format!("Chromecast \u{b7} {:.1} s behind", f64::from(*ms) / 1000.0),
+            (CastState::Playing { latency_ms: Some(ms), .. }, Mark::On) if *ms >= 100 => format!("Chromecast \u{b7} {:.1} s behind", f64::from(*ms) / 1000.0),
             _ if d.group => "Chromecast \u{b7} Group".to_string(),
             _ => "Chromecast".to_string(),
         };
@@ -691,7 +693,8 @@ fn scene_cast(s: &mut State, what: &str) {
             s.cast.state = CastState::Paused { name };
             s.cast.volume = Some(26);
         }
-        "failed" => s.toast = Some(format!("{} Playing on {}.", uzumaki_cast::Why::Lost.message("Smart TV Pro"), this_computer())),
+        "reconnecting" => s.cast.state = CastState::Reconnecting { name },
+        "failed" => s.toast = Some(format!("{} Paused on {}.", uzumaki_cast::Why::Lost.message("Smart TV Pro"), this_computer())),
         _ => {}
     }
 }

@@ -36,6 +36,7 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("cast-connecting", |s| airplay(s, "cast-connecting")),
     ("cast-on", |s| airplay(s, "cast-on")),
     ("cast-paused", |s| airplay(s, "cast-paused")),
+    ("cast-reconnecting", |s| airplay(s, "cast-reconnecting")),
     ("cast-on-closed", |s| airplay(s, "cast-on-closed")),
     ("cast-failed", |s| airplay(s, "cast-failed")),
     ("cast-only-list", |s| airplay(s, "cast-only-list")),

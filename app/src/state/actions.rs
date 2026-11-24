@@ -225,7 +225,7 @@ impl State {
         self.resume = None;
         self.pending_play = None; // a newer click than the album or playlist still loading
         self.airplay_song_change();
-        self.cast_song_change(&song);
+        self.cast_song_change(&song, at);
         self.playback.song = Some(song.clone());
         self.playback.state = PlayState::Loading;
         self.starting = Some(crate::clock::now());
@@ -906,7 +906,7 @@ impl State {
         self.playback.seek_preview = None;
         let target = seconds.clamp(0.0, self.playback.duration.max(0.0));
         self.airplay_flush(); // the seek is heard at once
-        self.cast_seeked();
+        self.cast_seeked(target);
         self.seek_player(target);
     }
 

@@ -6,16 +6,27 @@
 //! speakers and the other way round. Headless runs and tests have no controller: the methods
 //! only change state, and scenes fill in made-up devices.
 //!
-//! The device plays a couple of seconds behind the player (its receiver waits for a buffer):
-//! lyrics and the progress bar follow the measured delay (`Playback::heard_now`), pause and
-//! resume are instant (the stream holds), and a seek, a skip or a picked song starts the
-//! device afresh (`Controller::restart`: a short silence, then the new place in step).
+//! Apple Music (and local files the TV can't play itself) go as a live stream of the player's
+//! output, which the TV plays a couple of seconds behind: lyrics and the progress bar follow the
+//! measured delay (`Playback::heard_now`), pause and resume are instant (the stream holds), and
+//! a seek, a skip or a picked song starts the device afresh. A local file the TV can play
+//! (`uzumaki_cast::Media::local`) is played by the TV itself: the local player runs muted as the
+//! app's clock and follows the TV's position (`Event::Position`), seeks are the TV's own.
+//!
+//! A song that follows on by itself is handed to the session as `follow`: the TV plays out what
+//! it still has of the old one, then starts the new one with its title and cover.
+//!
+//! A lost connection is tried again for a minute (`Reconnecting`): the player pauses where the
+//! listener stopped hearing it and plays on once the TV is back; if it doesn't come back, the
+//! music stays paused on this computer at that spot. Leaving the TV for this computer (the picker,
+//! or the TV taken by another app) goes on from where the listener was, as for AirPlay.
 
 use std::time::{Duration, Instant};
 
-use uzumaki_cast::{CastDevice, Event, Meta, State as CastState};
+use uzumaki_cast::{CastDevice, Event, Media, Meta, State as CastState};
 
 use super::State;
+use crate::bridge::PlayState;
 use crate::models::Song;
 
 #[derive(Default)]
@@ -31,6 +42,18 @@ pub struct Cast {
     pub volume: Option<u8>,
     /// A skip sent to the bridge: the next song MusicKit announces starts the device afresh.
     cut: Option<Instant>,
+    /// Back to this computer from the TV: the bridge's player steps back here when its capture
+    /// ends (the local player does at once).
+    rewind: Option<Rewind>,
+    /// The connection was lost: the player was paused where the listener was (`true`: it was
+    /// playing, so it plays on when the TV is back).
+    lost: Option<bool>,
+}
+
+struct Rewind {
+    to: f64,
+    song: Option<String>,
+    at: Instant,
 }
 
 impl Cast {
@@ -42,6 +65,11 @@ impl Cast {
 
 /// How long a skip waits for MusicKit's next song before it is forgotten.
 const CUT_WAIT: Duration = Duration::from_secs(10);
+/// Less behind than this: no step back on the way to this computer (a fade does).
+const MIN_REWIND: f64 = 0.25;
+const REWIND_TTL: Duration = Duration::from_secs(5);
+/// The local player follows the TV playing its file when they are further apart than this.
+const FOLLOW_GAP: f64 = 0.5;
 
 impl State {
     /// Settings → Speakers → Chromecast is on (or `UZUMAKI_CAST_SPIKE=1`), on a system that has it.
@@ -71,19 +99,32 @@ impl State {
     pub(super) fn cast_event(&mut self, e: Event) -> bool {
         match e {
             Event::State(s) => {
-                // Lyrics and the progress bar follow what the device plays (its measured buffer).
+                // Lyrics and the progress bar follow what the device plays (its measured buffer;
+                // none for a file the TV plays itself).
                 let delay = match &s {
                     CastState::Playing { latency_ms: Some(ms), .. } => f64::from(*ms) / 1000.0,
-                    CastState::Playing { .. } | CastState::Buffering { .. } | CastState::Paused { .. } => self.playback.output_delay,
+                    CastState::Playing { .. } | CastState::Buffering { .. } | CastState::Paused { .. } | CastState::Reconnecting { .. } => self.playback.output_delay,
                     _ => 0.0,
                 };
+                let was = std::mem::replace(&mut self.cast.state, s.clone());
                 if s == CastState::Off {
                     self.cast.volume = None;
                     self.cast.cut = None;
+                    // Lost for good: the player already waits where the listener was.
+                    if self.cast.lost.take().is_none() && matches!(was, CastState::Playing { .. }) {
+                        self.cast_leave();
+                    }
                 }
-                let changed = (delay - self.playback.output_delay).abs() > 0.01 || std::mem::discriminant(&s) != std::mem::discriminant(&self.cast.state);
+                if matches!(s, CastState::Playing { .. } | CastState::Paused { .. })
+                    && let Some(was_playing) = self.cast.lost.take()
+                {
+                    eprintln!("cast: the TV is back{}", if was_playing { ": playing on" } else { "" });
+                    if was_playing {
+                        self.play();
+                    }
+                }
+                let changed = (delay - self.playback.output_delay).abs() > 0.01 || std::mem::discriminant(&s) != std::mem::discriminant(&was);
                 self.playback.output_delay = delay;
-                self.cast.state = s;
                 changed
             }
             Event::Capture(on) => {
@@ -93,7 +134,8 @@ impl State {
             }
             Event::Failed { name, why, detail } => {
                 eprintln!("cast: {why:?} {detail}");
-                self.toast = Some(format!("{} Playing on {}.", why.message(&name), crate::ui::this_computer()));
+                let now = if why == uzumaki_cast::Why::Lost && !self.playback.state.is_active() { "Paused" } else { "Playing" };
+                self.toast = Some(format!("{} {now} on {}.", why.message(&name), crate::ui::this_computer()));
                 true
             }
             Event::Devices(list) => {
@@ -106,6 +148,62 @@ impl State {
                 self.cast.volume = Some(v);
                 changed && self.ui.airplay.open
             }
+            Event::Position { key, at } => {
+                self.cast_follow(&key, at);
+                false
+            }
+            Event::Interrupted { silent_ms } => {
+                self.cast_interrupted(silent_ms);
+                true
+            }
+        }
+    }
+
+    /// The TV plays the local file itself: the (muted) local player, the app's clock, stays with it.
+    fn cast_follow(&mut self, key: &str, at: f64) {
+        let pb = &self.playback;
+        if !pb.local || pb.state != PlayState::Playing || pb.song.as_ref().is_none_or(|s| s.id != key) {
+            return;
+        }
+        if (pb.position_now() - at).abs() > FOLLOW_GAP {
+            self.seek_player_as(at, true);
+        }
+    }
+
+    /// The connection to the TV was lost `silent_ms` ago: the player pauses where the listener
+    /// stopped hearing it, until the TV is back (or for good, on this computer).
+    fn cast_interrupted(&mut self, silent_ms: u64) {
+        let was_playing = self.playback.state.is_active();
+        let to = (self.playback.position_now() - self.playback.output_delay - silent_ms as f64 / 1000.0).max(0.0);
+        eprintln!("cast: connection lost; the player waits at {to:.2} s, where the listener was");
+        self.cast.lost = Some(was_playing);
+        // Not a pause of the TV (there's none to tell): the session reconnects on its own.
+        if let Some(name) = self.cast.state.name().map(str::to_string) {
+            self.cast.state = CastState::Reconnecting { name };
+        }
+        if was_playing {
+            self.pause();
+        }
+        if self.playback.song.is_some() {
+            self.seek_player(to);
+        }
+    }
+
+    /// Back to this computer from the TV, which played `output_delay` behind the player: the
+    /// music goes on from where the listener was. The local player steps back at once; the
+    /// bridge's when its capture ends (`cast_capture`).
+    fn cast_leave(&mut self) {
+        self.cast.rewind = None;
+        let behind = self.playback.output_delay;
+        if behind < MIN_REWIND || self.resume.is_some() || self.playback.state != PlayState::Playing {
+            return;
+        }
+        let to = (self.playback.position_now() - behind).max(0.0);
+        eprintln!("cast: back to this computer {:.0} ms before the player, where the listener was ({to:.2} s)", behind * 1000.0);
+        if self.playback.local {
+            self.seek_player_as(to, true);
+        } else {
+            self.cast.rewind = Some(Rewind { to, song: self.playback.song.as_ref().map(|s| s.id.clone()), at: Instant::now() });
         }
     }
 
@@ -113,12 +211,25 @@ impl State {
     pub(super) fn cast_capture(&mut self) {
         let Some(c) = crate::cast::controller() else { return };
         c.set_bridge(self.bridge.is_some());
+        let rewind = if self.cast.capture { None } else { self.cast_rewind_bridge() };
         let Some(b) = &self.bridge else { return };
         if self.cast.capture {
             b.airplay_to(true, Some(&c.socket()));
         } else if !self.airplay.capture {
-            b.airplay(false);
+            b.airplay_off_at(rewind);
         }
+    }
+
+    /// The bridge's capture for the TV ends: its player goes back to the spot `cast_leave` kept,
+    /// if the same song is still on. That spot is where the page unmutes.
+    fn cast_rewind_bridge(&mut self) -> Option<f64> {
+        let r = self.cast.rewind.take()?;
+        let song = self.playback.song.as_ref().map(|s| s.id.clone());
+        if self.playback.local || r.at.elapsed() > REWIND_TTL || r.song != song {
+            return None;
+        }
+        self.seek_player(r.to);
+        Some(r.to)
     }
 
     pub(super) fn cast_capture_ready(&self, ready: bool, error: Option<&str>) {
@@ -155,18 +266,37 @@ impl State {
             return; // already there (or on its way)
         }
         self.cast.volume = None;
+        self.cast.lost = None;
         match crate::cast::controller() {
-            Some(c) => c.connect(device, self.cast_meta()),
+            Some(c) => {
+                c.connect(device, self.cast_meta());
+                self.cast_first_media(c);
+            }
             // Headless: the choice shows at once.
             None => self.cast.state = CastState::Connecting { name: device.name },
         }
     }
 
-    /// Back to this computer (the session there was ends; the TV stops at once).
+    /// A local file plays: the TV starts with it (where the player is), if it can play it itself.
+    fn cast_first_media(&self, c: &uzumaki_cast::Controller) {
+        if let Some(song) = &self.playback.song {
+            let media = cast_media(song);
+            if media.is_file() {
+                c.play(media, meta_of(Some(song)), self.playback.position_now(), false);
+            }
+        }
+    }
+
+    /// Back to this computer (the session there was ends; the TV stops at once), from where the
+    /// listener was.
     pub fn cast_stop(&mut self) {
         if !self.cast.active() {
             return;
         }
+        if matches!(self.cast.state, CastState::Playing { .. }) {
+            self.cast_leave();
+        }
+        self.cast.lost = None;
         match crate::cast::controller() {
             Some(c) => c.stop(),
             None => self.cast.state = CastState::Off,
@@ -190,11 +320,6 @@ impl State {
         self.cast_stop();
     }
 
-    /// The device has a session that plays or will (a command now reaches it).
-    fn cast_live(&self) -> bool {
-        matches!(self.cast.state, CastState::Loading { .. } | CastState::Playing { .. } | CastState::Buffering { .. } | CastState::Paused { .. })
-    }
-
     /// The user paused (true) or played on: the TV does the same at once. Its buffer holds the
     /// next seconds and the stream sends nothing meanwhile, so it resumes in step with the player.
     pub(super) fn cast_pause(&self, on: bool) {
@@ -210,31 +335,33 @@ impl State {
         }
     }
 
-    /// A seek: the device drops the seconds it still had and starts at the new place.
-    pub(super) fn cast_seeked(&self) {
-        if self.cast_live()
+    /// A seek to `to` s: a file the TV plays seeks there itself; the live stream drops the
+    /// seconds it still had and starts at the new place.
+    pub(super) fn cast_seeked(&self, to: f64) {
+        if self.cast.active()
             && let Some(c) = crate::cast::controller()
         {
-            c.restart(Some(self.cast_meta()));
+            c.seek(to, Some(self.cast_meta()));
         }
     }
 
-    /// `song` is about to start in place of the playing one. Unless the playing one reached its
-    /// end by itself (then its last seconds are still on their way), the device starts afresh,
-    /// with the new song's title.
-    pub(super) fn cast_song_change(&self, song: &Song) {
-        if !self.cast_live() || self.song_ended() {
+    /// `song` is about to start (`at` s in) in place of the playing one. If the playing one
+    /// reached its end by itself, the TV plays out what it still has of it first; otherwise it
+    /// starts afresh at once. Either way with the new song's title.
+    pub(super) fn cast_song_change(&self, song: &Song, at: f64) {
+        if !self.cast.active() {
             return;
         }
+        let at = if at > 0.0 && (song.duration <= 0.0 || at < song.duration) { at } else { 0.0 };
         if let Some(c) = crate::cast::controller() {
-            c.restart(Some(meta_of(Some(song))));
+            c.play(cast_media(song), meta_of(Some(song)), at, self.song_ended());
         }
     }
 
     /// Next or Previous sent to MusicKit: the old audio is dropped now, and the device starts
     /// afresh when the new song is announced (`cast_new_song`), so it shows its title.
     pub(super) fn cast_skip(&mut self) {
-        if !self.cast_live() {
+        if !self.cast.active() {
             return;
         }
         self.cast.cut = Some(Instant::now());
@@ -243,15 +370,15 @@ impl State {
         }
     }
 
-    /// MusicKit announced another song. After a skip: the device starts afresh with it. A song
-    /// that follows on by itself plays on without a gap (the device keeps the old title).
+    /// MusicKit announced another song: after a skip the device starts afresh with it; a song
+    /// that follows on by itself waits until the TV has played out the old one, then shows.
     pub(super) fn cast_new_song(&mut self) {
-        let Some(t) = self.cast.cut.take() else { return };
-        if t.elapsed() > CUT_WAIT || !self.cast_live() {
+        let cut = self.cast.cut.take().is_some_and(|t| t.elapsed() <= CUT_WAIT);
+        if !self.cast.active() {
             return;
         }
         if let Some(c) = crate::cast::controller() {
-            c.restart(Some(self.cast_meta()));
+            c.play(Media::Live, self.cast_meta(), 0.0, !cut);
         }
     }
 
@@ -270,21 +397,32 @@ impl State {
         match to {
             CastTo::List | CastTo::Status => Ok(c.status_lines()),
             CastTo::Off => {
-                c.stop();
+                self.cast_stop();
                 Ok(vec!["back to this computer".into()])
             }
             CastTo::Pause => sent(c.pause()),
             CastTo::Resume => sent(c.resume()),
-            CastTo::Reload => sent(c.restart(Some(self.cast_meta()))),
+            CastTo::Reload => sent(c.reload(Some(self.cast_meta()))),
             CastTo::Volume(v) => sent(c.set_volume(v)),
             CastTo::Name(name) => {
                 if self.airplay.active() {
                     self.airplay_pick(None);
                 }
+                self.cast.lost = None;
                 c.connect_named(&name, self.cast_meta());
+                self.cast_first_media(c);
                 Ok(vec![format!("connecting to “{name}” (uzu cast status)")])
             }
         }
+    }
+}
+
+/// What the device plays for `song`: a local file it can play itself, else the live stream
+/// (`UZUMAKI_CAST_FILES=0`: always the live stream).
+fn cast_media(song: &Song) -> Media {
+    match song.local_path() {
+        Some(p) if crate::cast::files() => Media::local(p, song.duration, &song.id),
+        _ => Media::Live,
     }
 }
 
@@ -354,7 +492,7 @@ mod tests {
         let mut s = State::offline();
         assert!(s.cast_event(Event::Failed { name: "TV".into(), why: uzumaki_cast::Why::Lost, detail: String::new() }));
         let toast = s.toast.clone().unwrap();
-        assert!(toast.contains("was lost") && toast.contains(crate::ui::this_computer()), "{toast}");
+        assert!(toast.contains("Lost the connection") && toast.contains(crate::ui::this_computer()), "{toast}");
         assert!(s.cast_event(Event::State(CastState::Connecting { name: "TV".into() })));
         assert_eq!(s.cast.state.name(), Some("TV"));
         s.ui.airplay.open = true;
@@ -382,5 +520,91 @@ mod tests {
         assert!(s.cast.cut.is_some());
         s.cast_new_song();
         assert!(s.cast.cut.is_none(), "used once");
+    }
+
+    fn playing(s: &mut State, song: Song, at: f64, local: bool) {
+        s.playback.song = Some(song);
+        s.playback.local = local;
+        s.playback.duration = 300.0;
+        s.playback.position = at;
+        s.playback.position_at = Some(crate::clock::now());
+        s.playback.state = PlayState::Playing;
+    }
+
+    fn local_song(name: &str) -> Song {
+        Song { id: format!("file:///music/{name}.mp3"), title: name.into(), ..crate::state::tests::song(name) }
+    }
+
+    #[test]
+    fn a_lost_connection_pauses_where_the_listener_was_and_plays_on_when_back() {
+        let mut s = State::offline();
+        playing(&mut s, local_song("x"), 100.0, true);
+        s.cast_event(Event::State(CastState::Playing { name: "TV".into(), latency_ms: Some(2000) }));
+        assert!(s.cast_event(Event::Interrupted { silent_ms: 3000 }));
+        assert_eq!(s.cast.state, CastState::Reconnecting { name: "TV".into() });
+        assert_eq!(s.cast.lost, Some(true));
+        // 100 s now, the TV 2 s behind, and nothing heard for the last 3 s: 95 s.
+        assert!((s.playback.position - 95.0).abs() < 0.1, "{}", s.playback.position);
+        let sent = s.local_sent.borrow().clone();
+        assert_eq!(sent.first().map(String::as_str), Some("pause"), "{sent:?}");
+        assert!(sent.iter().any(|x| x.starts_with("seek 95")), "{sent:?}");
+        // The TV is back: the player plays on.
+        s.playback.state = PlayState::Paused;
+        s.cast_event(Event::State(CastState::Playing { name: "TV".into(), latency_ms: None }));
+        assert!(s.cast.lost.is_none());
+        assert_eq!(s.local_sent.borrow().last().map(String::as_str), Some("resume"));
+    }
+
+    #[test]
+    fn given_up_it_stays_paused_on_this_computer() {
+        let mut s = State::offline();
+        playing(&mut s, local_song("x"), 50.0, true);
+        s.cast_event(Event::State(CastState::Playing { name: "TV".into(), latency_ms: Some(2000) }));
+        s.cast_event(Event::Interrupted { silent_ms: 1000 });
+        s.playback.state = PlayState::Paused;
+        s.cast_event(Event::State(CastState::Off));
+        s.cast_event(Event::Failed { name: "TV".into(), why: uzumaki_cast::Why::Lost, detail: String::new() });
+        let toast = s.toast.clone().unwrap();
+        assert!(toast.contains("Paused on"), "{toast}");
+        assert!(!s.local_sent.borrow().iter().any(|x| x == "resume"));
+        assert!(s.cast.rewind.is_none() && s.cast.lost.is_none());
+    }
+
+    #[test]
+    fn back_to_this_computer_from_where_the_listener_was() {
+        // The bridge: its player steps back when its capture ends.
+        let mut s = State::offline();
+        playing(&mut s, crate::state::tests::song("a"), 60.0, false);
+        s.cast_event(Event::State(CastState::Playing { name: "TV".into(), latency_ms: Some(2500) }));
+        s.cast_stop(); // headless: Off at once
+        assert_eq!(s.cast.state, CastState::Off);
+        let to = s.cast_rewind_bridge().expect("a step back");
+        assert!((to - 57.5).abs() < 0.1, "{to}");
+        // The local player: at once, quietly.
+        let mut s = State::offline();
+        playing(&mut s, local_song("x"), 30.0, true);
+        s.cast_event(Event::State(CastState::Playing { name: "TV".into(), latency_ms: Some(2000) }));
+        s.cast_event(Event::State(CastState::Off)); // the TV was taken by another app
+        assert!(s.local_sent.borrow().iter().any(|x| x.starts_with("seek quietly 28")), "{:?}", s.local_sent.borrow());
+        // A file the TV played itself: no delay, no step back.
+        let mut s = State::offline();
+        playing(&mut s, local_song("x"), 30.0, true);
+        s.cast_event(Event::State(CastState::Playing { name: "TV".into(), latency_ms: Some(0) }));
+        assert_eq!(s.playback.output_delay, 0.0);
+        s.cast_event(Event::State(CastState::Off));
+        assert!(s.local_sent.borrow().is_empty());
+    }
+
+    #[test]
+    fn the_local_player_follows_the_tv_playing_its_file() {
+        let mut s = State::offline();
+        let x = local_song("x");
+        playing(&mut s, x.clone(), 12.0, true);
+        s.cast_event(Event::Position { key: x.id.clone(), at: 11.8 });
+        assert!(s.local_sent.borrow().is_empty(), "close enough");
+        s.cast_event(Event::Position { key: x.id.clone(), at: 10.0 });
+        assert_eq!(s.local_sent.borrow().clone(), ["seek quietly 10"]);
+        s.cast_event(Event::Position { key: "file:///music/other.mp3".into(), at: 1.0 });
+        assert_eq!(s.local_sent.borrow().len(), 1, "another song's position is not ours");
     }
 }
