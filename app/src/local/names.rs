@@ -15,8 +15,10 @@
 //! the folders `Artist/Album/` below the music folder give artist and album (a disc folder such
 //! as `CD1` is skipped); one folder alone is left to the album stand-in (the folder's name).
 //!
-//! Brackets stay in the title for display (a remix is another song); `without_brackets` is for
-//! LRCLIB's retry.
+//! Download junk at the end of the title is dropped: a YouTube id (`-D4y_acTR0MY`), a numeric id
+//! (`-286911839`) and bracketed labels like `(High Quality)`, `[HQ]`, `(Official Video)`,
+//! `(Lyrics)`. Other brackets stay in the title for display (a remix is another song); `without_brackets` is for
+//! LRCLIB's retry. Digits that belong to the title (`1978`) stay.
 
 use std::path::{Component, Path};
 
@@ -51,7 +53,8 @@ pub fn guess(path: &Path, root: Option<&Path>, title_tag: Option<&str>) -> Guess
 
 /// The file name alone (no extension).
 pub fn parse_name(stem: &str) -> Guess {
-    let clean_stem = squeeze(stem);
+    // Junk first: a YouTube id has `_` in it, which squeezing would turn into a space.
+    let clean_stem = squeeze(&strip_junk(stem));
     let mut parts = split(&clean_stem);
     let g = Guess { title: clean_stem, ..Guess::default() };
     if parts.is_empty() {
@@ -187,6 +190,56 @@ fn strip_track(s: &str) -> Option<(u32, &str)> {
     (!title.is_empty()).then_some((n, title))
 }
 
+/// Bracketed labels that are download junk, not part of a song's name (lowercase).
+const JUNK: &[&str] = &[
+    "hq", "hd", "4k", "1080p", "720p", "high quality", "hd audio", "hq audio", "lyrics", "lyric video", "with lyrics",
+    "audio", "video", "music video", "visualizer", "visualiser", "full album", "free download", "download",
+];
+
+fn is_junk_label(inner: &str) -> bool {
+    let l = inner.trim().to_lowercase();
+    JUNK.contains(&l.as_str()) || l.starts_with("official ")
+}
+
+/// A YouTube id: 11 of `[A-Za-z0-9_-]` that look random (a digit, `_`, `-`, or a capital inside).
+fn is_youtube_id(t: &str) -> bool {
+    let b = t.as_bytes();
+    b.len() == 11
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c == b'-')
+        && (b.iter().any(|c| c.is_ascii_digit() || *c == b'_' || *c == b'-') || (b[1..].iter().any(u8::is_ascii_uppercase) && b.iter().any(u8::is_ascii_lowercase)))
+}
+
+/// The title without a trailing download id (`-D4y_acTR0MY`, `-286911839`) and trailing junk
+/// labels (`(High Quality)`, `[Official Video]`), in any order. Never empties the title.
+fn strip_junk(title: &str) -> String {
+    let mut t = title.trim();
+    loop {
+        let before = t;
+        // The id sticks to the last word with a hyphen, no spaces.
+        if let Some(i) = t.rfind('-') {
+            let (head, id) = (t[..i].trim_end(), &t[i + 1..]);
+            let numeric = id.len() >= 6 && id.bytes().all(|b| b.is_ascii_digit());
+            if !head.is_empty() && !t[..i].ends_with(' ') && !id.is_empty() && (numeric || is_youtube_id(id)) {
+                t = head;
+            }
+        }
+        // A trailing junk label.
+        for (open, close) in [('(', ')'), ('[', ']')] {
+            if t.ends_with(close)
+                && let Some(i) = t.rfind(open)
+                && is_junk_label(&t[i + 1..t.len() - 1])
+                && !t[..i].trim().is_empty()
+            {
+                t = t[..i].trim_end();
+            }
+        }
+        if t == before {
+            break;
+        }
+    }
+    t.to_string()
+}
+
 /// The title without its trailing `(…)` and `[…]` groups ("Song (X Remix) [Video]" → "Song");
 /// None when there is none or nothing would be left.
 pub fn without_brackets(title: &str) -> Option<String> {
@@ -271,7 +324,7 @@ mod tests {
     #[test]
     fn extra_parts_join_into_the_title_and_brackets_stay() {
         assert_eq!(g("Artist - Song - Live in Paris"), full("Song - Live in Paris", Some("Artist"), None, None));
-        assert_eq!(g("Artist - Song (Radio Edit) [HQ]"), full("Song (Radio Edit) [HQ]", Some("Artist"), None, None));
+        assert_eq!(g("Artist - Song (Radio Edit) [Remix]"), full("Song (Radio Edit) [Remix]", Some("Artist"), None, None));
         assert_eq!(g("-"), full("-", None, None, None));
         assert_eq!(g(""), full("", None, None, None));
     }
@@ -301,6 +354,30 @@ mod tests {
         assert_eq!(guess(path, None, Some("around the world")).artist.as_deref(), Some("Daft Punk"));
         let live = Path::new("/m/Music/Song - Live.mp3");
         assert_eq!(guess(live, None, Some("Song")).artist, None);
+    }
+
+    #[test]
+    fn download_junk_is_dropped_from_derived_titles() {
+        assert_eq!(
+            g("Eruption - One Way Ticket 1978 (High Quality)-D4y_acTR0MY"),
+            full("One Way Ticket 1978", Some("Eruption"), None, None)
+        );
+        assert_eq!(g("KILL YOURSELF (PART IV)-286911839"), full("KILL YOURSELF (PART IV)", None, None, None));
+        assert_eq!(g("Artist - Song [HQ]").title, "Song");
+        assert_eq!(g("Artist - Song (Official Video)").title, "Song");
+        assert_eq!(g("Artist - Song (Official Music Video) [HD]").title, "Song");
+        assert_eq!(g("Artist - Song (Lyrics)-286911839").title, "Song");
+        assert_eq!(g("Artist - Song-D4y_acTR0MY (Lyrics)").title, "Song");
+        // Not junk: real hyphens, short ids, mixed-in words, labels that are part of the song.
+        assert_eq!(g("Jay-Z - Song").title, "Song");
+        assert_eq!(g("Artist - Re-Recordings").title, "Re-Recordings");
+        assert_eq!(g("Artist - Spider-Man").title, "Spider-Man");
+        assert_eq!(g("Artist - Song (Live)").title, "Song (Live)");
+        assert_eq!(g("Artist - Song (Part 2)").title, "Song (Part 2)");
+        assert_eq!(g("Artist - Brightsides-Interludes").title, "Brightsides-Interludes");
+        assert_eq!(g("Artist - Track-1978").title, "Track-1978");
+        // Only junk: kept.
+        assert_eq!(g("(Lyrics)").title, "(Lyrics)");
     }
 
     #[test]
