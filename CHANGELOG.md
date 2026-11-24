@@ -5,6 +5,17 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Fixed
+- **Local files: a song without an album no longer takes another song's cover or a made-up album called after the
+  music folder.** A cover is the song's own embedded picture, else an image (`cover`/`folder`/`front`/`album`) in its
+  folder (or the album folder above a `CD1`/`Disc 2` folder); songs only borrow each other's art when they share a
+  real album (tagged, or read from `Artist/Album/` or the file name), never because they sit in the same folder.
+  Otherwise the song shows the initials tile. A file directly in a music folder with no album has none (no "Music"
+  album, not merged with other artists' songs): it is its own single in Albums. The index is read again once.
+- **Local files: download junk is dropped from names read from a file name:** a YouTube id (`-D4y_acTR0MY`), a
+  numeric id (`-286911839`) and labels like `(High Quality)`, `[HQ]`, `(Official Video)`, `(Lyrics)`.
+  `Eruption - One Way Ticket 1978 (High Quality)-D4y_acTR0MY.mp3` is "One Way Ticket 1978" by Eruption.
+
 ### Added
 - **Local files without tags are named from their file and folders.** `Artist - Title`, `04 - Title`, `04. Title`,
   `NN - Artist - Title`, `Artist - Album - 04 Title` and `Artist/Album/04 Title.flac` give the song its artist,

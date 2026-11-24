@@ -154,7 +154,9 @@ pub fn derive(songs: &mut [Song], album_artists: &[String], roots: &[PathBuf]) -
             song.artist = UNKNOWN_ARTIST.into();
         }
         if clean(&song.album).is_none() {
-            song.album = folder.clone();
+            // The folder's name stands in, unless the file sits directly in a music folder
+            // ("Music" is no album): then the song has none and is its own single below.
+            song.album = if path.parent().is_some_and(|p| roots.iter().any(|r| r == p)) { String::new() } else { folder.clone() };
             song.album_is_fallback = true;
         }
         match album_artists.get(i).and_then(|a| clean(a)) {
@@ -185,7 +187,8 @@ pub fn derive(songs: &mut [Song], album_artists: &[String], roots: &[PathBuf]) -
         let album_artist = aa[i].clone();
         // An untagged album is its folder (named after it, by Unknown Artist): two folders called
         // "CD1" stay two albums. A tagged album keeps its discs' folders together.
-        let mut key = format!("{}\0{}", fold(&album_artist), fold(&song.album));
+        let single = song.album.is_empty();
+        let mut key = if single { format!("single\0{}", song.id) } else { format!("{}\0{}", fold(&album_artist), fold(&song.album)) };
         if song.album == folder && album_artist == UNKNOWN_ARTIST {
             key.push('\0');
             key.push_str(&path.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default());
@@ -194,7 +197,7 @@ pub fn derive(songs: &mut [Song], album_artists: &[String], roots: &[PathBuf]) -
             albums.push(Collection {
                 kind: CollectionKind::Album,
                 id: format!("{ALBUM_PREFIX}{}", hash16(key)),
-                title: song.album.clone(),
+                title: if single { song.title.clone() } else { song.album.clone() },
                 subtitle: album_artist.clone(),
                 artwork: None,
                 year: None,
@@ -508,6 +511,25 @@ pub(crate) mod tests {
         assert_eq!(v.artists[0].name, UNKNOWN_ARTIST);
         assert_eq!(v.artist_songs[0].len(), 3);
         assert_eq!(v.artist_albums[0].len(), 2);
+    }
+
+    #[test]
+    fn songs_directly_in_a_music_folder_without_an_album_are_not_an_album_called_music() {
+        let mut one = track("/m/Eruption - One Way Ticket.mp3", "One Way Ticket", "Eruption", "", "Eruption", None, None);
+        one.album_fallback = true;
+        let mut two = track("/m/Powerade.wav", "Powerade", "Unknown Artist", "", "Unknown Artist", None, None);
+        two.album_fallback = true;
+        // An old index entry that still has the folder's name (rescanned in practice).
+        let mut old = track("/m/legends.mp3", "legends", "Juice WRLD", "", "", None, None);
+        old.album_fallback = true;
+        let (songs, v) = view(&[one, two, old]);
+        assert!(songs.iter().all(|s| s.album.is_empty() && s.album_is_fallback), "{:?}", songs.iter().map(|s| &s.album).collect::<Vec<_>>());
+        assert_eq!(v.albums.len(), 3, "each is its own single, none merged");
+        let mut titles: Vec<_> = v.albums.iter().map(|a| a.title.as_str()).collect();
+        titles.sort();
+        assert_eq!(titles, ["One Way Ticket", "Powerade", "legends"]);
+        assert!(v.albums.iter().all(|a| a.title != "m" && a.track_count == Some(1)));
+        assert_eq!(songs[0].tile_name(), "One Way Ticket");
     }
 
     #[test]

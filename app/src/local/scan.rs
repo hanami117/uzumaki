@@ -6,14 +6,17 @@
 //!   and reads tags + duration with lofty. A file whose path, mtime and size match an entry of
 //!   `previous` reuses it without opening the file, so a rescan of an unchanged library only
 //!   stats files.
-//! - Covers: the embedded front cover (from any of the file's tags), else
+//! - Covers: a song's own: the embedded front cover (from any of the file's tags), else
 //!   `cover|folder|front|album.(jpg|jpeg|png)` beside the file, else in the folder above when the
 //!   file sits in a disc folder (`CD1`, `Disc 2`). Each folder is looked at once per scan. One
-//!   thumbnail per album (max 600 px, JPEG) in `art_dir`, named by a hash of album artist +
-//!   album (else the folder). `LocalTrack::cover` is that file's path.
+//!   thumbnail per real album (max 600 px, JPEG) in `art_dir`, named by a hash of album artist +
+//!   album, shared by its songs. A song without a real album (no album tag, none read from the
+//!   names; the folder's name stands in for one) has its own art or its folder's image and never
+//!   another song's embedded art. `LocalTrack::cover` is that file's path.
 //! - Missing tags fall back to what the file name and folders say (`names`, marked in
 //!   `LocalTrack::guessed`): `Artist - Title`, `NN - Title`, `Artist/Album/NN Title`. Else title →
-//!   file stem, artist → "Unknown Artist", album → folder name.
+//!   file stem, artist → "Unknown Artist", album → folder name (none for a file directly in a
+//!   music folder: "Music" is no album).
 //!   Track and disc numbers read the leading number (`3/12`, `03 of 12`); a compilation flag
 //!   (`TCMP`, `cpil`, `COMPILATION`) without an album artist makes it "Various Artists".
 //! - A music folder that can't be read (an unmounted drive, a network share that's away) keeps
@@ -109,7 +112,7 @@ pub fn art_dir() -> PathBuf {
 }
 
 /// Version of the index file; another version reads as empty (a rescan rebuilds it).
-const INDEX_VERSION: u32 = 4;
+const INDEX_VERSION: u32 = 5;
 
 /// The album artist of a compilation without an album artist tag.
 pub const VARIOUS_ARTISTS: &str = "Various Artists";
@@ -213,10 +216,11 @@ pub fn scan(folders: &[PathBuf], previous: &[LocalTrack], art_dir: &Path, mut pr
     }
     progress(tracks.len());
 
-    // A track without a cover of its own takes its album's thumbnail when another track made one.
+    // A track without a cover of its own takes its album's thumbnail when another track of the
+    // same real album made one (never across songs that only share a folder).
     for t in &mut tracks {
-        if t.cover.is_none() {
-            let key = album_key(t, !t.album_fallback);
+        if t.cover.is_none() && !t.album_fallback {
+            let key = album_key(t);
             if let Some(c) = covers.thumbs.get(&key) {
                 t.cover = Some(c.clone());
             }
@@ -315,13 +319,9 @@ pub(crate) fn hash16(s: &str) -> String {
     format!("{h:016x}")
 }
 
-/// Thumbnail name of an album: album artist + album, or the folder when there's no album tag.
-fn album_key(t: &LocalTrack, has_album: bool) -> String {
-    if has_album {
-        hash16(&format!("{}\0{}", t.album_artist, t.album))
-    } else {
-        hash16(&t.path.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
-    }
+/// Thumbnail name of a real album: album artist + album.
+fn album_key(t: &LocalTrack) -> String {
+    hash16(&format!("{}\0{}", t.album_artist, t.album))
 }
 
 fn read_track(path: &Path, mtime: u64, size: u64, root: Option<&Path>, art_dir: &Path, covers: &mut Covers) -> LocalTrack {
@@ -334,7 +334,9 @@ fn read_track(path: &Path, mtime: u64, size: u64, root: Option<&Path>, art_dir: 
     };
     let duration = tagged.as_ref().map_or(0.0, |f| f.properties().duration().as_secs_f64());
 
-    let folder_name = path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+    // The folder's name stands in for a missing album, except for a file directly in a music
+    // folder ("Music" is no album): that song has none.
+    let folder_name = path.parent().filter(|p| root != Some(*p)).and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
     let title_tag = tag.and_then(|t| clean(t.title()));
     let album_tag = tag.and_then(|t| clean(t.album()));
     let artist_tag = tag.and_then(|t| clean(t.artist()));
@@ -359,6 +361,7 @@ fn read_track(path: &Path, mtime: u64, size: u64, root: Option<&Path>, art_dir: 
             .or_else(|| clean(t.get_string(ItemKey::Year).or_else(|| t.get_string(ItemKey::RecordingDate))).map(|y| y.chars().take(4).collect()))
     });
 
+    let own_art = || tagged.as_ref().and_then(|f| tag.and_then(embedded_cover).or_else(|| f.tags().iter().find_map(embedded_cover)));
     let mut track = LocalTrack {
         path: path.to_path_buf(),
         mtime,
@@ -379,23 +382,44 @@ fn read_track(path: &Path, mtime: u64, size: u64, root: Option<&Path>, art_dir: 
         cover: None,
     };
 
-    let key = album_key(&track, album_named);
-    track.cover = match covers.thumbs.get(&key) {
-        Some(c) => Some(c.clone()),
-        None => {
-            let thumb = art_dir.join(format!("{key}.jpg"));
-            if thumb.exists() {
-                covers.thumbs.insert(key, thumb.clone());
-                Some(thumb)
-            } else {
-                let embedded = tagged.as_ref().and_then(|f| tag.and_then(embedded_cover).or_else(|| f.tags().iter().find_map(embedded_cover)));
-                let data = embedded.or_else(|| folder_cover(path, &mut covers.folders));
-                data.filter(|d| write_thumbnail(d, art_dir, &thumb)).map(|_| {
+    track.cover = if album_named {
+        // A real album shares one thumbnail: the first song's own art, else the folder's image.
+        let key = album_key(&track);
+        match covers.thumbs.get(&key) {
+            Some(c) => Some(c.clone()),
+            None => {
+                let thumb = art_dir.join(format!("{key}.jpg"));
+                if thumb.exists() {
                     covers.thumbs.insert(key, thumb.clone());
-                    thumb
-                })
+                    Some(thumb)
+                } else {
+                    let data = own_art().or_else(|| folder_cover(path, &mut covers.folders).map(|(_, d)| d));
+                    data.filter(|d| write_thumbnail(d, art_dir, &thumb)).map(|_| {
+                        covers.thumbs.insert(key, thumb.clone());
+                        thumb
+                    })
+                }
             }
         }
+    } else {
+        // No real album (none tagged, none in the names, only a folder's name or nothing): the
+        // song's own art, else an image in its folder. Never another song's embedded art.
+        let own = own_art().and_then(|d| {
+            let thumb = art_dir.join(format!("{}.jpg", hash16(&format!("file\0{}", path.display()))));
+            write_thumbnail(&d, art_dir, &thumb).then_some(thumb)
+        });
+        own.or_else(|| {
+            let (img, data) = folder_cover(path, &mut covers.folders)?;
+            let key = hash16(&format!("image\0{}", img.display()));
+            if let Some(c) = covers.thumbs.get(&key) {
+                return Some(c.clone());
+            }
+            let thumb = art_dir.join(format!("{key}.jpg"));
+            (thumb.exists() || write_thumbnail(&data, art_dir, &thumb)).then(|| {
+                covers.thumbs.insert(key, thumb.clone());
+                thumb
+            })
+        })
     };
     track
 }
@@ -443,10 +467,11 @@ fn cover_in(dir: &Path, seen: &mut HashMap<PathBuf, Option<PathBuf>>) -> Option<
 }
 
 /// The cover picture beside the file, else (in a disc folder) in the album's folder above.
-fn folder_cover(file: &Path, seen: &mut HashMap<PathBuf, Option<PathBuf>>) -> Option<Vec<u8>> {
+fn folder_cover(file: &Path, seen: &mut HashMap<PathBuf, Option<PathBuf>>) -> Option<(PathBuf, Vec<u8>)> {
     let dir = file.parent()?;
     let pic = cover_in(dir, seen).or_else(|| dir.parent().filter(|_| is_disc_folder(dir)).and_then(|up| cover_in(up, seen)))?;
-    fs::read(pic).ok()
+    let data = fs::read(&pic).ok()?;
+    Some((pic, data))
 }
 
 /// Decodes `data`, shrinks it to at most `COVER_MAX` px and saves a JPEG at `thumb` (atomically).
@@ -589,6 +614,77 @@ mod tests {
         let idx = d.join("index.json");
         save_index(&idx, &t);
         assert_eq!(load_index(&idx), t);
+    }
+
+    /// A music folder shaped like a real one: tagged songs with art, a song with a title and an
+    /// artist but no album, and untagged downloads, all directly in it.
+    #[test]
+    fn a_song_without_an_album_never_borrows_another_songs_art() {
+        let d = tmp_dir("noborrow");
+        let art = d.join("art-dir");
+        let music = d.join("Music");
+        make(&music.join("11. Antarctica.wav"), &[("title", "Antarctica"), ("artist", "$uicideboy$"), ("album", "Dark Side of the Clouds"), ("track", "11")], Some(png(300, 300)));
+        make(&music.join("12 Mafia.wav"), &[("title", "Mafia"), ("artist", "Dark Side € Tony Effe"), ("album", "CRACK MUSICA"), ("track", "12")], Some(png(310, 300)));
+        make(&music.join("BATPIIICORE - BATPIIICORE VOL.2 - 04 KRILYA.wav"), &[("title", "KRILYA"), ("artist", "BATPIIICORE"), ("album", "BATPIIICORE VOL.2"), ("track", "4")], Some(png(320, 300)));
+        make(&music.join("juice wrld - legends.wav"), &[("title", "legends :("), ("artist", "Juice WRLD")], Some(png(330, 300)));
+        make(&music.join("Eruption - One Way Ticket 1978 (High Quality)-D4y_acTR0MY.wav"), &[], None);
+        make(&music.join("KILL YOURSELF (PART IV)-286911839.wav"), &[], None);
+        make(&music.join("Powerade (NOISETIME x Hähnchenteile Remix).wav"), &[], None);
+        let t = run(std::slice::from_ref(&music), &[], &art);
+        assert_eq!(t.len(), 7);
+        let by = |title: &str| t.iter().find(|t| t.title == title).unwrap_or_else(|| panic!("{title} in {:?}", t.iter().map(|t| &t.title).collect::<Vec<_>>()));
+        let show = |t: &LocalTrack| (t.title.clone(), t.artist.clone(), t.album.clone(), t.track, t.cover.is_some());
+
+        // Tags win.
+        assert_eq!(show(by("Antarctica")), ("Antarctica".into(), "$uicideboy$".into(), "Dark Side of the Clouds".into(), Some(11), true));
+        assert_eq!(show(by("Mafia")), ("Mafia".into(), "Dark Side € Tony Effe".into(), "CRACK MUSICA".into(), Some(12), true));
+        assert_eq!(show(by("KRILYA")), ("KRILYA".into(), "BATPIIICORE".into(), "BATPIIICORE VOL.2".into(), Some(4), true));
+        // Title and artist, no album: not "Music"; its own art.
+        let legends = by("legends :(");
+        assert_eq!((legends.artist.as_str(), legends.album.as_str(), legends.album_fallback), ("Juice WRLD", "", true));
+        assert!(legends.cover.is_some());
+        // Untagged: named from the file name, junk off, no album, no cover (not legends').
+        let e = by("One Way Ticket 1978");
+        assert_eq!((e.artist.as_str(), e.album.as_str(), e.cover.as_ref()), ("Eruption", "", None));
+        let k = by("KILL YOURSELF (PART IV)");
+        assert_eq!((k.artist.as_str(), k.album.as_str(), k.cover.as_ref()), ("Unknown Artist", "", None));
+        let p = by("Powerade (NOISETIME x Hähnchenteile Remix)");
+        assert_eq!((p.artist.as_str(), p.album.as_str(), p.cover.as_ref()), ("Unknown Artist", "", None));
+        // Four different covers, one each.
+        let mut covers: Vec<_> = t.iter().filter_map(|t| t.cover.clone()).collect();
+        covers.sort();
+        covers.dedup();
+        assert_eq!(covers.len(), 4);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn art_is_shared_by_real_albums_and_folder_images_but_not_by_folder_name_albums() {
+        let d = tmp_dir("sharing");
+        let art = d.join("art-dir");
+        let music = d.join("Music");
+        // A real album (tagged): the song without its own art takes the album's.
+        make(&music.join("a.wav"), &[("title", "A"), ("album", "Real"), ("artist", "Ann")], Some(png(300, 300)));
+        make(&music.join("b.wav"), &[("title", "B"), ("album", "Real"), ("artist", "Ann")], None);
+        // A real album read from `Artist/Album/`: shared too.
+        make(&music.join("Bob/Second/01 C.wav"), &[("title", "C")], Some(png(310, 300)));
+        make(&music.join("Bob/Second/02 D.wav"), &[], None);
+        // A folder that only gives its name: one song's art stays its own.
+        make(&music.join("Rips/e.wav"), &[("title", "E")], Some(png(320, 300)));
+        make(&music.join("Rips/f.wav"), &[("title", "F")], None);
+        // A folder image serves the songs beside it, albums or not.
+        make(&music.join("Tape/g.wav"), &[("title", "G")], None);
+        make(&music.join("Tape/h.wav"), &[("title", "H")], None);
+        fs::write(music.join("Tape/Cover.png"), png(200, 200)).unwrap();
+        let t = run(std::slice::from_ref(&music), &[], &art);
+        let c = |title: &str| t.iter().find(|t| t.title == title).unwrap_or_else(|| panic!("{title}")).cover.clone();
+        assert!(c("A").is_some() && c("A") == c("B"));
+        assert!(c("C").is_some() && c("C") == c("D"));
+        assert!(c("E").is_some());
+        assert_eq!(c("F"), None, "same folder name is not the same album");
+        assert!(c("G").is_some() && c("G") == c("H"));
+        assert!(c("G") != c("A"));
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]
