@@ -642,13 +642,14 @@ fn a_device_that_goes_away_ends_after_trying_again() {
     let fake = Arc::new(Fake::default());
     let port = fake_device(fake.clone());
     let mut cfg = config(port);
-    cfg.silence_timeout = Duration::from_secs(2);
+    // Above the 2 s status poll, so a loaded machine doesn't lose the device before it plays.
+    cfg.silence_timeout = Duration::from_secs(4);
     cfg.reconnect_for = Duration::from_secs(3);
     let (c, events) = controller(cfg);
     c.connect_named("Fake TV", Meta::default());
     wait("playing", 15, || matches!(c.state(), State::Playing { .. }));
     fake.off.store(true, Ordering::SeqCst);
-    wait("interrupted", 8, || has_event(&events, |e| matches!(e, Event::Interrupted { silent_ms } if *silent_ms >= 1500)));
+    wait("interrupted", 12, || has_event(&events, |e| matches!(e, Event::Interrupted { silent_ms } if *silent_ms >= 3000)));
     wait("given up", 15, || has_event(&events, |e| matches!(e, Event::Failed { why: Why::Lost, .. })));
     wait("off", 5, || c.state() == State::Off && c.idle());
     assert!(events.lock().unwrap().contains(&Event::Capture(false)));
