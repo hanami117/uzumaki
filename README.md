@@ -85,7 +85,7 @@ The screenshots use made-up albums and artists.
 
 ## Install
 
-> **Uzumaki 0.4.3 is out for Linux, macOS and Windows**: the AUR and an AppImage on Linux; a disk image and Homebrew on macOS; an installer and a zip on Windows.
+> **Uzumaki 0.4.4 is out for Linux, macOS and Windows**: the AUR and an AppImage on Linux; a disk image and Homebrew on macOS; an installer and a zip on Windows.
 > The install pages on
 > [getuzumaki.app](https://getuzumaki.app/#download) have the same steps.
 

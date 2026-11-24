@@ -5,6 +5,12 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-24
+
+Own music files get lyrics from LRCLIB and names read from their file names when untagged, no more borrowed covers or
+folder-name albums, and every song row shows the same initials tile when it has no cover. You need an Apple Music
+subscription to stream; local files play without one.
+
 ### Fixed
 - **A song without a cover shows the same initials tile everywhere, not a plain square.** Song rows (Songs, album and
   playlist tracks, Favourite Songs, search, mixed playlists), Up Next and the drag ghost now draw the player bar's tile:
