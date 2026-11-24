@@ -21,6 +21,12 @@ takes each release's notes from its section here.
   Artists) instead of one per artist; track and disc numbers like `3/12` are read; a disc folder (`CD1`,
   `Disc 2`) takes the cover beside it in the album folder, and covers from any of a file's tags count. Your
   music folders are read once again after the update to pick these up.
+- **Chromecast is no longer Beta** (still off by default: Settings → Speakers → Chromecast; macOS and Linux).
+- **Chromecast: local files are played by the TV itself** when it can (MP3, AAC, FLAC up to 96 kHz/24-bit, Ogg,
+  WAV): no delay behind the app, seeks are the TV's own, the file's own quality. Other files (ALAC, AIFF, …) and
+  Apple Music still go as a live stream. Mixed queues switch between the two by themselves.
+- **Chromecast: a song that follows on by itself shows its own title, artist and cover on the TV.** The TV first
+  plays out the old song, then starts the new one from its first note, after a short pause.
 
 ### Fixed
 - The system's media controls (media keys, the Linux panel's player widget, macOS Control Center, the Windows media
@@ -36,6 +42,11 @@ takes each release's notes from its section here.
 - **Local files:** a music folder on a drive that isn't connected keeps its songs (and their places in your
   playlists) instead of dropping them; Settings → Local files says "Not connected".
 - **Mixed playlists:** a song found unavailable shows greyed in the merged list at once.
+- **Chromecast: a lost connection comes back.** TV switched off and on, Wi-Fi dropping or the computer waking from
+  sleep: Uzumaki pauses where you stopped hearing the music, tries again for a minute and plays on. If the TV doesn't
+  come back, the music waits, paused, on this computer at that spot.
+- **Chromecast: back to this computer from where you were** (the picker, `uzu cast off`, or the TV taken by another
+  app), not a couple of seconds further on, as AirPlay does.
 
 ## [0.4.2] - 2026-11-23
 

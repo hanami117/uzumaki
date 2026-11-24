@@ -22,6 +22,12 @@ pub fn forced() -> bool {
     SUPPORTED && std::env::var("UZUMAKI_CAST_SPIKE").is_ok_and(|v| v.trim() == "1")
 }
 
+/// Local files the TV can play go to it as files (it plays them itself); `UZUMAKI_CAST_FILES=0`
+/// sends them through the live stream like Apple Music.
+pub fn files() -> bool {
+    std::env::var("UZUMAKI_CAST_FILES").map_or(true, |v| v.trim() != "0")
+}
+
 /// Creates the controller (once, at launch; nothing runs until a device is looked for or picked).
 pub fn init(sink: impl Fn(Event) + Send + Sync + 'static) -> &'static Controller {
     CONTROLLER.get_or_init(|| {

@@ -211,11 +211,22 @@ impl Fetch {
     }
 }
 
+/// What the current URL serves.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Route {
+    /// The live stream. `from`: the first fetch starts at this hub frame (a song change that
+    /// followed on by itself: the device starts again at the new song) instead of the pre-roll.
+    Live { from: Option<u64> },
+    /// A file of the user's, as it is (`crate::file`).
+    File { path: std::path::PathBuf, content_type: String },
+}
+
 struct State {
     token: String,
     generation: u64,
     allow: Allow,
     newest: Option<Arc<Fetch>>,
+    route: Route,
 }
 
 pub struct Server {
@@ -236,7 +247,7 @@ impl Server {
         let listener = TcpListener::bind((bind, port))?;
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
-        let state = Arc::new(Mutex::new(State { token: token(), generation: 1, allow, newest: None }));
+        let state = Arc::new(Mutex::new(State { token: token(), generation: 1, allow, newest: None, route: Route::Live { from: None } }));
         let generation = Arc::new(AtomicU64::new(1));
         let quit = Arc::new(AtomicBool::new(false));
         let refused = Arc::new(AtomicUsize::new(0));
@@ -266,25 +277,37 @@ impl Server {
         self.addr
     }
 
-    /// A new token (for a new `LOAD`): the old URL stops working and its connections end.
+    /// A new token (for a new `LOAD`) for the live stream: the old URL stops working and its
+    /// connections end.
     pub fn rotate(&self) -> String {
+        self.rotate_to(Route::Live { from: None })
+    }
+
+    /// A new token serving `route`.
+    pub fn rotate_to(&self, route: Route) -> String {
         let mut s = self.state.lock().unwrap();
         s.token = token();
         s.generation += 1;
+        s.route = route;
         self.generation.store(s.generation, Ordering::SeqCst);
-        self.url_of(&s.token)
+        self.url_of(&s.token, &s.route)
     }
 
     pub fn url(&self) -> String {
-        self.url_of(&self.state.lock().unwrap().token)
+        let s = self.state.lock().unwrap();
+        self.url_of(&s.token, &s.route)
     }
 
-    fn url_of(&self, token: &str) -> String {
+    fn url_of(&self, token: &str, route: &Route) -> String {
         let host = match self.addr.ip() {
             IpAddr::V6(v6) => format!("[{v6}]"),
             v4 => v4.to_string(),
         };
-        format!("http://{host}:{}/cast/{token}/stream.{}", self.addr.port(), self.format.ext())
+        let name = match route {
+            Route::Live { .. } => format!("stream.{}", self.format.ext()),
+            Route::File { content_type, .. } => format!("file.{}", crate::file::ext_of(content_type)),
+        };
+        format!("http://{host}:{}/cast/{token}/{name}", self.addr.port())
     }
 
     pub fn allow(&self, more: &[IpAddr]) {
@@ -330,9 +353,9 @@ fn read_head(conn: &mut TcpStream) -> Option<String> {
 fn serve(mut conn: TcpStream, peer: SocketAddr, opts: Opts, st: &Mutex<State>, generation: &AtomicU64, quit: &AtomicBool, refused: &AtomicUsize, hub: &Hub, active: &AtomicUsize) {
     let _ = conn.set_nonblocking(false);
     let ip = plain(peer.ip());
-    let (token, my_gen, ok) = {
+    let (token, my_gen, ok, route) = {
         let s = st.lock().unwrap();
-        (s.token.clone(), s.generation, s.allow.rule(ip))
+        (s.token.clone(), s.generation, s.allow.rule(ip), s.route.clone())
     };
     // The head is read first even when refusing: closing with it unread would reset the
     // connection and lose the answer.
@@ -347,7 +370,10 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, opts: Opts, st: &Mutex<State>, g
     let mut parts = request.split_whitespace();
     let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let header = |name: &str| head.lines().skip(1).find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()));
-    let want = format!("/cast/{token}/stream.{}", opts.format.ext());
+    let want = match &route {
+        Route::Live { .. } => format!("/cast/{token}/stream.{}", opts.format.ext()),
+        Route::File { content_type, .. } => format!("/cast/{token}/file.{}", crate::file::ext_of(content_type)),
+    };
     if path != want || !(method == "GET" || method == "HEAD") {
         refused.fetch_add(1, Ordering::SeqCst);
         log(format!("404 for {method} from {ip} (wrong path)"));
@@ -357,6 +383,33 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, opts: Opts, st: &Mutex<State>, g
     let range = header("range").map(|r| format!(", Range {r}")).unwrap_or_default();
     log(format!("{method} from {ip}, allowed: {rule} (User-Agent {ua:?}{range})"));
     let head_only = method == "HEAD";
+    if let Route::File { path, content_type } = &route {
+        // The receiver reads a file with a few ranged requests, sometimes at once.
+        let fetch = Arc::new(Fetch { peer: ip, started: Instant::now(), frames: AtomicU64::new(0), token_gen: my_gen });
+        {
+            let mut s = st.lock().unwrap();
+            if s.newest.as_ref().is_none_or(|f| f.token_gen != my_gen) {
+                s.newest = Some(fetch);
+            }
+        }
+        let _ = conn.set_write_timeout(Some(WRITE_TIMEOUT));
+        let r = crate::file::serve(&mut conn, path, content_type, header("range").as_deref(), head_only, || !quit.load(Ordering::SeqCst) && generation.load(Ordering::SeqCst) == my_gen);
+        if let Err(e) = r {
+            log(format!("the file to {ip} ended: {e}"));
+        }
+        return;
+    }
+    let from = match route {
+        Route::Live { from: Some(f) } if !head_only => {
+            // Once: a later fetch of this URL (the device reconnecting) gets the usual pre-roll.
+            let mut s = st.lock().unwrap();
+            if s.generation == my_gen {
+                s.route = Route::Live { from: None };
+            }
+            Some(f)
+        }
+        _ => None,
+    };
     if !head_only && active.fetch_add(1, Ordering::SeqCst) >= MAX_CLIENTS {
         active.fetch_sub(1, Ordering::SeqCst);
         log(format!("503 for {ip}: already {MAX_CLIENTS} connections"));
@@ -380,7 +433,12 @@ fn serve(mut conn: TcpStream, peer: SocketAddr, opts: Opts, st: &Mutex<State>, g
         }
         return;
     }
-    let sub = hub.subscribe_preroll(DEPTH, opts.preroll_ms * RATE / 1000);
+    let preroll = match from {
+        // From the new song's start: what the hub published since (the history keeps 10 s).
+        Some(f) => hub.published().saturating_sub(f).min(crate::pcm::HISTORY_FRAMES),
+        None => opts.preroll_ms * RATE / 1000,
+    };
+    let sub = hub.subscribe_preroll(DEPTH, preroll);
     log(format!("pre-roll to {ip}: {} ms of recent audio + {} ms of silence", sub.backlog_frames * 1000 / RATE, sub.pad_frames * 1000 / RATE));
     let fetch = Arc::new(Fetch { peer: ip, started: Instant::now(), frames: AtomicU64::new(0), token_gen: my_gen });
     st.lock().unwrap().newest = Some(fetch.clone());

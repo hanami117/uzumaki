@@ -1,10 +1,20 @@
-//! One Cast session: connect, launch the Default Media Receiver, serve and `LOAD` the stream, then
-//! follow the device's statuses until the session ends. See `lib.rs` for the states.
+//! One Cast session: connect, launch the Default Media Receiver, serve and `LOAD` the stream (or a
+//! local file the device plays itself), then follow the device's statuses until the session ends.
+//! See `lib.rs` for the states.
+//!
+//! Song changes: a skip, a seek or a picked song starts the device afresh at once. A song that
+//! follows on by itself waits until the device has played what it still holds of the old one
+//! (its buffer, or the end of its file), then a new `LOAD` starts the new song with its own title
+//! and cover; the live stream starts at the new song's first frame (`Route::Live { from }`), so
+//! nothing is lost but a short pause between the songs.
+//!
+//! A lost connection (the TV off, Wi-Fi gone, this computer asleep) is tried again for
+//! `Config::reconnect_for` (state `Reconnecting`) before the session ends.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
 
@@ -12,12 +22,42 @@ use crate::channel::{Channel, Incoming};
 use crate::discover::CastDevice;
 use crate::proto::{DEFAULT_MEDIA_RECEIVER, Message, NS_CONNECTION, NS_HEARTBEAT, NS_MEDIA, NS_RECEIVER, RECEIVER, SENDER};
 use crate::health::Health;
-use crate::stream::{Allow, Fetch, Opts, Server, local_addr_for};
-use crate::{Cmd, Event, Inner, Meta, State, Why, log, pcm};
+use crate::stream::{Allow, Fetch, Opts, Route, Server, local_addr_for};
+use crate::{Cmd, Event, Inner, Media, Meta, State, Why, log, pcm};
 
 pub(crate) enum In {
-    Net(Incoming),
+    /// From the device connection of that generation (older ones are ignored after a reconnect).
+    Net(u64, Incoming),
     Cmd(Cmd),
+}
+
+/// A natural song change, waiting for the device to reach it.
+struct Pending {
+    media: Media,
+    meta: Meta,
+    at: f64,
+    /// The hub frame where the new song begins (the live stream starts again there).
+    mark: u64,
+    /// The live stream's time of that frame on the device's connection.
+    served_mark: f64,
+    /// Time spent playing since (a fallback, should the device's time not get there).
+    played_for: Duration,
+}
+
+/// How much earlier than the song change the mark is set: the change is announced a moment after
+/// the new song's audio began.
+const MARK_EARLY: f64 = 0.25;
+/// The longest a natural change waits (time spent playing) for the device to get there.
+const FOLLOW_WAIT_LIVE: Duration = Duration::from_secs(20);
+const FOLLOW_WAIT_FILE: Duration = Duration::from_secs(6);
+/// Between reconnect attempts.
+const RETRY_EVERY: Duration = Duration::from_secs(2);
+/// The wall clock ran ahead of the monotonic one by this much: this computer slept.
+const SLEPT: Duration = Duration::from_secs(5);
+
+/// The wall clock moved `wall` while the monotonic clock (which stops in sleep) moved `mono`.
+pub(crate) fn slept(wall: Duration, mono: Duration) -> bool {
+    wall > mono + SLEPT
 }
 
 const PING_EVERY: Duration = Duration::from_secs(5);
@@ -40,7 +80,25 @@ enum Phase {
 struct Session<'a> {
     inner: &'a Arc<Inner>,
     device: CastDevice,
-    ch: Channel,
+    ch: Option<Channel>,
+    tx: mpsc::Sender<In>,
+    /// The connection's generation (a reconnect makes a new one).
+    generation: u64,
+    /// What the device plays (or will, once loaded).
+    media: Media,
+    /// Where a file starts at its next LOAD.
+    file_at: f64,
+    pending: Option<Pending>,
+    /// The device reached the end of its file.
+    finished: bool,
+    /// The last PLAYING status: when, and the device's time then.
+    last_play: Option<(Instant, f64)>,
+    device_time: f64,
+    /// The device played once this session (a lost connection is then worth trying again).
+    ever_played: bool,
+    /// Reconnecting until then (None: connected as usual).
+    reconnect_until: Option<Instant>,
+    clocks: (SystemTime, Instant),
     phase: Phase,
     next_id: u64,
     /// Our receiver app: its session and transport ids.
@@ -93,10 +151,7 @@ pub(crate) fn run(inner: &Arc<Inner>, mut device: CastDevice, meta: Meta, rx: &m
     }
     log(format!("connecting to “{}” ({}, {}:{}{})", device.name, device.model, device.ip, device.port, if device.group { ", a Cast Group" } else { "" }));
     let addr = SocketAddr::new(device.ip, device.port);
-    let t = tx.clone();
-    let ch = match Channel::open_tls(addr, inner.cfg.connect_timeout, move |m| {
-        let _ = t.send(In::Net(m));
-    }) {
+    let ch = match open(addr, inner.cfg.connect_timeout, &tx, 1) {
         Ok(c) => c,
         Err(e) => {
             log(format!("can't connect: {e}"));
@@ -108,7 +163,18 @@ pub(crate) fn run(inner: &Arc<Inner>, mut device: CastDevice, meta: Meta, rx: &m
     let mut s = Session {
         inner,
         device,
-        ch,
+        ch: Some(ch),
+        tx,
+        generation: 1,
+        media: Media::Live,
+        file_at: 0.0,
+        pending: None,
+        finished: false,
+        last_play: None,
+        device_time: 0.0,
+        ever_played: false,
+        reconnect_until: None,
+        clocks: (SystemTime::now(), now),
         phase: Phase::Connecting,
         next_id: 1,
         app: None,
@@ -131,21 +197,142 @@ pub(crate) fn run(inner: &Arc<Inner>, mut device: CastDevice, meta: Meta, rx: &m
         volume: None,
         reloading: false,
     };
-    s.send(RECEIVER, NS_CONNECTION, json!({"type": "CONNECT", "origin": {}, "userAgent": "Uzumaki", "senderInfo": {"sdkType": 2, "version": "15.605.1.3", "platform": 6, "systemVersion": "", "connectionType": 1}}));
-    let id = s.id();
-    s.send(RECEIVER, NS_RECEIVER, json!({"type": "GET_STATUS", "requestId": id}));
-    let end = s.run(rx);
-    s.finish(end, rx);
+    s.hello();
+    loop {
+        let end = s.run(rx);
+        let end = match end {
+            End::Failed(Why::Lost, why) if s.ever_played && !inner.closed.load(std::sync::atomic::Ordering::SeqCst) => match s.reconnect(rx, &why) {
+                Ok(()) => continue,
+                Err(end) => end,
+            },
+            end => end,
+        };
+        return s.finish(end, rx);
+    }
+}
+
+fn open(addr: SocketAddr, timeout: Duration, tx: &mpsc::Sender<In>, generation: u64) -> Result<Channel, String> {
+    let t = tx.clone();
+    Channel::open_tls(addr, timeout, move |m| {
+        let _ = t.send(In::Net(generation, m));
+    })
 }
 
 impl Session<'_> {
+    fn hello(&mut self) {
+        self.send(RECEIVER, NS_CONNECTION, json!({"type": "CONNECT", "origin": {}, "userAgent": "Uzumaki", "senderInfo": {"sdkType": 2, "version": "15.605.1.3", "platform": 6, "systemVersion": "", "connectionType": 1}}));
+        let id = self.id();
+        self.send(RECEIVER, NS_RECEIVER, json!({"type": "GET_STATUS", "requestId": id}));
+    }
+
+    /// The connection is gone: tries again (new address from mDNS too: the TV may have a new one
+    /// after a restart) until `reconnect_for` is over. Ok: connected again, `run` goes on.
+    fn reconnect(&mut self, rx: &mpsc::Receiver<In>, why: &str) -> Result<(), End> {
+        let cfg = self.inner.cfg.clone();
+        let silent = self.last_heard.elapsed();
+        if self.reconnect_until.is_none() {
+            log(format!("lost “{}” ({why}; nothing heard for {} ms): reconnecting for up to {} s", self.name(), silent.as_millis(), cfg.reconnect_for.as_secs()));
+            self.reconnect_until = Some(Instant::now() + cfg.reconnect_for);
+            self.inner.emit(Event::Interrupted { silent_ms: silent.as_millis() as u64 });
+        } else {
+            log(format!("lost “{}” again while reconnecting ({why})", self.name()));
+        }
+        let until = self.reconnect_until.unwrap();
+        // What the device played is gone with it: start again where it was.
+        if let Some(p) = self.pending.take() {
+            self.media = p.media;
+            self.meta = p.meta;
+            self.file_at = p.at;
+        } else if self.media.is_file() {
+            self.file_at = self.device_now().unwrap_or(self.device_time);
+        }
+        self.drop_channel();
+        self.app = None;
+        self.media_session = None;
+        self.load_req = None;
+        self.load_at = None;
+        self.fetch = None;
+        self.played = false;
+        self.last_play = None;
+        self.buffers.clear();
+        self.set_phase(Phase::Connecting);
+        let name = self.name();
+        let mut attempt = 0u32;
+        loop {
+            // Commands meanwhile: Stop ends it; songs and seeks are kept for the next LOAD.
+            let wait = if attempt == 0 { Duration::ZERO } else { RETRY_EVERY };
+            let t = Instant::now();
+            loop {
+                match rx.recv_timeout(wait.saturating_sub(t.elapsed())) {
+                    Ok(In::Cmd(Cmd::Stop)) | Err(mpsc::RecvTimeoutError::Disconnected) => return Err(End::User),
+                    Ok(In::Cmd(c)) => {
+                        let _ = self.on_cmd(c);
+                    }
+                    Ok(In::Net(..)) => {}
+                    Err(mpsc::RecvTimeoutError::Timeout) => break,
+                }
+            }
+            if Instant::now() >= until {
+                return Err(End::Failed(Why::Lost, format!("{why}; no answer for {} s", cfg.reconnect_for.as_secs())));
+            }
+            attempt += 1;
+            if attempt > 1
+                && cfg.fake.is_none()
+                && let Some(d) = crate::discover::discover(Duration::from_secs(3), Some(&name)).ok().and_then(|l| crate::discover::pick(&l, &name).cloned())
+            {
+                if d.addrs != self.device.addrs || d.port != self.device.port {
+                    log(format!("“{name}” answers at {} now", d.addrs.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
+                }
+                self.device.addrs = d.addrs;
+                self.device.port = d.port;
+            }
+            let Some((ip, _)) = crate::discover::choose(&self.device.addrs, cfg.family, &crate::discover::local_v4()) else { continue };
+            self.device.ip = ip;
+            self.generation += 1;
+            match open(SocketAddr::new(ip, self.device.port), cfg.connect_timeout, &self.tx, self.generation) {
+                Ok(ch) => {
+                    log(format!("reconnected to “{name}” at {ip} (attempt {attempt})"));
+                    self.ch = Some(ch);
+                    // This computer may have a new address too: the server moves with it.
+                    if self.server.as_ref().is_some_and(|s| Some(s.addr().ip()) != local_addr_for(ip)) {
+                        log("this computer's address changed: a new stream server");
+                        self.server = None;
+                    }
+                    let now = Instant::now();
+                    self.last_heard = now;
+                    self.last_ping = now;
+                    self.last_status = now;
+                    self.phase_since = now;
+                    self.clocks = (SystemTime::now(), now);
+                    self.hello();
+                    return Ok(());
+                }
+                Err(e) => log(format!("reconnect attempt {attempt}: {e}")),
+            }
+        }
+    }
+
+    /// Closes the connection without waiting for it (a dead one may take its write timeout).
+    fn drop_channel(&mut self) {
+        if let Some(ch) = self.ch.take() {
+            let _ = std::thread::Builder::new().name("cast-channel-drop".into()).spawn(move || drop(ch));
+        }
+    }
+
+    /// The device's position now, while it plays (extrapolated from its last PLAYING status).
+    fn device_now(&self) -> Option<f64> {
+        self.last_play.map(|(t, at)| at + t.elapsed().as_secs_f64())
+    }
+
     fn id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
     }
 
     fn send(&self, dest: &str, ns: &str, payload: Value) {
-        self.ch.send(&Message::new(SENDER, dest, ns, &payload));
+        if let Some(ch) = &self.ch {
+            ch.send(&Message::new(SENDER, dest, ns, &payload));
+        }
     }
 
     fn name(&self) -> String {
@@ -161,6 +348,9 @@ impl Session<'_> {
     }
 
     fn latency_ms(&self) -> Option<u32> {
+        if self.media.is_file() && self.played {
+            return Some(0); // the device is the player
+        }
         if self.buffers.is_empty() {
             return None;
         }
@@ -172,6 +362,7 @@ impl Session<'_> {
     fn show(&mut self) {
         let name = self.name();
         let st = match self.phase {
+            _ if self.reconnect_until.is_some() && self.phase < Phase::Playing => State::Reconnecting { name },
             Phase::Connecting => State::Connecting { name },
             Phase::Launching => State::Launching { name },
             Phase::Loading => State::Loading { name },
@@ -194,13 +385,14 @@ impl Session<'_> {
         let cfg = self.inner.cfg.clone();
         loop {
             match rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(In::Net(Incoming::Msg(m))) => {
+                Ok(In::Net(g, _)) if g != self.generation => {}
+                Ok(In::Net(_, Incoming::Msg(m))) => {
                     self.last_heard = Instant::now();
                     if let Some(end) = self.on_message(&m) {
                         return end;
                     }
                 }
-                Ok(In::Net(Incoming::Closed(why))) => return End::Failed(Why::Lost, why),
+                Ok(In::Net(_, Incoming::Closed(why))) => return End::Failed(Why::Lost, why),
                 Ok(In::Cmd(c)) => {
                     if let Some(end) = self.on_cmd(c) {
                         return end;
@@ -210,6 +402,22 @@ impl Session<'_> {
                 Err(mpsc::RecvTimeoutError::Disconnected) => return End::User,
             }
             let now = Instant::now();
+            let wall = SystemTime::now();
+            let (w0, m0) = std::mem::replace(&mut self.clocks, (wall, now));
+            let dt = now.duration_since(m0);
+            if slept(wall.duration_since(w0).unwrap_or_default(), dt) {
+                // The connection is most likely dead, and the device stopped long ago.
+                self.last_heard = m0;
+                return End::Failed(Why::Lost, "this computer slept".into());
+            }
+            if self.phase == Phase::Playing
+                && let Some(p) = &mut self.pending
+            {
+                p.played_for += dt;
+            }
+            if self.pending_due() {
+                self.apply_pending();
+            }
             if now.duration_since(self.last_ping) >= PING_EVERY {
                 self.last_ping = now;
                 self.send(RECEIVER, NS_HEARTBEAT, json!({"type": "PING"}));
@@ -298,14 +506,94 @@ impl Session<'_> {
                 if let Some(m) = meta {
                     self.meta = m;
                 }
-                if self.server.is_some() && self.app.is_some() {
+                self.pending = None;
+                if self.media.is_file() {
+                    self.file_at = self.device_now().unwrap_or(self.device_time);
+                }
+                if self.ready() {
                     log("reload: new URL, new LOAD");
-                    self.reloading = true;
-                    self.load(true);
+                    self.load(None);
+                }
+            }
+            Cmd::Play { media, meta, at, follow } => {
+                let follow = follow && self.ready() && self.played && !(self.media.is_file() && self.finished);
+                if follow {
+                    let mark = self.inner.hub.published().saturating_sub((MARK_EARLY * pcm::RATE as f64) as u64);
+                    let served_mark = match (&self.media, &self.fetch) {
+                        (Media::Live, Some(f)) => f.served_secs() - MARK_EARLY,
+                        _ => f64::INFINITY,
+                    };
+                    // Two changes before the device got to the first: the earlier mark stays.
+                    let (mark, served_mark) = self.pending.as_ref().map_or((mark, served_mark), |p| (p.mark, p.served_mark));
+                    log(format!("the next song follows on: “{}” once the device has played out the current one", meta.title));
+                    self.pending = Some(Pending { media, meta, at, mark, served_mark, played_for: Duration::ZERO });
+                    if self.pending_due() {
+                        self.apply_pending();
+                    }
+                } else {
+                    self.pending = None;
+                    self.media = media;
+                    self.meta = meta;
+                    self.file_at = at;
+                    if self.ready() {
+                        self.load(None);
+                    }
+                }
+            }
+            Cmd::Seek { at, meta } => {
+                if let Some(m) = meta {
+                    self.meta = m;
+                }
+                self.pending = None;
+                if !self.media.is_file() {
+                    self.inner.hub.forget();
+                    if self.ready() {
+                        self.load(None);
+                    }
+                } else if let (Some(ms), Some(t), true) = (self.media_session, transport, self.played && !self.finished) {
+                    log(format!("SEEK to {at:.1} s"));
+                    let id = self.id();
+                    self.send(&t, NS_MEDIA, json!({"type": "SEEK", "mediaSessionId": ms, "requestId": id, "currentTime": at}));
+                    self.last_play = None;
+                    self.device_time = at;
+                } else {
+                    self.file_at = at;
+                    if self.ready() {
+                        self.load(None);
+                    }
                 }
             }
         }
         None
+    }
+
+    /// The receiver runs and the server is up: a LOAD can go out.
+    fn ready(&self) -> bool {
+        self.server.is_some() && self.app.is_some()
+    }
+
+    /// The device got to the pending song change.
+    fn pending_due(&self) -> bool {
+        let Some(p) = &self.pending else { return false };
+        if !self.ready() || !self.played {
+            return true;
+        }
+        match &self.media {
+            Media::Live => self.device_now().is_some_and(|t| t >= p.served_mark) || p.played_for >= FOLLOW_WAIT_LIVE,
+            Media::File(f) => self.finished || (f.duration > 0.0 && self.device_now().is_some_and(|t| t >= f.duration - 0.3)) || p.played_for >= FOLLOW_WAIT_FILE,
+        }
+    }
+
+    fn apply_pending(&mut self) {
+        let Some(p) = self.pending.take() else { return };
+        let from = (self.media.is_file() || self.played).then_some(p.mark);
+        self.media = p.media;
+        self.meta = p.meta;
+        self.file_at = p.at;
+        if self.ready() {
+            log(format!("the device got to the next song: LOAD “{}”", self.meta.title));
+            self.load(if self.media.is_file() { None } else { from });
+        }
     }
 
     fn on_message(&mut self, m: &Message) -> Option<End> {
@@ -326,6 +614,9 @@ impl Session<'_> {
                     return None;
                 }
                 log(format!("{kind}: {}", m.payload));
+                if kind == "LOAD_FAILED" && self.file_failed() {
+                    return None;
+                }
                 if matches!(kind, "LOAD_FAILED" | "LOAD_CANCELLED") || self.phase < Phase::Buffering {
                     return Some(End::Failed(Why::LoadFailed, format!("{kind} {}", v["reason"].as_str().unwrap_or(""))));
                 }
@@ -360,7 +651,8 @@ impl Session<'_> {
                     if let Err(e) = self.start_stream() {
                         return Some(End::Failed(Why::LoadFailed, e));
                     }
-                    self.load(false);
+                    self.pending = None;
+                    self.load(None);
                 }
                 None if self.phase == Phase::Connecting => {
                     if let Some(o) = other {
@@ -387,9 +679,19 @@ impl Session<'_> {
 
     /// The HTTP server (and the app's inputs).
     fn start_stream(&mut self) -> Result<(), String> {
-        if self.server.is_some() {
-            return Ok(());
+        if self.server.is_none() {
+            self.start_server()?;
         }
+        let cfg = &self.inner.cfg;
+        if cfg.app_inputs && self.inputs.is_none() {
+            self.inputs = Some(pcm::Inputs::start(&cfg.socket(), self.inner.feed.clone(), self.inner.hub.clone()));
+            self.inner.feed.set_casting(true);
+            self.inner.emit(Event::Capture(true));
+        }
+        Ok(())
+    }
+
+    fn start_server(&mut self) -> Result<(), String> {
         let cfg = &self.inner.cfg;
         let bind = local_addr_for(self.device.ip).unwrap_or(self.device.ip);
         // Served over IPv6, the device may fetch from a temporary address of its own: its /64 too.
@@ -410,17 +712,18 @@ impl Session<'_> {
             }
             Err(e) => return Err(format!("can't start the stream server on {bind}:{}: {e}", cfg.port)),
         }
-        if cfg.app_inputs {
-            self.inputs = Some(pcm::Inputs::start(&cfg.socket(), self.inner.feed.clone(), self.inner.hub.clone()));
-            self.inner.feed.set_casting(true);
-            self.inner.emit(Event::Capture(true));
-        }
         Ok(())
     }
 
-    fn load(&mut self, fresh: bool) {
+    /// LOADs `self.media` (a new URL each time). `from`: the live stream starts at that hub frame.
+    fn load(&mut self, from: Option<u64>) {
         let (Some(server), Some((sid, transport))) = (&self.server, self.app.clone()) else { return };
-        let url = if fresh { server.rotate() } else { server.url() };
+        self.reloading = self.load_req.is_some();
+        let route = match &self.media {
+            Media::Live => Route::Live { from },
+            Media::File(f) => Route::File { path: f.path.clone(), content_type: f.content_type.clone() },
+        };
+        let url = server.rotate_to(route);
         let cfg = &self.inner.cfg;
         let m = &self.meta;
         let mut metadata = json!({"metadataType": 3, "title": if m.title.is_empty() { "Uzumaki" } else { &m.title }});
@@ -434,16 +737,27 @@ impl Session<'_> {
             metadata["images"] = json!([{"url": img}]);
         }
         let id = self.id();
-        let shown_url = url.rsplit_once("/cast/").map_or(url.clone(), |(h, _)| format!("{h}/cast/<token>/stream.{}", cfg.format.ext()));
-        log(format!("LOAD {shown_url} ({}, {})", cfg.format.content_type(), cfg.stream_type));
-        self.send(
-            &transport,
-            NS_MEDIA,
-            json!({
-                "type": "LOAD", "requestId": id, "sessionId": sid, "autoplay": true, "currentTime": 0,
-                "media": {"contentId": url, "contentUrl": url, "streamType": cfg.stream_type, "contentType": cfg.format.content_type(), "metadata": metadata},
-            }),
-        );
+        let shown_url = url.rsplit_once("/cast/").map_or(url.clone(), |(h, t)| format!("{h}/cast/<token>/{}", t.rsplit('/').next().unwrap_or("")));
+        let (stream_type, content_type, at) = match &self.media {
+            Media::Live => (cfg.stream_type.clone(), cfg.format.content_type().to_string(), 0.0),
+            Media::File(f) => ("BUFFERED".to_string(), f.content_type.clone(), self.file_at.max(0.0)),
+        };
+        let what = match (&self.media, from) {
+            (Media::File(f), _) => format!("the file {:?} at {at:.1} s", f.path.file_name().unwrap_or_default()),
+            (Media::Live, Some(f)) => format!("the live stream from the new song's start ({:.1} s back)", self.inner.hub.published().saturating_sub(f) as f64 / pcm::RATE as f64),
+            (Media::Live, None) => "the live stream".into(),
+        };
+        log(format!("LOAD {shown_url} ({content_type}, {stream_type}): {what}"));
+        let mut media = json!({"contentId": url, "contentUrl": url, "streamType": stream_type, "contentType": content_type, "metadata": metadata});
+        if let Media::File(f) = &self.media
+            && f.duration > 0.0
+        {
+            media["duration"] = json!(f.duration);
+        }
+        self.send(&transport, NS_MEDIA, json!({"type": "LOAD", "requestId": id, "sessionId": sid, "autoplay": !self.inner.feed.holding(), "currentTime": at, "media": media}));
+        self.finished = false;
+        self.last_play = None;
+        self.device_time = at;
         self.load_at = Some(Instant::now());
         self.health = Health::new(Instant::now());
         self.fetch = None;
@@ -487,6 +801,11 @@ impl Session<'_> {
         let state = s["playerState"].as_str().unwrap_or("");
         let device_time = s["currentTime"].as_f64().unwrap_or(0.0);
         let now = Instant::now();
+        self.device_time = device_time;
+        self.last_play = (state == "PLAYING").then_some((now, device_time));
+        if let Media::File(f) = &self.media {
+            return self.on_file_status(state, device_time, s["idleReason"].as_str().unwrap_or(""), f.key.clone());
+        }
         // The status may arrive before our poll saw the fetch.
         self.watch_fetch(now);
         let served = self.fetch.as_ref().map_or(0.0, |f| f.served_secs());
@@ -508,6 +827,7 @@ impl Session<'_> {
         match state {
             "PLAYING" => {
                 self.reloading = false;
+                self.connected_again();
                 if !self.played {
                     self.played = true;
                     let ms = |t: Option<Instant>| t.map(|t| now.duration_since(t).as_millis() as u64);
@@ -538,6 +858,7 @@ impl Session<'_> {
             }
             "PAUSED" => {
                 log(format!("PAUSED (served {served:.2} s, device at {device_time:.2} s)"));
+                self.connected_again();
                 self.set_phase(Phase::Paused);
             }
             "IDLE" => {
@@ -550,7 +871,7 @@ impl Session<'_> {
                         // The Content-Length is used up (or the receiver dropped the stream): a new URL.
                         log("the receiver reached the end of the stream: loading a new URL");
                         self.reloading = true;
-                        self.load(true);
+                        self.load(None);
                     }
                     "FINISHED" => {}
                     "INTERRUPTED" | "CANCELLED" => return Some(End::Failed(Why::Taken, format!("IDLE {why}"))),
@@ -560,6 +881,81 @@ impl Session<'_> {
             _ => {}
         }
         None
+    }
+
+    /// Statuses of a file the device plays itself: no buffer to measure, the device is the player.
+    fn on_file_status(&mut self, state: &str, at: f64, idle: &str, key: String) -> Option<End> {
+        match state {
+            "PLAYING" => {
+                self.reloading = false;
+                self.connected_again();
+                if !self.played {
+                    self.played = true;
+                    let ms = self.load_at.map_or(0, |t| t.elapsed().as_millis());
+                    log(format!("PLAYING the file: {ms} ms after LOAD, at {at:.2} s"));
+                    self.inner.report.lock().unwrap().load_to_playing_ms = Some(ms as u64);
+                }
+                self.inner.emit(Event::Position { key, at });
+                self.set_phase(Phase::Playing);
+            }
+            "PAUSED" => {
+                self.connected_again();
+                self.set_phase(Phase::Paused);
+            }
+            "BUFFERING" => {
+                if self.phase != Phase::Paused {
+                    self.set_phase(Phase::Buffering);
+                }
+            }
+            "IDLE" => {
+                log(format!("IDLE {idle} (the file, at {at:.2} s)"));
+                match idle {
+                    "FINISHED" => {
+                        self.finished = true;
+                        if self.pending_due() {
+                            self.apply_pending();
+                        }
+                    }
+                    "INTERRUPTED" | "CANCELLED" if self.reloading => {}
+                    "ERROR" => {
+                        if !self.file_failed() {
+                            return Some(End::Failed(Why::LoadFailed, "the receiver reported an error".into()));
+                        }
+                    }
+                    "INTERRUPTED" | "CANCELLED" => return Some(End::Failed(Why::Taken, format!("IDLE {idle}"))),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// The device can't play the file it was given: the live stream instead (the local player's
+    /// own output, as before files were sent). True when that was done.
+    fn file_failed(&mut self) -> bool {
+        let Media::File(f) = &self.media else { return false };
+        log(format!("the device can't play {:?} ({}): the live stream instead", f.path.file_name().unwrap_or_default(), f.content_type));
+        self.media = Media::Live;
+        self.load(None);
+        true
+    }
+
+    /// The local outputs play again and the bridge stops capturing for us.
+    fn release_outputs(&mut self) {
+        if self.inputs.is_some() {
+            self.inner.feed.set_casting(false);
+            self.inputs = None;
+            self.inner.emit(Event::Capture(false));
+        }
+    }
+
+    /// Playing again after a lost connection.
+    fn connected_again(&mut self) {
+        self.ever_played = true;
+        if self.reconnect_until.take().is_some() {
+            log(format!("“{}” plays again", self.name()));
+        }
     }
 
     fn finish(mut self, end: End, rx: &mpsc::Receiver<In>) {
@@ -581,13 +977,16 @@ impl Session<'_> {
             let mut media_idle = self.media_session.is_none();
             let mut gone = false;
             while !gone && Instant::now() < deadline {
-                let Ok(In::Net(Incoming::Msg(m))) = rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) else { continue };
+                let Ok(In::Net(_, Incoming::Msg(m))) = rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) else { continue };
                 let v = m.json().unwrap_or(Value::Null);
                 match v["type"].as_str() {
                     Some("MEDIA_STATUS") => {
                         let idle = v["status"].as_array().is_some_and(|a| a.is_empty() || a.iter().any(|x| x["playerState"].as_str() == Some("IDLE")));
                         if idle && !media_idle {
                             media_idle = true;
+                            // The TV is quiet: this computer's output comes back now, not once
+                            // the receiver has gone too (the step back is where the listener was).
+                            self.release_outputs();
                             log(format!("the TV stopped the media after {} ms", t.elapsed().as_millis()));
                         }
                     }
@@ -606,12 +1005,10 @@ impl Session<'_> {
         }
         if !matches!(end, End::Failed(Why::Lost, _)) {
             self.send(RECEIVER, NS_CONNECTION, json!({"type": "CLOSE"}));
+        } else {
+            self.drop_channel();
         }
-        if self.inputs.is_some() {
-            self.inner.feed.set_casting(false);
-            self.inputs = None;
-            self.inner.emit(Event::Capture(false));
-        }
+        self.release_outputs();
         self.server = None;
         let r = self.inner.report.lock().unwrap().clone();
         let summary = r.lines(&State::Off).into_iter().skip(1).collect::<Vec<_>>().join("; ");

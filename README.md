@@ -62,8 +62,8 @@ The screenshots use made-up albums and artists.
 - **Desktop integration:** media keys and desktop widgets (MPRIS on Linux, Now Playing on macOS, the media overlay on Windows), a tray or
   menu bar icon, close to tray, and song notifications.
 - **Speakers:** AirPlay on macOS and Linux (HomePods and other AirPlay speakers, one or several in sync), and
-  **Chromecast (Beta)** on macOS and Linux: Google TVs and Cast speakers on your network, a few seconds behind
-  (Settings → Speakers → Chromecast; off by default, not on Windows). See [AirPlay on Linux](#airplay-on-linux).
+  **Chromecast** on macOS and Linux: Google TVs and Cast speakers on your network, a couple of seconds behind for
+  Apple Music; local files are played by the TV itself (Settings → Speakers → Chromecast; off by default, not on Windows). See [AirPlay on Linux](#airplay-on-linux).
 - **Keyboard first:** you can change every shortcut in Settings → Keyboard.
 - **`uzu`:** a command line and terminal player for the running app (see below).
 - **Hooks:** your own scripts run on every song change or play/pause.

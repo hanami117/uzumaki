@@ -220,7 +220,7 @@ const SPECS: &[Spec] = &[
     spec(Row::Resume, Tab::Playback, "Resume where you left off", "Uzumaki opens on the last song and its queue, paused.", "restore continue last song position queue startup launch remember session"),
     // ---- Speakers ----
     spec(Row::AirPlay, Tab::Speakers, "Reconnect to the last speaker", "At start, play on the AirPlay speaker you used last, if it is on. Off: always this computer.", "airplay device speaker homepod apple tv output cast wireless reconnect startup launch remember"),
-    spec(Row::Chromecast, Tab::Speakers, "Chromecast", "Google TVs and Cast speakers on this network show up in the speaker menu, a couple of seconds behind. Off: Uzumaki doesn't look for them.", "chromecast google cast tv android tv google tv nest speaker output wireless stream network device"),
+    spec(Row::Chromecast, Tab::Speakers, "Chromecast", "Google TVs and Cast speakers on this network show up in the speaker menu. Apple Music plays a couple of seconds behind; local files play on the TV itself. Off: Uzumaki doesn't look for them.", "chromecast google cast tv android tv google tv nest speaker output wireless stream network device"),
     // ---- Appearance ----
     spec(Row::Theme, Tab::Appearance, "Theme", "System follows your computer's light or dark appearance.", "dark mode light mode colour color appearance night"),
     spec(Row::Player, Tab::Appearance, "Player bar", "Full width at the bottom, or a floating capsule.", "player docked floating controls"),
