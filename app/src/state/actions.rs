@@ -437,7 +437,9 @@ impl State {
         }).map(|(i, _)| i).collect()
     }
 
-    /// History in the active context jumps there; otherwise replay one track, keeping Play Next.
+    /// History in the active context jumps there. A song from an earlier queue plays once, as
+    /// Play Next would, and the queue that was playing (Play Next, the list, AutoPlay) carries on
+    /// after it; with no queue it plays on its own. The app's History rows and uzu share this.
     pub fn play_history(&mut self, i: usize) {
         let Some((_, song)) = self.history.tracks.get(i).cloned() else { return };
         if !song.playable { return; }
@@ -451,8 +453,15 @@ impl State {
         } else if let Some(pos) = self.queue.context.iter().position(|s| s.same_track(&song)) {
             self.queue.pos = pos;
             self.queue.base = pos;
+            self.queue.user_playing = None;
             self.queue.plan_lap(self.playback.repeat);
             self.begin_current(song);
+        } else if self.playback.song.is_some() && !self.queue.context.is_empty() {
+            // Replacing the queue with this one song left nothing after it (uzu, where every
+            // search pick is a list of one, hit this nearly every time): Next did nothing and
+            // playback stopped at its end unless AutoPlay found something again.
+            self.queue.play_next(&[song]);
+            self.play_up_next(0);
         } else {
             self.play_list(&[song], 0, "History");
         }

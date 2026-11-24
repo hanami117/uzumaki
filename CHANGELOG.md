@@ -5,6 +5,13 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Fixed
+- **Playing a song from History no longer stops playback after it.** A History song from an earlier queue (in uzu,
+  where every search pick is a queue of its own, that was nearly every History song) used to replace the queue with that
+  one song: nothing came after it and Next did nothing. It now plays once, like Play Next, and what was coming (songs
+  you queued, the rest of the list, AutoPlay) carries on after it; Previous goes back to the song it interrupted. Same
+  in uzu's History and the app's History rows.
+
 ## [0.4.4] - 2026-11-24
 
 Own music files get lyrics from LRCLIB and names read from their file names when untagged, no more borrowed covers or

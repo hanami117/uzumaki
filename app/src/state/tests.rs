@@ -1761,7 +1761,8 @@ fn history_requires_confirmation_survives_contexts_and_keeps_play_next_on_replay
     assert_eq!(s.ctl_queue().history.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["i.b", "i.a"]);
     s.play_history(0);
     assert_eq!(s.playback.song.as_ref().unwrap().id, b.id);
-    assert_eq!(s.queue.source, "History");
+    assert_eq!(s.queue.source, "another source", "an earlier queue's song plays once; this queue stays");
+    assert_eq!(s.queue.user_playing.as_ref().map(|x| x.id.as_str()), Some("i.b"));
 }
 
 #[test]
@@ -1800,6 +1801,122 @@ fn general_history_from_another_source_replays_once_and_resumes_station() {
     s.playback.duration = 0.0;
     s.apply_msg(Msg::Bridge(Event::PlayState(PlayState::Ended)));
     assert!(!s.queue.station.as_ref().unwrap().one_off);
+}
+
+/// Bug report 2026-11-24: in uzu every search pick is a list of one song, so a History song is
+/// nearly always from an earlier queue. Replaying it threw the playing queue away for a one-song
+/// "History" list: nothing followed it and Next did nothing. It now plays once, as Play Next
+/// would, and the queue that was playing carries on after it.
+#[test]
+fn history_from_an_earlier_queue_plays_once_and_the_queue_carries_on() {
+    let mut s = State::offline();
+    s.play_list(&[song("x")], 0, "Search “x”");
+    heard(&mut s, "x");
+    s.play_list(&[song("a"), song("b"), song("c")], 0, "album");
+    heard(&mut s, "a");
+    s.add_to_queue(&[song("q")]);
+    let run = s.queue.run;
+    // uzu's History screen, Enter on "x" (the path the app's own History rows share).
+    assert_eq!(s.ctl_history(0, Some("x")), Ok(()));
+    assert_eq!(now(&s), Some("x"));
+    assert_eq!(s.queue.source, "album", "the queue that was playing stays");
+    assert_eq!(s.queue.run, run, "same queue (AutoPlay keeps its station)");
+    assert_eq!(up_next_ids(&s), ["q", "b", "c"]);
+    // MusicKit is handed what follows, so it moves on by itself, and Next has a song.
+    assert_eq!(s.queue.upcoming_ids(), ["q", "b", "c"]);
+    assert!(s.queue.bridge_has_next(Repeat::Off));
+    heard(&mut s, "x");
+    assert_eq!(up_next_ids(&s), ["q", "b", "c"]);
+    assert_eq!(s.ctl_queue().history.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["a"]);
+    // "x" ends: the queued song, then the album goes on.
+    heard(&mut s, "q");
+    heard(&mut s, "b");
+    assert_eq!((now(&s), s.queue.pos), (Some("b"), 1));
+    assert_eq!(up_next_ids(&s), ["c"]);
+}
+
+/// The same from uzu with AutoPlay: what AutoPlay lined up after a one-song search pick stays
+/// after the History song (it used to start a new queue, AutoPlay's songs gone with it).
+#[test]
+fn history_from_an_earlier_queue_keeps_autoplay() {
+    let mut s = State::offline();
+    s.session.authorized = true;
+    s.play_list(&[song("x")], 0, "Search “x”");
+    heard(&mut s, "x");
+    s.play_list(&[song("y")], 0, "Search “y”");
+    heard(&mut s, "y");
+    s.queue.add_autoplay(vec![song("p1"), song("p2")]);
+    assert_eq!(s.ctl_history(0, Some("x")), Ok(()));
+    assert_eq!(now(&s), Some("x"));
+    assert_eq!(s.ctl_queue().autoplay.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["p1", "p2"]);
+    assert_eq!(s.queue.upcoming_ids(), ["p1", "p2"]);
+    assert!(s.queue.bridge_has_next(Repeat::Off));
+    heard(&mut s, "x");
+    heard(&mut s, "p1");
+    assert_eq!(now(&s), Some("p1"));
+    assert_eq!(s.ctl_queue().autoplay.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["p2"]);
+}
+
+/// Previous on a History song replayed from an earlier queue goes back to the song it
+/// interrupted, and the queue carries on from there.
+#[test]
+fn previous_on_a_replayed_history_song_returns_to_the_queue() {
+    let mut s = State::offline();
+    s.play_list(&[song("x")], 0, "Search “x”");
+    heard(&mut s, "x");
+    s.play_list(&[song("a"), song("b")], 0, "album");
+    heard(&mut s, "a");
+    s.play_history(0);
+    heard(&mut s, "x");
+    s.playback.position = 0.0;
+    s.previous();
+    assert_eq!(now(&s), Some("a"));
+    assert_eq!(up_next_ids(&s), ["b"]);
+    assert_eq!(s.queue.upcoming_ids(), ["b"]);
+}
+
+/// Nothing playing (a History kept from the last run, no queue): the song plays as a list of
+/// its own, as before.
+#[test]
+fn history_with_no_queue_plays_the_song_on_its_own() {
+    let mut s = State::offline();
+    s.history = super::queue::History::restore(vec![song("old")]);
+    s.play_history(0);
+    assert_eq!(now(&s), Some("old"));
+    assert_eq!(s.queue.source, "History");
+}
+
+/// uzu `prev` / the `p` key (the app's Previous): back within the list, then forward again.
+/// Both ways back (MusicKit's own Previous, and the app restarting its queue one song earlier)
+/// leave what follows in place.
+#[test]
+fn previous_then_the_list_goes_forward_again() {
+    // MusicKit moved on by itself (b after a): its own Previous goes back to a.
+    let mut s = State::offline();
+    s.play_list(&[song("a"), song("b"), song("c")], 0, "album");
+    heard(&mut s, "a");
+    heard(&mut s, "b");
+    assert!(s.queue.pos > s.queue.base);
+    s.playback.position = 0.0;
+    s.previous();
+    heard(&mut s, "a");
+    assert_eq!(s.queue.pos, 0);
+    assert_eq!(up_next_ids(&s), ["b", "c"]);
+    assert!(s.queue.bridge_has_next(Repeat::Off));
+    heard(&mut s, "b");
+    heard(&mut s, "c");
+    assert_eq!(s.queue.pos, 2);
+    // Playback started at b: the app restarts its queue at a, with b and c after it.
+    let mut s = State::offline();
+    s.play_list(&[song("a"), song("b"), song("c")], 1, "album");
+    heard(&mut s, "b");
+    s.playback.position = 0.0;
+    s.previous();
+    assert_eq!(now(&s), Some("a"));
+    assert_eq!(s.queue.upcoming_ids(), ["b", "c"]);
+    heard(&mut s, "a");
+    heard(&mut s, "b");
+    assert_eq!(up_next_ids(&s), ["c"]);
 }
 
 // ------------------------------------------------------------------ queued songs on a station
