@@ -6,6 +6,16 @@ takes each release's notes from its section here.
 ## [Unreleased]
 
 ### Added
+- **Local files without tags are named from their file and folders.** `Artist - Title`, `04 - Title`, `04. Title`,
+  `NN - Artist - Title`, `Artist - Album - 04 Title` and `Artist/Album/04 Title.flac` give the song its artist,
+  title, album and track number, where the tag is missing (real tags always win; `_` reads as a space; brackets
+  such as `(… Remix)` stay in the title). Before, such songs showed "Unknown Artist" and the file name. Nothing is
+  written into your files; the index is read once again.
+- **Lyrics for those songs from LRCLIB**, too: the name's artist and title are asked like tags are. A song with no
+  artist anywhere is searched by title alone and only takes a result of the same length (within 2 s). When a title
+  with brackets finds nothing, it is asked once more without them (`Song (X Remix)` → `Song`), and then only a
+  result of the same length counts, so a remix doesn't get the original's lyrics unless the songs are equally
+  long. Answers are kept per question, so a better title or artist is asked again.
 - **Local files: lyrics from [LRCLIB](https://lrclib.net)** for songs that have none of their own (no `.lrc`,
   `.txt` or lyrics tag). Synced lyrics when LRCLIB has them, else plain ones; songs marked instrumental get none.
   They show in Now Playing, the side panel and uzu's lyrics screen with a small "Lyrics from LRCLIB". Each song is

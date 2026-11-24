@@ -53,7 +53,8 @@ The screenshots use made-up albums and artists.
   Apple Music. You can also use Uzumaki with local files only, without an Apple Music subscription.
   Star them as favourites (kept on this computer), see their lyrics from a `.lrc` or `.txt` beside the file or
   from their tags (or, for songs without any, from [LRCLIB](https://lrclib.net)), and browse them by artist and
-  album with album artists, discs, compilations and covers.
+  album with album artists, discs, compilations and covers. Files without tags are named from their file and
+  folder names (`Artist - Title.flac`, `Artist/Album/04 Title.flac`).
 - **Mixed playlists:** put your own files into your Apple Music playlists (they stay on this computer and are
   marked with a small icon; Apple Music never gets them), or make Uzumaki playlists that mix both and live only
   on this computer. Export a playlist's own files as `.m3u8`, or import a `.m3u8` as an Uzumaki playlist
@@ -325,7 +326,8 @@ For the details, see [docs/bridge-protocol.md](docs/bridge-protocol.md).
   from the files and their folders, and their favourites stay on this computer; none of it goes to Apple.
 - **Lyrics from LRCLIB** (on by default): for one of your own songs without lyrics, Uzumaki asks
   [lrclib.net](https://lrclib.net) once, sending its title, artist, album and length (and a User-Agent naming
-  Uzumaki and its version). Answers, "not found" included, are kept in Uzumaki's cache, so each song is asked once
+  Uzumaki and its version). For a file without tags, the title and artist are read from its file name and
+  folders (`Artist - Title.flac`, `Artist/Album/04 Title.flac`), so that text is what is sent. Answers, "not found" included, are kept in Uzumaki's cache, so each song is asked once
   ("not found" again after ten days). Nothing is written into your music folders unless you turn on "Save .lrc
   files next to the songs". Turn it off in Settings → Local Files; then nothing is sent.
 
