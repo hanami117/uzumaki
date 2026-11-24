@@ -5,6 +5,17 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **Local files: lyrics from [LRCLIB](https://lrclib.net)** for songs that have none of their own (no `.lrc`,
+  `.txt` or lyrics tag). Synced lyrics when LRCLIB has them, else plain ones; songs marked instrumental get none.
+  They show in Now Playing, the side panel and uzu's lyrics screen with a small "Lyrics from LRCLIB". Each song is
+  asked once: answers (and "not found", asked again after ten days) are kept in Uzumaki's cache. Sends the song's
+  title, artist, album and length to lrclib.net; on by default, off in Settings → Local Files → Lyrics. Offline or
+  when LRCLIB is busy nothing breaks: it waits (honouring LRCLIB's Retry-After) and asks again later.
+- **Settings → Local Files → Lyrics:** "Save .lrc files next to the songs" (off by default; `.txt` for lyrics that
+  aren't time-synced, never over an existing file) and "Download lyrics for all local songs", which asks LRCLIB
+  about every song without lyrics, one at a time, with progress and Stop.
+
 ## [0.4.3] - 2026-11-24
 
 More for your own music files (favourites, lyrics, better albums, playlist import and export), Chromecast plays local
