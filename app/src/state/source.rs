@@ -98,6 +98,7 @@ impl State {
                 t.set_playing(false);
             }
             self.discord_sync();
+            self.media_sync(false);
         }
         let now = Instant::now();
         let local_only = self.local_only();
@@ -209,6 +210,7 @@ impl State {
             self.playback.song = None;
             self.playback.set_state(PlayState::Stopped);
             self.discord_sync();
+            self.media_sync(false);
             self.playback.position = 0.0;
             self.playback.position_at = None;
             self.starting = None;

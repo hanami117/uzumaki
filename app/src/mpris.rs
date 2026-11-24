@@ -329,8 +329,8 @@ impl Mpris {
         Ok(Self { conn, shared })
     }
 
-    /// Called on the bridge reader thread for every bridge event (now playing, play state, time,
-    /// ready/volume), before the UI sees it. Must not block.
+    /// Called on the UI thread with what the app state shows (`media::Feed`: song, play state,
+    /// time, volume). Must not block.
     pub fn observe(&self, event: &Event) {
         let mut changed: HashMap<&str, Value<'_>> = HashMap::new();
         let mut seeked: Option<i64> = None;

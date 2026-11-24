@@ -613,9 +613,15 @@ pub struct State {
     notifier: crate::notify::Notifier,
     /// Discord Rich Presence (`discord/`): "Show on Discord", off unless the setting is on.
     discord: crate::discord::Presence,
+    /// The system's media controls (MPRIS, macOS Now Playing, Windows SMTC): what they are told
+    /// (`media.rs`). None in tests that don't listen and in headless runs.
+    pub media_out: Option<crate::media::Observer>,
+    media_feed: crate::media::Feed,
     /// Set when we asked for a new song and it hasn't started yet. Meanwhile MusicKit reports
     /// the old queue stopping (nothing playing, paused, …), which must not flicker the player bar.
     starting: Option<Instant>,
+    /// Pause was pressed while `starting`: the next Paused is believed (`apply_event`).
+    pause_while_starting: bool,
     /// Songs skipped in a row because Apple couldn't find them (see `queue_failed`).
     skipped_in_row: u32,
     /// The account refuses explicit songs (`restricted.rs`), told by MusicKit or learned from a refusal.
@@ -724,7 +730,10 @@ impl State {
             hooks: if persist { crate::hooks::Hooks::for_app() } else { crate::hooks::Hooks::off() },
             notifier,
             discord: if persist { crate::discord::Presence::for_app() } else { crate::discord::Presence::off() },
+            media_out: None,
+            media_feed: Default::default(),
             starting: None,
+            pause_while_starting: false,
             skipped_in_row: 0,
             explicit_blocked: false,
             restricted_told: false,
@@ -793,6 +802,7 @@ impl State {
         self.favourite_lookups();
         self.resume_changed(false);
         self.discord_sync();
+        self.media_sync(time);
         if time {
             // A frame for `ui::poll`, which moves the seek bars to the clock: a report that
             // changes it without changing the second (a small jump, or while paused) re-runs no
@@ -1218,12 +1228,15 @@ impl State {
                 if state == PlayState::Playing {
                     // A start at a position (Resume where you left off) counts its wait for a
                     // report near the target from when the audio runs, not from the click.
+                    self.pause_while_starting = false;
                     if self.starting.take().is_some() {
                         if let Some((_, at)) = &mut self.playback.seek_target {
                             *at = crate::clock::now();
                         }
                     }
                     self.skipped_in_row = 0;
+                } else if state == PlayState::Paused && std::mem::take(&mut self.pause_while_starting) {
+                    self.starting = None; // the user paused the song that was loading
                 } else if self.starting.is_some_and(|t| crate::clock::since(t) < STARTING_GRACE) {
                     return false; // the old queue winding down; we already show "loading"
                 }

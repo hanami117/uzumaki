@@ -84,12 +84,12 @@ pub const SUPPORT_URL: &str = "https://ko-fi.com/hanami117";
 /// The copyright line (Settings → About; the macOS About panel and Info.plist spell it out too).
 pub const COPYRIGHT: &str = "© 2026 Thomas Lonigro";
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, OnceLock};
 
 use rune::{App, AppSpec, ImageCache, Tx, Waker};
 
-use crate::bridge::{Bridge, Engine, Event};
+use crate::bridge::{Bridge, Engine};
 use crate::local::LocalPlayer;
 use crate::state::{Msg, State};
 
@@ -336,9 +336,8 @@ fn main() {
         std::thread::spawn(win::register_app_id);
     }
 
-    // Bridge events and replies arrive on its reader thread. MPRIS hears playback events there
-    // too (so media keys and panel widgets stay current while the window isn't drawing), then
-    // the message goes to the UI thread.
+    // Bridge events and replies arrive on its reader thread and go to the UI thread (updates run
+    // there even while no window shows), where the state tells the media controls.
     let handle = app.handle();
     // Show the library from disk while Electron starts.
     {
@@ -357,25 +356,11 @@ fn main() {
     let mpris_slot: Arc<OnceLock<nowplaying::NowPlaying>> = Arc::new(OnceLock::new());
     #[cfg(windows)]
     let mpris_slot: Arc<OnceLock<smtc::Smtc>> = Arc::new(OnceLock::new());
-    // True while the local-files player is in charge: MPRIS then follows its playback events
-    // and ignores the (paused) bridge's.
+    // True while the local-files player is in charge (`LocalPlayer` keeps it up to date).
     let local_active = Arc::new(AtomicBool::new(false));
     let sink = {
         let handle = handle.clone();
-        let mpris_slot = mpris_slot.clone();
-        let local_active = local_active.clone();
-        move |msg: Msg| {
-            if let Some(m) = mpris_slot.get() {
-                let local = local_active.load(Ordering::SeqCst);
-                let playback = |e: &Event| matches!(e, Event::NowPlaying(_) | Event::PlayState(_) | Event::Time { .. } | Event::Stopped | Event::Exited);
-                match &msg {
-                    Msg::Bridge(e) if !(local && playback(e)) => m.observe(e),
-                    Msg::Local { event, .. } if local => m.observe(event),
-                    _ => {}
-                }
-            }
-            handle.update_if(move |s: &mut State, tx| s.apply(msg, tx));
-        }
+        move |msg: Msg| handle.update_if(move |s: &mut State, tx| s.apply(msg, tx))
     };
     // AirPlay: created idle (no thread, no network) before the players, which ask it where the
     // audio goes; it starts working when the picker opens or a speaker is chosen.
@@ -465,6 +450,12 @@ fn main() {
     let ui_handle = handle.clone();
     let app = app.init(move || {
         let mut s = State::new(None, Some(local), Some(ui_handle));
+        // MPRIS / Now Playing / SMTC are told what the app state says plays (`State::media_out`).
+        s.media_out = Some(Box::new(move |e| {
+            if let Some(m) = mpris_slot.get() {
+                m.observe(e);
+            }
+        }));
         s.engine = Some(ui_engine);
         s.load_local();
         s.background = hidden;
