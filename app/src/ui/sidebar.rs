@@ -757,7 +757,8 @@ mod hide_tests {
         s.settings.pins.push(crate::settings::Pin { kind: PinKind::Album, id: "a.1".into(), title: "A".into(), artwork: None });
         s.set_nav_hidden("nav-radio", true);
         s.set_music_source(crate::settings::MusicSource::LocalOnly);
-        assert_eq!(keys(&s), ["h-Library", "nav-local-artists", "nav-local-albums", "nav-local", "nav-folders"]);
+        // Favourite Songs is the local favourites' page (Apple's stays hidden with the rest).
+        assert_eq!(keys(&s), ["h-Library", "nav-local-artists", "nav-local-albums", "nav-local", "nav-folders", "h-Playlists", "pl-local-favourites"]);
         // The rail lists the same four, and Local Files is called Songs there.
         assert_eq!(library(&s).iter().map(|n| n.info().2).collect::<Vec<_>>(), ["Artists", "Albums", "Songs", "Folders"]);
         assert_eq!(nav_choices(true).iter().map(|c| c.1).collect::<Vec<_>>(), ["Search", "Artists", "Albums", "Songs", "Folders"]);
