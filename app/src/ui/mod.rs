@@ -21,7 +21,7 @@ mod keys;
 mod lib_search;
 mod library;
 mod lists;
-mod local_files;
+pub(crate) mod local_files;
 mod local_lib;
 #[cfg(test)]
 mod lyrics_snap_tests;

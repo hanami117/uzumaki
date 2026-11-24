@@ -127,6 +127,7 @@ pub(crate) fn fake_lyrics(song_id: &str) -> Reply {
             LyricLine { start: 14.0, end: 18.0, text: "second line here".into(), ..Default::default() },
             LyricLine { start: 18.0, end: 20.0, text: "answer".into(), second_voice: true, ..Default::default() },
         ],
+        credit: None,
     }
 }
 

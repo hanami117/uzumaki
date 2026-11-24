@@ -101,6 +101,7 @@ pub fn lyrics_reply(song_id: &str, l: &crate::lyrics::Lyrics) -> ctl::Reply {
                 words: x.words.iter().map(|w| ctl::LyricWord { start: w.start, end: w.end, text: w.text.clone() }).collect(),
             })
             .collect(),
+        credit: l.credit.map(str::to_string),
     }
 }
 
@@ -115,7 +116,7 @@ fn locate(ids: &[String], index: usize, id: &str, taken: &[usize]) -> Option<usi
 const QUEUE_CHANGED: &str = "the queue changed and that song is no longer in it (run uzu queue again)";
 
 fn lyrics_state(song_id: &str, status: ctl::LyricsStatus) -> ctl::Reply {
-    ctl::Reply::Lyrics { song_id: song_id.to_string(), status, lines: Vec::new() }
+    ctl::Reply::Lyrics { song_id: song_id.to_string(), status, lines: Vec::new(), credit: None }
 }
 
 impl State {

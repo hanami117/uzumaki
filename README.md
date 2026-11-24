@@ -52,7 +52,8 @@ The screenshots use made-up albums and artists.
 - **Your own music files:** FLAC, MP3, AAC/ALAC, Ogg Vorbis and WAV play inside the app, in the same queue as
   Apple Music. You can also use Uzumaki with local files only, without an Apple Music subscription.
   Star them as favourites (kept on this computer), see their lyrics from a `.lrc` or `.txt` beside the file or
-  from their tags, and browse them by artist and album with album artists, discs, compilations and covers.
+  from their tags (or, for songs without any, from [LRCLIB](https://lrclib.net)), and browse them by artist and
+  album with album artists, discs, compilations and covers.
 - **Mixed playlists:** put your own files into your Apple Music playlists (they stay on this computer and are
   marked with a small icon; Apple Music never gets them), or make Uzumaki playlists that mix both and live only
   on this computer. Export a playlist's own files as `.m3u8`, or import a `.m3u8` as an Uzumaki playlist
@@ -322,6 +323,11 @@ For the details, see [docs/bridge-protocol.md](docs/bridge-protocol.md).
   (and fetches the cover from Apple). See [docs/DISCORD.md](docs/DISCORD.md).
 - **Covers and lyrics** come from Apple, the same as in the web player. Your own files' covers and lyrics are read
   from the files and their folders, and their favourites stay on this computer; none of it goes to Apple.
+- **Lyrics from LRCLIB** (on by default): for one of your own songs without lyrics, Uzumaki asks
+  [lrclib.net](https://lrclib.net) once, sending its title, artist, album and length (and a User-Agent naming
+  Uzumaki and its version). Answers, "not found" included, are kept in Uzumaki's cache, so each song is asked once
+  ("not found" again after ten days). Nothing is written into your music folders unless you turn on "Save .lrc
+  files next to the songs". Turn it off in Settings → Local Files; then nothing is sent.
 
 ## Build from source and contribute
 
@@ -340,7 +346,8 @@ Copyright © 2026 Thomas Lonigro.
 
 Uzumaki is free software, under the GNU General Public License, version 3 or (at your option) any later
 version (`GPL-3.0-or-later`, see [LICENSE](LICENSE)). Third-party code, fonts and the castLabs Electron
-player keep their own licences: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+player keep their own licences: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Lyrics for your own files
+that have none come from [LRCLIB](https://lrclib.net), a free, community-built lyrics database: thank you.
 
 Website: [getuzumaki.app](https://getuzumaki.app) · Questions or ideas: hello@getuzumaki.app ·
 Help with the app: support@getuzumaki.app · X: [@Uzumaki_App](https://x.com/Uzumaki_App)

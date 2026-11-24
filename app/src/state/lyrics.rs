@@ -1,6 +1,7 @@
 //! Lyrics of the playing song, from Apple (`/songs/{id}/syllable-lyrics`, then `/lyrics`), or
 //! for a local file from beside it or its tags (`local::lyrics`, read on a background thread each
-//! time it starts, keyed by its `file://` id; never asked of Apple).
+//! time it starts, keyed by its `file://` id; never asked of Apple), else from LRCLIB
+//! (`state/lrclib.rs`).
 //!
 //! Only an answer from Apple is kept: lyrics, or "none". An error (the network, a 401/429/5xx, the
 //! page reloading, a reply that never comes) is never taken for "none": the song is asked again
@@ -165,7 +166,8 @@ impl State {
     }
 
     /// A local file's lyrics, read again each time it starts (an edited `.lrc` shows the next
-    /// time), off the UI thread when the app runs. What shows meanwhile stays.
+    /// time), off the UI thread when the app runs. What shows meanwhile stays. A file without
+    /// lyrics of its own asks LRCLIB (its cache first) when that is on (`State::lrclib_ask`).
     fn read_local_lyrics(&mut self, song: &Song) {
         let Some(path) = song.local_path().map(std::path::Path::to_path_buf) else { return };
         let id = song.id.clone();
@@ -176,13 +178,14 @@ impl State {
         if !self.lyrics.contains_key(&id) {
             self.lyrics.insert(id.clone(), Load::Loading);
         }
+        let ask = self.lrclib_ask(song);
         match self.handle.clone() {
             Some(handle) => {
                 let spawned = std::thread::Builder::new().name("local-lyrics".into()).spawn(move || {
-                    let found = crate::local::lyrics::read(&path);
+                    let (found, later) = super::lrclib::local_lyrics(&path, ask);
                     handle.update(move |s: &mut State, tx| {
                         s.landing(tx);
-                        s.local_lyrics_read(id, found);
+                        s.local_lyrics_read(id, found, later);
                     });
                 });
                 if spawned.is_err() {
@@ -190,13 +193,18 @@ impl State {
                 }
             }
             None => {
-                let found = crate::local::lyrics::read(&path);
-                self.local_lyrics_read(id, found);
+                let (found, later) = super::lrclib::local_lyrics(&path, ask);
+                self.local_lyrics_read(id, found, later);
             }
         }
     }
 
-    pub(super) fn local_lyrics_read(&mut self, id: String, found: Option<Lyrics>) {
+    /// A local file's lyrics landed. `later`: LRCLIB couldn't be asked this time (offline, busy),
+    /// which never replaces lyrics already showing.
+    pub(super) fn local_lyrics_read(&mut self, id: String, found: Option<Lyrics>, later: bool) {
+        if found.is_none() && later && matches!(self.lyrics.get(&id), Some(Load::Ready(Some(_)))) {
+            return;
+        }
         self.lyrics.insert(id, Load::Ready(found));
     }
 

@@ -339,6 +339,7 @@ fn parent(row: Row) -> Option<Row> {
         Row::ListStrength => Some(Row::ShowOn),
         Row::StartHidden => Some(Row::StartAtLogin),
         Row::CloseToTray => Some(Row::Tray),
+        Row::LrclibSave | Row::LrclibAll => Some(Row::Lrclib),
         Row::NpCoverEffect => Some(Row::NpBackground),
         _ => None,
     }
@@ -356,6 +357,7 @@ fn available(s: &State, row: Row) -> bool {
             Row::ListStrength => ap.source != BgSource::Off && ap.show_on == ShowOn::All,
             Row::StartHidden => s.login.on,
             Row::CloseToTray => s.settings.tray_icon,
+            Row::LrclibSave | Row::LrclibAll => s.settings.lrclib,
             Row::NpCoverEffect => ap.np == NpBg::Cover,
             _ => true,
         }
@@ -760,6 +762,9 @@ fn row_el(r: &Rx, id: Row) -> El {
         Row::ArtCache => cache_row(s, narrow, CacheKind::Art, title, "settings/clear/art"),
         Row::LibraryCache => cache_row(s, narrow, CacheKind::Library, title, "settings/clear/library"),
         Row::MusicFolders => music_folders(s, narrow),
+        Row::Lrclib => setting(narrow, title, desc(), switch("settings/lrclib", title, s.settings.lrclib, true, |s, on| s.set_lrclib(on))),
+        Row::LrclibSave => setting(narrow, title, desc(), switch("settings/lrclib-save", title, s.settings.lrclib_save, true, |s, on| s.set_lrclib_save(on))),
+        Row::LrclibAll => lrclib_all(s, narrow, title, desc()),
         Row::NumberKeys => number_keys(s, narrow),
         Row::Binding(i) => binding(s, i),
     }
@@ -1116,6 +1121,29 @@ Playback in Apple Music mode runs in a hidden castLabs Electron window, which br
 symphonia and rodio. The interface is drawn with Rune, in Inter and IBM Plex Mono. Each keeps its own licence: see \
 THIRD_PARTY_NOTICES.md in the source. Uzumaki is not affiliated with Apple.";
 
+/// Local Files → Download lyrics for all local songs: the button, Stop and the progress while
+/// it runs, then what it came to.
+fn lrclib_all(s: &State, narrow: bool, title: &str, desc: Option<String>) -> El {
+    let b = &s.lrclib_batch;
+    let n = super::local_files::thousands;
+    let (desc, control) = match b.running {
+        Some(p) => (
+            Some(format!("Checked {} of {} songs \u{b7} lyrics for {}", n(p.done), n(p.total), n(p.found))),
+            small_button("settings/lrclib-stop", "Stop").on_press(|s: &mut State| s.lrclib_stop()),
+        ),
+        None => {
+            let go = small_button("settings/lrclib-all", "Download");
+            let go = if s.local_lib.scanning || s.local_lib.songs.is_empty() {
+                go.opacity(0.4).cursor(Cursor::NotAllowed)
+            } else {
+                go.on_press(|s: &mut State| s.lrclib_all())
+            };
+            (b.note.clone().or(desc), go)
+        }
+    };
+    setting(narrow, title, desc, control)
+}
+
 fn local(r: &Rx) -> Vec<El> {
     let lib = &r.s.local_lib;
     let status = if lib.scanning {
@@ -1132,6 +1160,8 @@ fn local(r: &Rx) -> Vec<El> {
         text("Plays FLAC, MP3, AAC/ALAC (M4A), Ogg Vorbis and WAV. Files stay on this computer.")
             .font(SMALL13).color(PAL.dim).wrap().mt(6.0),
     );
+    v.push(heading("Lyrics"));
+    v.extend(rows(r, &[Row::Lrclib, Row::LrclibSave, Row::LrclibAll]));
     v
 }
 
@@ -1744,7 +1774,7 @@ mod tests {
         for tab in Tab::ALL {
             let table = search::rows_of(tab);
             let page: Vec<Row> = match tab {
-                Tab::Local => vec![Row::MusicFolders],
+                Tab::Local => vec![Row::MusicFolders, Row::Lrclib, Row::LrclibSave, Row::LrclibAll],
                 Tab::Keyboard => vec![Row::NumberKeys],
                 Tab::About => vec![Row::About, Row::Licences, Row::Links, Row::Support],
                 _ => layout_rows(tab).collect(),
@@ -1792,7 +1822,9 @@ mod tests {
         let mut s = State::offline();
         s.settings.music_source = MusicSource::LocalOnly;
         set_query(&mut s, "lyrics");
-        assert!(results(&s).iter().all(|(t, _)| *t == Tab::Keyboard), "{:?}", results(&s));
+        // Apple's lyrics row is gone; the shortcuts and LRCLIB's rows (local files) stay.
+        assert!(results(&s).iter().all(|(t, _)| matches!(t, Tab::Keyboard | Tab::Local)), "{:?}", results(&s));
+        assert!(results(&s).iter().any(|(t, _)| *t == Tab::Local), "{:?}", results(&s));
     }
 
     #[test]

@@ -18,6 +18,18 @@ fn frame(narrow: bool) -> El {
     if narrow { c.w_full().grow(1.0).min_h(0.0) } else { c.grow(1.0).max_w(640.0).h_full() }
 }
 
+/// The lyrics' frame, inside `credited`'s column when they carry a credit.
+fn frame_for(l: &Lyrics, narrow: bool) -> El {
+    if l.credit.is_some() { col().key("np-lyrics").w_full().grow(1.0).min_h(0.0) } else { frame(narrow) }
+}
+
+/// Lyrics from elsewhere (LRCLIB): the column of `frame` with the credit under the lyrics.
+fn credited(narrow: bool, body: El, credit: &'static str) -> El {
+    let c = col().key("np-lyrics-col").gap(10.0);
+    let c = if narrow { c.w_full().grow(1.0).min_h(0.0) } else { c.grow(1.0).max_w(640.0).h_full() };
+    c.child(body).child(text(credit).font(SECTION11).color(PAL.dim).px(8.0).key("np-lyrics-credit"))
+}
+
 fn message(narrow: bool, msg: &str) -> El {
     frame(narrow).justify_center().child(text(msg.to_string()).font(TextStyle::new(20.0, 500.0)).color(PAL.lyric_next))
 }
@@ -26,7 +38,11 @@ pub fn panel(s: &State, song: &Song, cx: &Cx<State>, narrow: bool) -> El {
     let view = cx.layout_size("np-lyrics").unwrap_or([480.0, 560.0]);
     match lyrics_load(s, song) {
         Some(Load::Ready(Some(l))) if !l.lines.is_empty() => {
-            if l.synced { synced(s, song, l, cx, view, narrow) } else { plain(l, view, narrow) }
+            let body = if l.synced { synced(s, song, l, cx, view, narrow) } else { plain(l, view, narrow) };
+            match l.credit {
+                Some(c) => credited(narrow, body, c),
+                None => body,
+            }
         }
         Some(Load::Idle) | Some(Load::Loading) | None => message(narrow, "Loading lyrics\u{2026}"),
         Some(Load::Failed(_)) => message(narrow, "Couldn\u{2019}t load lyrics"),
@@ -42,7 +58,7 @@ fn plain(l: &Lyrics, view: [f32; 2], narrow: bool) -> El {
     for line in &l.lines {
         body = body.child(text(line.text.clone()).font(PLAIN).color(PAL.text2.alpha(0.85)).wrap());
     }
-    frame(narrow).scroll(ScrollSpec { stick_bottom: false }).scroll_edge_fade(40.0).child(body)
+    frame_for(l, narrow).scroll(ScrollSpec { stick_bottom: false }).scroll_edge_fade(40.0).child(body)
 }
 
 /// Alpha of the unlit base text of a word-timed line (the fill overlay is full `PAL.text`).
@@ -179,7 +195,7 @@ fn synced(s: &State, song: &Song, l: &Lyrics, cx: &Cx<State>, view: [f32; 2], na
         }));
     }
 
-    frame(narrow)
+    frame_for(l, narrow)
         .scroll(ScrollSpec { stick_bottom: false })
         .scroll_edge_fade(48.0)
         .motion(GLIDE)

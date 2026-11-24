@@ -62,6 +62,12 @@ pub enum Row {
     ArtCache,
     LibraryCache,
     MusicFolders,
+    /// Download lyrics from LRCLIB for local songs without their own (Settings → Local Files).
+    Lrclib,
+    /// Save what LRCLIB finds next to the songs.
+    LrclibSave,
+    /// Download lyrics for all local songs (the batch, its progress and Stop).
+    LrclibAll,
     NumberKeys,
     /// The version and copyright (Settings → About).
     About,
@@ -121,6 +127,9 @@ impl Row {
             Row::ArtCache => "art-cache",
             Row::LibraryCache => "library-cache",
             Row::MusicFolders => "music-folders",
+            Row::Lrclib => "lrclib",
+            Row::LrclibSave => "lrclib-save",
+            Row::LrclibAll => "lrclib-all",
             Row::NumberKeys => "number-keys",
             Row::About => "about",
             Row::Licences => "licences",
@@ -249,6 +258,9 @@ const SPECS: &[Spec] = &[
     spec(Row::DiscordHideTitle, Tab::Notifications, "Hide the song title", "Shows \u{201c}Listening to music\u{201d} and the artist only.", "discord private privacy hide song title name secret"),
     // ---- Local Files ----
     spec(Row::MusicFolders, Tab::Local, "Music folders", "Songs in these folders (and their subfolders) show up under Local Files.", "folder directory files flac mp3 rescan scan import"),
+    spec(Row::Lrclib, Tab::Local, "Download lyrics from LRCLIB", "For songs without lyrics of their own. Sends the title, artist, album and length to lrclib.net.", "lyrics lrclib lrc synced karaoke download internet online words"),
+    spec(Row::LrclibSave, Tab::Local, "Save .lrc files next to the songs", "Writes what LRCLIB finds into your music folders (.txt when not time-synced), never over an existing file. Off: kept in Uzumaki\u{2019}s cache only.", "lyrics lrclib lrc txt save write sidecar file folder"),
+    spec(Row::LrclibAll, Tab::Local, "Download lyrics for all local songs", "Asks LRCLIB about every song without lyrics, one at a time. Songs already asked are skipped.", "lyrics lrclib download all library batch fetch"),
     // ---- Keyboard ----
     spec(Row::NumberKeys, Tab::Keyboard, "Number keys 1\u{2013}9", "Your sidebar pins or pages.", "shortcuts keys hotkeys keybindings pins pages ctrl alt digits"),
     // ---- Advanced ----

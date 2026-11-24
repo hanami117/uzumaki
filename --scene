@@ -1,0 +1,2442 @@
+{
+  "accessibility": {
+    "bounds": [
+      0.0,
+      0.0,
+      1360.0,
+      860.0
+    ],
+    "children": [
+      {
+        "bounds": [
+          0.0,
+          0.0,
+          1360.0,
+          860.0
+        ],
+        "children": [
+          {
+            "bounds": [
+              0.0,
+              0.0,
+              1360.0,
+              860.0
+            ],
+            "children": [
+              {
+                "bounds": [
+                  0.0,
+                  0.0,
+                  232.0,
+                  860.0
+                ],
+                "children": [
+                  {
+                    "bounds": [
+                      0.0,
+                      0.0,
+                      232.0,
+                      28.0
+                    ],
+                    "key": "sb-titlebar",
+                    "role": "group"
+                  },
+                  {
+                    "bounds": [
+                      60.0,
+                      39.0,
+                      76.0,
+                      22.0
+                    ],
+                    "name": "Uzumaki",
+                    "role": "label"
+                  },
+                  {
+                    "actions": [
+                      "click",
+                      "focus"
+                    ],
+                    "bounds": [
+                      146.0,
+                      34.0,
+                      32.0,
+                      32.0
+                    ],
+                    "key": "sb-settings",
+                    "name": "Settings",
+                    "role": "button"
+                  },
+                  {
+                    "actions": [
+                      "click",
+                      "focus"
+                    ],
+                    "bounds": [
+                      188.0,
+                      34.0,
+                      32.0,
+                      32.0
+                    ],
+                    "key": "sb-toggle",
+                    "name": "Toggle sidebar",
+                    "role": "button"
+                  },
+                  {
+                    "actions": [
+                      "click",
+                      "focus",
+                      "context-menu"
+                    ],
+                    "bounds": [
+                      10.0,
+                      80.0,
+                      212.0,
+                      36.0
+                    ],
+                    "children": [
+                      {
+                        "bounds": [
+                          51.0,
+                          89.0,
+                          161.0,
+                          18.0
+                        ],
+                        "name": "Search",
+                        "role": "label"
+                      }
+                    ],
+                    "key": "nav-search",
+                    "name": "Search",
+                    "role": "button"
+                  },
+                  {
+                    "actions": [
+                      "click",
+                      "focus",
+                      "context-menu"
+                    ],
+                    "bounds": [
+                      10.0,
+                      118.0,
+                      212.0,
+                      36.0
+                    ],
+                    "children": [
+                      {
+                        "bounds": [
+                          51.0,
+                          127.0,
+                          161.0,
+                          18.0
+                        ],
+                        "name": "Home",
+                        "role": "label"
+                      }
+                    ],
+                    "key": "nav-home",
+                    "name": "Home",
+                    "role": "button"
+                  },
+                  {
+                    "actions": [
+                      "click",
+                      "focus",
+                      "context-menu"
+                    ],
+                    "bounds": [
+                      10.0,
+                      156.0,
+                      212.0,
+                      36.0
+                    ],
+                    "children": [
+                      {
+                        "bounds": [
+                          51.0,
+                          165.0,
+                          161.0,
+                          18.0
+                        ],
+                        "name": "New",
+                        "role": "label"
+                      }
+                    ],
+                    "key": "nav-new",
+                    "name": "New",
+                    "role": "button"
+                  },
+                  {
+                    "actions": [
+                      "click",
+                      "focus",
+                      "context-menu"
+                    ],
+                    "bounds": [
+                      10.0,
+                      194.0,
+                      212.0,
+                      36.0
+                    ],
+                    "children": [
+                      {
+                        "bounds": [
+                          51.0,
+                          203.0,
+                          161.0,
+                          18.0
+                        ],
+                        "name": "Radio",
+                        "role": "label"
+                      }
+                    ],
+                    "key": "nav-radio",
+                    "name": "Radio",
+                    "role": "button"
+                  },
+                  {
+                    "actions": [
+                      "scroll-up",
+                      "scroll-down",
+                      "set-scroll-offset"
+                    ],
+                    "bounds": [
+                      0.0,
+                      230.0,
+                      232.0,
+                      630.0
+                    ],
+                    "children": [
+                      {
+                        "actions": [
+                          "scroll-into-view"
+                        ],
+                        "bounds": [
+                          0.0,
+                          230.0,
+                          232.0,
+                          336.0
+                        ],
+                        "children": [
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              230.0,
+                              232.0,
+                              36.0
+                            ],
+                            "key": "h-Library",
+                            "name": "Library",
+                            "position": 1,
+                            "role": "label"
+                          },
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              266.0,
+                              232.0,
+                              36.0
+                            ],
+                            "children": [
+                              {
+                                "actions": [
+                                  "click",
+                                  "focus",
+                                  "context-menu",
+                                  "scroll-into-view"
+                                ],
+                                "bounds": [
+                                  10.0,
+                                  266.0,
+                                  212.0,
+                                  36.0
+                                ],
+                                "children": [
+                                  {
+                                    "actions": [
+                                      "scroll-into-view"
+                                    ],
+                                    "bounds": [
+                                      51.0,
+                                      275.0,
+                                      161.0,
+                                      18.0
+                                    ],
+                                    "name": "Recently Added",
+                                    "role": "label"
+                                  }
+                                ],
+                                "key": "nav-recent",
+                                "name": "Recently Added",
+                                "role": "button"
+                              }
+                            ],
+                            "key": "nav-recent",
+                            "position": 2,
+                            "role": "group"
+                          },
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              302.0,
+                              232.0,
+                              36.0
+                            ],
+                            "children": [
+                              {
+                                "actions": [
+                                  "click",
+                                  "focus",
+                                  "context-menu",
+                                  "scroll-into-view"
+                                ],
+                                "bounds": [
+                                  10.0,
+                                  302.0,
+                                  212.0,
+                                  36.0
+                                ],
+                                "children": [
+                                  {
+                                    "actions": [
+                                      "scroll-into-view"
+                                    ],
+                                    "bounds": [
+                                      51.0,
+                                      311.0,
+                                      161.0,
+                                      18.0
+                                    ],
+                                    "name": "Artists",
+                                    "role": "label"
+                                  }
+                                ],
+                                "key": "nav-artists",
+                                "name": "Artists",
+                                "role": "button"
+                              }
+                            ],
+                            "key": "nav-artists",
+                            "position": 3,
+                            "role": "group"
+                          },
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              338.0,
+                              232.0,
+                              36.0
+                            ],
+                            "children": [
+                              {
+                                "actions": [
+                                  "click",
+                                  "focus",
+                                  "context-menu",
+                                  "scroll-into-view"
+                                ],
+                                "bounds": [
+                                  10.0,
+                                  338.0,
+                                  212.0,
+                                  36.0
+                                ],
+                                "children": [
+                                  {
+                                    "actions": [
+                                      "scroll-into-view"
+                                    ],
+                                    "bounds": [
+                                      51.0,
+                                      347.0,
+                                      161.0,
+                                      18.0
+                                    ],
+                                    "name": "Albums",
+                                    "role": "label"
+                                  }
+                                ],
+                                "key": "nav-albums",
+                                "name": "Albums",
+                                "role": "button"
+                              }
+                            ],
+                            "key": "nav-albums",
+                            "position": 4,
+                            "role": "group"
+                          },
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              374.0,
+                              232.0,
+                              36.0
+                            ],
+                            "children": [
+                              {
+                                "actions": [
+                                  "click",
+                                  "focus",
+                                  "context-menu",
+                                  "scroll-into-view"
+                                ],
+                                "bounds": [
+                                  10.0,
+                                  374.0,
+                                  212.0,
+                                  36.0
+                                ],
+                                "children": [
+                                  {
+                                    "actions": [
+                                      "scroll-into-view"
+                                    ],
+                                    "bounds": [
+                                      51.0,
+                                      383.0,
+                                      161.0,
+                                      18.0
+                                    ],
+                                    "name": "Songs",
+                                    "role": "label"
+                                  }
+                                ],
+                                "key": "nav-songs",
+                                "name": "Songs",
+                                "role": "button"
+                              }
+                            ],
+                            "key": "nav-songs",
+                            "position": 5,
+                            "role": "group"
+                          },
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              410.0,
+                              232.0,
+                              36.0
+                            ],
+                            "children": [
+                              {
+                                "actions": [
+                                  "click",
+                                  "focus",
+                                  "context-menu",
+                                  "scroll-into-view"
+                                ],
+                                "bounds": [
+                                  10.0,
+                                  410.0,
+                                  212.0,
+                                  36.0
+                                ],
+                                "children": [
+                                  {
+                                    "actions": [
+                                      "scroll-into-view"
+                                    ],
+                                    "bounds": [
+                                      51.0,
+                                      419.0,
+                                      161.0,
+                                      18.0
+                                    ],
+                                    "name": "Made for You",
+                                    "role": "label"
+                                  }
+                                ],
+                                "key": "nav-mfy",
+                                "name": "Made for You",
+                                "role": "button"
+                              }
+                            ],
+                            "key": "nav-mfy",
+                            "position": 6,
+                            "role": "group"
+                          },
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              446.0,
+                              232.0,
+                              36.0
+                            ],
+                            "children": [
+                              {
+                                "actions": [
+                                  "click",
+                                  "focus",
+                                  "context-menu",
+                                  "scroll-into-view"
+                                ],
+                                "bounds": [
+                                  10.0,
+                                  446.0,
+                                  212.0,
+                                  36.0
+                                ],
+                                "children": [
+                                  {
+                                    "actions": [
+                                      "scroll-into-view"
+                                    ],
+                                    "bounds": [
+                                      51.0,
+                                      455.0,
+                                      161.0,
+                                      18.0
+                                    ],
+                                    "name": "Local Files",
+                                    "role": "label"
+                                  }
+                                ],
+                                "key": "nav-local",
+                                "name": "Local Files",
+                                "role": "button"
+                              }
+                            ],
+                            "key": "nav-local",
+                            "position": 7,
+                            "role": "group"
+                          },
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              482.0,
+                              232.0,
+                              36.0
+                            ],
+                            "children": [
+                              {
+                                "actions": [
+                                  "scroll-into-view"
+                                ],
+                                "bounds": [
+                                  20.0,
+                                  496.5,
+                                  174.0,
+                                  15.0
+                                ],
+                                "name": "Playlists",
+                                "role": "label"
+                              },
+                              {
+                                "actions": [
+                                  "click",
+                                  "focus",
+                                  "context-menu",
+                                  "scroll-into-view"
+                                ],
+                                "bounds": [
+                                  194.0,
+                                  492.0,
+                                  24.0,
+                                  24.0
+                                ],
+                                "key": "new-playlist-btn",
+                                "name": "New Playlist",
+                                "role": "button"
+                              }
+                            ],
+                            "key": "h-Playlists",
+                            "position": 8,
+                            "role": "group"
+                          },
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              518.0,
+                              232.0,
+                              36.0
+                            ],
+                            "children": [
+                              {
+                                "actions": [
+                                  "click",
+                                  "focus",
+                                  "context-menu",
+                                  "scroll-into-view"
+                                ],
+                                "bounds": [
+                                  10.0,
+                                  518.0,
+                                  212.0,
+                                  36.0
+                                ],
+                                "children": [
+                                  {
+                                    "actions": [
+                                      "scroll-into-view"
+                                    ],
+                                    "bounds": [
+                                      51.0,
+                                      527.0,
+                                      161.0,
+                                      18.0
+                                    ],
+                                    "name": "All Playlists",
+                                    "role": "label"
+                                  }
+                                ],
+                                "key": "nav-playlists",
+                                "name": "All Playlists",
+                                "role": "button"
+                              }
+                            ],
+                            "key": "nav-playlists",
+                            "position": 9,
+                            "role": "group"
+                          },
+                          {
+                            "actions": [
+                              "scroll-into-view"
+                            ],
+                            "bounds": [
+                              0.0,
+                              554.0,
+                              232.0,
+                              12.0
+                            ],
+                            "key": "pad",
+                            "position": 10,
+                            "role": "group"
+                          }
+                        ],
+                        "key": "sb-rows",
+                        "role": "group",
+                        "setSize": 10
+                      }
+                    ],
+                    "key": "sb-scroll",
+                    "role": "scroll-view",
+                    "scroll": [
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    "states": [
+                      "clips"
+                    ]
+                  }
+                ],
+                "key": "sidebar",
+                "role": "group"
+              },
+              {
+                "bounds": [
+                  233.0,
+                  0.0,
+                  1127.0,
+                  860.0
+                ],
+                "children": [
+                  {
+                    "bounds": [
+                      265.0,
+                      16.0,
+                      1063.0,
+                      44.0
+                    ],
+                    "children": [
+                      {
+                        "bounds": [
+                          281.0,
+                          29.0,
+                          1031.0,
+                          18.0
+                        ],
+                        "name": "Starting playback engine…",
+                        "role": "label"
+                      }
+                    ],
+                    "key": "banner-starting",
+                    "role": "group"
+                  },
+                  {
+                    "actions": [
+                      "scroll-up",
+                      "scroll-down",
+                      "set-scroll-offset"
+                    ],
+                    "bounds": [
+                      233.0,
+                      60.0,
+                      1127.0,
+                      800.0
+                    ],
+                    "children": [
+                      {
+                        "actions": [
+                          "scroll-into-view"
+                        ],
+                        "bounds": [
+                          265.0,
+                          88.0,
+                          1063.0,
+                          38.0
+                        ],
+                        "name": "Listen now",
+                        "role": "label"
+                      },
+                      {
+                        "actions": [
+                          "scroll-into-view"
+                        ],
+                        "bounds": [
+                          265.0,
+                          130.0,
+                          1063.0,
+                          18.0
+                        ],
+                        "name": "Picked from your recent listening",
+                        "role": "label"
+                      },
+                      {
+                        "actions": [
+                          "scroll-into-view"
+                        ],
+                        "bounds": [
+                          265.0,
+                          166.0,
+                          1063.0,
+                          23.0
+                        ],
+                        "name": "Recently played",
+                        "role": "label"
+                      },
+                      {
+                        "actions": [
+                          "scroll-into-view"
+                        ],
+                        "bounds": [
+                          265.0,
+                          219.0,
+                          204.0,
+                          18.0
+                        ],
+                        "name": "Sign in to see your music here.",
+                        "role": "label"
+                      },
+                      {
+                        "actions": [
+                          "scroll-into-view"
+                        ],
+                        "bounds": [
+                          265.0,
+                          281.0,
+                          1063.0,
+                          23.0
+                        ],
+                        "name": "Recently added",
+                        "role": "label"
+                      },
+                      {
+                        "actions": [
+                          "scroll-into-view"
+                        ],
+                        "bounds": [
+                          265.0,
+                          334.0,
+                          204.0,
+                          18.0
+                        ],
+                        "name": "Sign in to see your music here.",
+                        "role": "label"
+                      }
+                    ],
+                    "key": "home",
+                    "role": "scroll-view",
+                    "scroll": [
+                      0.0,
+                      0.0,
+                      0.0
+                    ],
+                    "states": [
+                      "clips"
+                    ]
+                  }
+                ],
+                "key": "main",
+                "role": "group"
+              }
+            ],
+            "key": "app-root",
+            "role": "group"
+          }
+        ],
+        "key": "window",
+        "role": "group"
+      }
+    ],
+    "name": "Uzumaki",
+    "role": "window"
+  },
+  "anim_t": 0.0,
+  "animating": false,
+  "dark_system": true,
+  "elements": [
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "window",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window",
+      "rect": [
+        0.0,
+        0.0,
+        1360.0,
+        860.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#0e0e11ff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "app-root",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root",
+      "rect": [
+        0.0,
+        0.0,
+        1360.0,
+        860.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0",
+      "rect": [
+        0.0,
+        0.0,
+        1360.0,
+        860.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#121216ff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "sidebar",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar",
+      "rect": [
+        0.0,
+        0.0,
+        232.0,
+        860.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "sb-titlebar",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-titlebar",
+      "rect": [
+        0.0,
+        0.0,
+        232.0,
+        28.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#1",
+      "rect": [
+        0.0,
+        28.0,
+        232.0,
+        6.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#2",
+      "rect": [
+        0.0,
+        34.0,
+        232.0,
+        46.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#2/#0",
+      "rect": [
+        20.0,
+        35.0,
+        30.0,
+        30.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ffffffff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#2/#0/#0",
+      "rect": [
+        18.5,
+        33.5,
+        33.0,
+        33.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#f2f2f5ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#2/#1",
+      "rect": [
+        60.0,
+        39.0,
+        76.0,
+        22.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Uzumaki"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "help": "Settings (⌘,)",
+      "inert": false,
+      "key": "sb-settings",
+      "label": "Settings",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#2/sb-settings",
+      "rect": [
+        146.0,
+        34.0,
+        32.0,
+        32.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#8a8a94ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#2/sb-settings/#0",
+      "rect": [
+        152.5,
+        40.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "help": "Toggle sidebar (⌘B)",
+      "inert": false,
+      "key": "sb-toggle",
+      "label": "Toggle sidebar",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#2/sb-toggle",
+      "rect": [
+        188.0,
+        34.0,
+        32.0,
+        32.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#8a8a94ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#2/sb-toggle/#0",
+      "rect": [
+        194.5,
+        40.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3",
+      "rect": [
+        0.0,
+        80.0,
+        232.0,
+        150.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-search",
+      "label": "Search",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-search",
+      "rect": [
+        10.0,
+        80.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-search/#0",
+      "rect": [
+        20.0,
+        88.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-search/#1",
+      "rect": [
+        51.0,
+        89.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Search"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#24242cff",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-home",
+      "label": "Home",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-home",
+      "rect": [
+        10.0,
+        118.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-home/#0",
+      "rect": [
+        20.0,
+        126.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#f2f2f5ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-home/#1",
+      "rect": [
+        51.0,
+        127.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Home"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-new",
+      "label": "New",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-new",
+      "rect": [
+        10.0,
+        156.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-new/#0",
+      "rect": [
+        20.0,
+        164.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-new/#1",
+      "rect": [
+        51.0,
+        165.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "New"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-radio",
+      "label": "Radio",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-radio",
+      "rect": [
+        10.0,
+        194.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-radio/#0",
+      "rect": [
+        20.0,
+        202.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/#3/nav-radio/#1",
+      "rect": [
+        51.0,
+        203.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Radio"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "sb-scroll",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll",
+      "rect": [
+        0.0,
+        230.0,
+        232.0,
+        630.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "sb-rows",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows",
+      "rect": [
+        0.0,
+        230.0,
+        232.0,
+        336.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#8a8a94ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "h-Library",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/h-Library",
+      "rect": [
+        0.0,
+        230.0,
+        232.0,
+        36.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Library"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "nav-recent",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-recent",
+      "rect": [
+        0.0,
+        266.0,
+        232.0,
+        36.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-recent",
+      "label": "Recently Added",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-recent/nav-recent",
+      "rect": [
+        10.0,
+        266.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-recent/nav-recent/#0",
+      "rect": [
+        20.0,
+        274.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-recent/nav-recent/#1",
+      "rect": [
+        51.0,
+        275.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Recently Added"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "nav-artists",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-artists",
+      "rect": [
+        0.0,
+        302.0,
+        232.0,
+        36.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-artists",
+      "label": "Artists",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-artists/nav-artists",
+      "rect": [
+        10.0,
+        302.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-artists/nav-artists/#0",
+      "rect": [
+        20.0,
+        310.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-artists/nav-artists/#1",
+      "rect": [
+        51.0,
+        311.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Artists"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "nav-albums",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-albums",
+      "rect": [
+        0.0,
+        338.0,
+        232.0,
+        36.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-albums",
+      "label": "Albums",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-albums/nav-albums",
+      "rect": [
+        10.0,
+        338.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-albums/nav-albums/#0",
+      "rect": [
+        20.0,
+        346.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-albums/nav-albums/#1",
+      "rect": [
+        51.0,
+        347.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Albums"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "nav-songs",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-songs",
+      "rect": [
+        0.0,
+        374.0,
+        232.0,
+        36.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-songs",
+      "label": "Songs",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-songs/nav-songs",
+      "rect": [
+        10.0,
+        374.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-songs/nav-songs/#0",
+      "rect": [
+        20.0,
+        382.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-songs/nav-songs/#1",
+      "rect": [
+        51.0,
+        383.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Songs"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "nav-mfy",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-mfy",
+      "rect": [
+        0.0,
+        410.0,
+        232.0,
+        36.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-mfy",
+      "label": "Made for You",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-mfy/nav-mfy",
+      "rect": [
+        10.0,
+        410.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-mfy/nav-mfy/#0",
+      "rect": [
+        20.0,
+        418.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-mfy/nav-mfy/#1",
+      "rect": [
+        51.0,
+        419.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Made for You"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "nav-local",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-local",
+      "rect": [
+        0.0,
+        446.0,
+        232.0,
+        36.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-local",
+      "label": "Local Files",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-local/nav-local",
+      "rect": [
+        10.0,
+        446.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-local/nav-local/#0",
+      "rect": [
+        20.0,
+        454.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-local/nav-local/#1",
+      "rect": [
+        51.0,
+        455.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Local Files"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "h-Playlists",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/h-Playlists",
+      "rect": [
+        0.0,
+        482.0,
+        232.0,
+        36.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#8a8a94ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/h-Playlists/#0",
+      "rect": [
+        20.0,
+        496.5,
+        174.0,
+        15.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Playlists"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "new-playlist-btn",
+      "label": "New Playlist",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/h-Playlists/new-playlist-btn",
+      "rect": [
+        194.0,
+        492.0,
+        24.0,
+        24.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#a6a6b0ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/h-Playlists/new-playlist-btn/#0",
+      "rect": [
+        199.0,
+        497.0,
+        14.0,
+        14.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "nav-playlists",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-playlists",
+      "rect": [
+        0.0,
+        518.0,
+        232.0,
+        36.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": true,
+      "focused": false,
+      "inert": false,
+      "key": "nav-playlists",
+      "label": "All Playlists",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-playlists/nav-playlists",
+      "rect": [
+        10.0,
+        518.0,
+        212.0,
+        36.0
+      ],
+      "role": "button",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#ff7a8aff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-playlists/nav-playlists/#0",
+      "rect": [
+        20.0,
+        526.5,
+        19.0,
+        19.0
+      ],
+      "role": "icon",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#b4b4bdff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/nav-playlists/nav-playlists/#1",
+      "rect": [
+        51.0,
+        527.0,
+        161.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "All Playlists"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "pad",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/sidebar/sb-scroll/sb-rows/pad",
+      "rect": [
+        0.0,
+        554.0,
+        232.0,
+        12.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#1f1f25ff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/#1",
+      "rect": [
+        232.0,
+        0.0,
+        1.0,
+        860.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "main",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main",
+      "rect": [
+        233.0,
+        0.0,
+        1127.0,
+        860.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/#0",
+      "rect": [
+        233.0,
+        0.0,
+        1127.0,
+        60.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#1c1c22ff",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "banner-starting",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/#0/banner-starting",
+      "rect": [
+        265.0,
+        16.0,
+        1063.0,
+        44.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#8a8a94ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/#0/banner-starting/#0",
+      "rect": [
+        281.0,
+        29.0,
+        1031.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Starting playback engine…"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "key": "home",
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home",
+      "rect": [
+        233.0,
+        60.0,
+        1127.0,
+        800.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0",
+      "rect": [
+        233.0,
+        60.0,
+        1127.0,
+        376.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#f2f2f5ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#0",
+      "rect": [
+        265.0,
+        88.0,
+        1063.0,
+        38.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Listen now"
+    },
+    {
+      "blur": 0.0,
+      "color": "#a6a6b0ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#1",
+      "rect": [
+        265.0,
+        130.0,
+        1063.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Picked from your recent listening"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#2",
+      "rect": [
+        265.0,
+        166.0,
+        1063.0,
+        95.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#f2f2f5ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#2/#0",
+      "rect": [
+        265.0,
+        166.0,
+        1063.0,
+        23.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Recently played"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#2/#1",
+      "rect": [
+        265.0,
+        195.0,
+        1063.0,
+        66.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#8a8a94ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#2/#1/#0",
+      "rect": [
+        265.0,
+        219.0,
+        204.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Sign in to see your music here."
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#3",
+      "rect": [
+        265.0,
+        281.0,
+        1063.0,
+        95.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#f2f2f5ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#3/#0",
+      "rect": [
+        265.0,
+        281.0,
+        1063.0,
+        23.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Recently added"
+    },
+    {
+      "blur": 0.0,
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#3/#1",
+      "rect": [
+        265.0,
+        310.0,
+        1063.0,
+        66.0
+      ],
+      "role": "group",
+      "scale": 1.0
+    },
+    {
+      "blur": 0.0,
+      "color": "#8a8a94ff",
+      "fill": "#00000000",
+      "focusVisible": false,
+      "focusable": false,
+      "focused": false,
+      "inert": false,
+      "loopPhase": null,
+      "opacity": 1.0,
+      "path": "window/app-root/#0/main/home/#0/#3/#1/#0",
+      "rect": [
+        265.0,
+        334.0,
+        204.0,
+        18.0
+      ],
+      "role": "text",
+      "scale": 1.0,
+      "text": "Sign in to see your music here."
+    }
+  ],
+  "reduced_motion": false,
+  "scale": 1.0,
+  "t": 0.0,
+  "time_scale": 1.0,
+  "title": "Uzumaki",
+  "viewport": [
+    1360.0,
+    860.0
+  ],
+  "warnings": []
+}

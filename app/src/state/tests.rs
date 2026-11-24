@@ -1634,6 +1634,7 @@ mod uzu_lyrics {
         let words = vec![Word { start: 1.0, end: 1.5, text: "la ".into() }, Word { start: 1.5, end: 2.0, text: "di".into() }];
         Lyrics {
             synced: true,
+            credit: None,
             lines: vec![
                 Line { start: 1.0, end: 2.0, text: "la di".into(), second_voice: false, words },
                 Line { start: 3.0, end: 4.0, text: "da".into(), second_voice: true, words: vec![] },
@@ -1655,7 +1656,7 @@ mod uzu_lyrics {
         assert_eq!(lyric_requests(&s), 1, "the song change asks once (want_lyrics)");
         s.apply_msg(Msg::Lyrics { id: "123".into(), result: Ok(Some(sung())) });
         for _ in 0..3 {
-            let ctl::Reply::Lyrics { song_id, status, lines } = s.ctl_lyrics() else { panic!("not lyrics") };
+            let ctl::Reply::Lyrics { song_id, status, lines, .. } = s.ctl_lyrics() else { panic!("not lyrics") };
             assert_eq!((song_id.as_str(), status), (song.id.as_str(), ctl::LyricsStatus::Synced));
             assert_eq!(lines.len(), 2);
             assert_eq!(lines[0].words.len(), 2);
@@ -1668,7 +1669,7 @@ mod uzu_lyrics {
     #[test]
     fn plain_loading_and_none() {
         let mut s = State::offline();
-        assert_eq!(s.ctl_lyrics(), ctl::Reply::Lyrics { song_id: String::new(), status: ctl::LyricsStatus::None, lines: vec![] }, "nothing plays");
+        assert_eq!(s.ctl_lyrics(), ctl::Reply::Lyrics { song_id: String::new(), status: ctl::LyricsStatus::None, lines: vec![], credit: None }, "nothing plays");
         s.session.authorized = true;
         let song = playing(&mut s, "i.1");
         let status = |s: &mut State| match s.ctl_lyrics() {
@@ -1676,7 +1677,7 @@ mod uzu_lyrics {
             _ => panic!("not lyrics"),
         };
         assert_eq!(status(&mut s), (ctl::LyricsStatus::Loading, 0));
-        let plain = Lyrics { synced: false, lines: vec![Line { text: "one".into(), ..Default::default() }, Line { text: "two".into(), ..Default::default() }] };
+        let plain = Lyrics { credit: None, synced: false, lines: vec![Line { text: "one".into(), ..Default::default() }, Line { text: "two".into(), ..Default::default() }] };
         s.apply_msg(Msg::Lyrics { id: "123".into(), result: Ok(Some(plain)) });
         assert_eq!(status(&mut s), (ctl::LyricsStatus::Plain, 2));
         // A late "none" (an older request's reply) doesn't hide lyrics already shown.

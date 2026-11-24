@@ -31,6 +31,7 @@ mod edits;
 mod favourites;
 mod library;
 mod local;
+pub mod lrclib;
 mod lyrics;
 pub mod mixed;
 pub mod motion;
@@ -532,6 +533,11 @@ pub struct State {
     pub lyrics: HashMap<String, Load<Option<Lyrics>>>,
     /// Lyrics requests in flight and retries (`state/lyrics.rs`).
     lyrics_fetch: HashMap<String, lyrics::Fetch>,
+    /// LRCLIB's client and cache, for local files without lyrics (`state/lrclib.rs`). None in
+    /// tests and headless runs: nothing is asked.
+    pub lrclib: Option<std::sync::Arc<crate::local::lrclib::Lrclib>>,
+    /// "Download lyrics for all local songs" while it runs, then what it came to.
+    pub lrclib_batch: lrclib::BatchView,
     /// Synced lyrics on screen: the bridge sends time 4×/s and every tick redraws.
     pub fine_time: bool,
     /// Who asks for `fine_time`: full-screen Now Playing, the right sidebar.
@@ -769,6 +775,8 @@ impl State {
             history: queue::History::default(),
             lyrics: HashMap::new(),
             lyrics_fetch: HashMap::new(),
+            lrclib: (persist && !rune::is_headless()).then(|| std::sync::Arc::new(crate::local::lrclib::Lrclib::for_app())),
+            lrclib_batch: Default::default(),
             fine_time: false,
             fine_time_np: false,
             fine_time_panel: false,

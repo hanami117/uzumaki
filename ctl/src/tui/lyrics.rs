@@ -45,6 +45,8 @@ pub struct Lyrics {
     pub song: Option<String>,
     pub status: LyricsStatus,
     pub lines: Vec<LyricLine>,
+    /// Where they came from, when the app says ("Lyrics from LRCLIB"): shown on the context line.
+    pub credit: Option<String>,
     /// The app is too old to know `Request::Lyrics`.
     pub unsupported: bool,
     /// The last ask failed (not "bad request"); try again after a while.
@@ -80,6 +82,7 @@ impl Lyrics {
         self.song = None;
         self.status = LyricsStatus::None;
         self.lines.clear();
+        self.credit = None;
         self.floor = None;
         self.manual = None;
         self.failed = false;

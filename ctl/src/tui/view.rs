@@ -374,7 +374,11 @@ fn lyrics_title(app: &App) -> String {
         uzumaki_ctl::LyricsStatus::Synced => " · line by line",
         _ => "",
     };
-    format!("Lyrics: {} — {}{mode}", song.title, song.artist)
+    let credit = match &l.credit {
+        Some(c) if !mode.is_empty() => format!(" · {}", c.strip_prefix("Lyrics ").unwrap_or(c)),
+        _ => String::new(),
+    };
+    format!("Lyrics: {} — {}{mode}{credit}", song.title, song.artist)
 }
 
 /// The lyrics screen's body: the lines with the current one in the middle, or why there are none.

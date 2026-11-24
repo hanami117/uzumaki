@@ -335,6 +335,9 @@ pub const SCENES: &[(&str, fn(&mut State))] = &[
     ("local-only-songs-stars", local_only_songs_stars),
     ("favourites-with-local", favourites_with_local),
     ("now-playing-local-lyrics", now_playing_local_lyrics),
+    ("now-playing-lrclib", now_playing_lrclib),
+    ("right-panel-lrclib", right_panel_lrclib),
+    ("settings-local-lrclib", settings_local_lrclib),
     ("settings-music-source", settings_music_source),
     ("settings-music-source-local", settings_music_source_local),
     ("intro-sync", intro_sync),
@@ -733,6 +736,7 @@ fn fake_lyrics() -> Lyrics {
     ];
     Lyrics {
         synced: true,
+        credit: None,
         lines: LINES
             .iter()
             .enumerate()
@@ -2551,6 +2555,30 @@ fn now_playing_local_lyrics(s: &mut State) {
     s.lyrics.insert(now.id.clone(), Load::Ready(Some(fake_lyrics())));
     s.playback.song = Some(now);
     s.playback.local = true;
+}
+
+/// A local song with lyrics from LRCLIB: the credit under them.
+fn now_playing_lrclib(s: &mut State) {
+    now_playing_local_lyrics(s);
+    let id = s.playback.song.as_ref().map(|x| x.id.clone()).unwrap_or_default();
+    let mut l = fake_lyrics();
+    l.credit = Some(crate::local::lrclib::CREDIT);
+    s.lyrics.insert(id, Load::Ready(Some(l)));
+}
+
+fn right_panel_lrclib(s: &mut State) {
+    now_playing_lrclib(s);
+    s.ui.now_playing = false;
+    s.playback.state = PlayState::Playing;
+    s.playback.position = 33.0;
+    s.settings.right_panel = true;
+    s.settings.right_tab = crate::settings::RightTab::Lyrics;
+}
+
+/// Settings → Local Files with "Download lyrics for all local songs" running.
+fn settings_local_lrclib(s: &mut State) {
+    settings_local(s);
+    s.lrclib_batch.running = Some(crate::state::lrclib::Progress { done: 1234, total: 3051, found: 802 });
 }
 
 fn local_album_id(s: &State, title: &str) -> String {

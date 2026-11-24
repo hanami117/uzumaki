@@ -333,6 +333,12 @@ pub struct Settings {
     /// Chromecast: Cast devices in the AirPlay picker (Settings → Speakers; `state/cast.rs`).
     /// Off by default: while off, nothing looks for them on the network.
     pub chromecast: bool,
+    /// Lyrics from lrclib.net for local files without their own (Settings → Local Files;
+    /// `local::lrclib`): sends title, artist, album and length. On by default.
+    pub lrclib: bool,
+    /// Also write what LRCLIB finds beside the song (`.lrc`, `.txt` for plain lyrics), never over
+    /// an existing file. Off by default: nothing is written into the music folders.
+    pub lrclib_save: bool,
     /// Pictures the user chose for playlists, by playlist id: shown only in Uzumaki (Apple's
     /// web API can't change a playlist's artwork). `file://` artwork in `playlist_art_dir`.
     pub playlist_art: BTreeMap<String, Artwork>,
@@ -399,6 +405,8 @@ impl Default for Settings {
             resume_playback: true,
             autoplay: true,
             chromecast: false,
+            lrclib: true,
+            lrclib_save: false,
             playlist_art: BTreeMap::new(),
             music_source: MusicSource::Apple,
             onboarded: None,

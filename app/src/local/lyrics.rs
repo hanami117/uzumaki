@@ -100,7 +100,7 @@ fn from_sylt(frame: &SynchronizedTextFrame<'_>) -> Option<Lyrics> {
         let end = stamps.get(i + 1).map_or(start + 5.0, |n| n.0);
         lines.push(Line { start: *start, end, text: text.clone(), ..Line::default() });
     }
-    (!lines.is_empty()).then_some(Lyrics { synced: true, lines })
+    (!lines.is_empty()).then_some(Lyrics { synced: true, lines, credit: None })
 }
 
 #[cfg(test)]
