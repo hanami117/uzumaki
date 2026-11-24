@@ -14,6 +14,16 @@ takes each release's notes from its section here.
   plays out the old song, then starts the new one from its first note, after a short pause.
 
 ### Fixed
+- The system's media controls (media keys, the Linux panel's player widget, macOS Control Center, the Windows media
+  overlay) now show exactly what the window shows: the new song while it loads (not the old one paused), a song
+  resumed at startup, the stop after the last unavailable song, and on a Chromecast the position you hear. The tray's
+  Play/Pause follows the same state.
+- Pause pressed while a song is still loading now shows Paused instead of the loading spinner.
+- Previous on a Chromecast counts the position you hear: 1 s into a song it goes back a song instead of restarting it.
+- Local files follow the system's audio output: plugging in headphones or switching AirPods moves the song there
+  where it was. When the output device goes away, the song moves to the default one, or pauses (the bar no longer
+  stays on Playing at a frozen time); Play tries again.
+- **uzu:** `uzu pause` and `uzu vol` (no value) no longer start Uzumaki just to find nothing playing.
 - **Chromecast: a lost connection comes back.** TV switched off and on, Wi-Fi dropping or the computer waking from
   sleep: Uzumaki pauses where you stopped hearing the music, tries again for a minute and plays on. If the TV doesn't
   come back, the music waits, paused, on this computer at that spot.

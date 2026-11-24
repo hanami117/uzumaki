@@ -70,7 +70,7 @@ impl Info {
     }
 }
 
-/// Follows the bridge events and decides when the system needs to hear something.
+/// Follows the playback events (`media::Feed`) and decides when the system needs to hear something.
 #[derive(Default)]
 struct Model {
     song: Option<Song>,
@@ -243,7 +243,7 @@ impl NowPlaying {
         Ok(Self { model, activity: Mutex::new(Unshared(None)), _targets: Unshared(targets) })
     }
 
-    /// Called on the bridge reader thread for every event. Must not block.
+    /// Called on the UI thread with what the app state shows (`media::Feed`). Must not block.
     pub fn observe(&self, event: &Event) {
         let info = lock(&self.model).apply(event, Instant::now());
         let Some(info) = info else { return };

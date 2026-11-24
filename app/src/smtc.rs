@@ -8,7 +8,7 @@
 //! SMTC belongs to a window. Uzumaki's own may not exist (started hidden, closed to the tray), so
 //! this module keeps a window of its own that is never shown, on its own thread
 //! (`uzumaki-smtc`), which also does every SMTC call. `observe` only updates the model and posts
-//! what changed to that thread: it never blocks the bridge's reader.
+//! what changed to that thread: it never blocks the UI thread.
 //!
 //! What Windows shows as the player's name and icon comes from the app id (`win::set_app_id`,
 //! `win::register_app_id`). Electron's own media session is off (`bridge/main.js`), so there
@@ -79,7 +79,7 @@ enum Change {
     Position { elapsed: f64, duration: f64 },
 }
 
-/// Follows the bridge events and decides when Windows needs to hear something.
+/// Follows the playback events (`media::Feed`) and decides when Windows needs to hear something.
 #[derive(Default)]
 struct Model {
     song: Option<Song>,
@@ -220,7 +220,7 @@ impl Smtc {
         Ok(Self { model: Arc::default(), tx: Mutex::new(tx), thread })
     }
 
-    /// Called on the bridge reader thread for every event. Must not block.
+    /// Called on the UI thread with what the app state shows (`media::Feed`). Must not block.
     pub fn observe(&self, event: &Event) {
         let change = lock(&self.model).apply(event, Instant::now());
         let Some(change) = change else { return };

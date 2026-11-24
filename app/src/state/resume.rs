@@ -199,6 +199,7 @@ impl State {
                     if let Some(snap) = snap.filter(|_| s.local_only() == local_only) {
                         s.restore_playback(snap);
                     }
+                    s.media_sync(false); // the resumed song, paused where it was left
                     s.resume_changed(true);
                     s.landing(tx);
                 });

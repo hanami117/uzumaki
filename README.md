@@ -240,7 +240,8 @@ To forget everything, quit Uzumaki and delete those folders.
 ## uzu: the command line
 
 `uzu` controls the running Uzumaki, the way `mpc` controls mpd. If Uzumaki isn't running, `uzu` starts it in
-the background, with no window. Plain `uzu` in a terminal opens a terminal player with the queue,
+the background, with no window (except for `uzu pause` and `uzu vol` with no value: with nothing playing, they only
+say so). Plain `uzu` in a terminal opens a terminal player with the queue,
 playlists, search, albums, lyrics and the cover.
 
 ```sh
