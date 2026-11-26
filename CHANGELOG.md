@@ -20,6 +20,11 @@ takes each release's notes from its section here.
   one song: nothing came after it and Next did nothing. It now plays once, like Play Next, and what was coming (songs
   you queued, the rest of the list, AutoPlay) carries on after it; Previous goes back to the song it interrupted. Same
   in uzu's History and the app's History rows.
+- **AirPlay: no more crackling on the speaker after you change song, seek or pause.** Each change left the AirPlay
+  sender a moment without audio: it filled the gap with half a second of silence while the speaker was still playing,
+  and the next song then started with too little queued on the speaker (or on a new timeline), which crackles. The
+  sender now gets silence until it has taken the change, so the speaker keeps its usual buffer, and the change has a
+  short fade: the old song fades out instead of stopping mid-wave, and the new song or position fades in.
 
 ## [0.4.4] - 2026-11-24
 
