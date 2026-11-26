@@ -16,7 +16,7 @@
 # your package manager: brew update && brew upgrade --cask uzumaki" instead of offering the DMG,
 # and its update check reports the channel "homebrew" (app/src/update.rs).
 cask "uzumaki" do
-  version "0.4.4"
+  version "0.4.5"
   # FILL AT RELEASE: the DMG's sha256 (packaging/release.sh prints it).
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
