@@ -5,6 +5,18 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **Linux and Windows: the tray menu is now the macOS menu's.** The song on top, Play/Pause, Previous, Next, Shuffle
+  and AutoPlay with real checkmarks, Repeat as a submenu (Off, All, One) with the current one marked, a Volume
+  submenu, Show Uzumaki, Check for Updates and Quit. The Volume submenu says where the sound goes (this computer, an
+  AirPlay speaker or group, a Chromecast) and its volume ("Volume: 40%"), with Volume Up and Volume Down (5% a step)
+  and 0%, 25%, 50%, 75% and 100% with the nearest one marked; it moves what the window moves for that output, as the
+  Mac's slider does. The menu shows the current state each time it opens. On Linux, scrolling over the tray icon
+  also changes the volume (as with KDE's media players), and the menu follows changes while it is open. Linux now
+  has its own StatusNotifierItem (through the ksni library) and Windows its own notification-area icon, instead of
+  Rune's, whose menus had no checkmarks or submenus; the tray icon also follows Settings → Appearance → App icon at
+  once now, instead of at the next start.
+
 ## [0.4.5] - 2026-11-26
 
 The macOS menu bar menu gets a volume slider and Shuffle, Repeat and AutoPlay (the Linux and Windows tray shows them as

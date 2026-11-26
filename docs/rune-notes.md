@@ -457,7 +457,9 @@ fn on_key(s: &mut Ui, ev: &KeyEvent, tx: &mut Tx) -> bool {
 - **Tray exists** (`rune::Tray`, `rune::tray::{TraySpec, TrayIcon, TrayItem}`, `TrayEvent::{Activate, Menu(id)}`): StatusNotifierItem
   + dbusmenu over zbus on Linux, needs the default `dbus` feature, runs on its own thread (callback must be `Send + Sync`
   and short: forward via `handle.update`), shows only where a tray host runs (GNOME needs an extension). Combine with
-  `keep_running()` for close-to-tray. We are not building it now.
+  `keep_running()` for close-to-tray. Its menu has plain items and separators only (no checkmarks, radio items or
+  submenus) and its icon can't change once shown, so the app no longer uses it: `tray.rs` has its own trays
+  (ksni on Linux, Win32 on Windows, AppKit on macOS).
 - No MPRIS in Rune. Rune's `dbus` feature uses zbus internally for tray/portals, which does not give us an MPRIS service.
 
 ---------------------------------------------------------------------------------------------------
