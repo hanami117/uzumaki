@@ -20,6 +20,11 @@ What it does is chosen by FAKE_AIRPLAY (comma-separated words), so tests can pla
     stalled         connect, then report a clock nobody answers
     die_after=N     end without a word N seconds after the start (connection lost)
     clock           report a clock that is ready shortly after connecting
+    starve          as the real helper, whose FLUSH waits for a read of its input that waits up to
+                    250 ms while it plays: a FLUSH whose input did not end on 250 ms of silence or
+                    more (or of more audio) starves first, padding silence while the speaker
+                    still renders (REANCHOR); the journal says "starved"
+Every FLUSH is journaled with the silence that ended the input before it ("flush bed_ms=N").
 A word written `<Name>:<word>` applies only to the speaker called <Name> (its --name), so one
 journal can play a group where one speaker fails.
 FAKE_AIRPLAY_JOURNAL=<file>: every command, state and level line is appended there.
@@ -141,7 +146,8 @@ elif "clock" in mode:
     status("clock_ready mode=ptp state=cold streak_ms=0 exchanges=0 ready_in_ms=0 ready_at_unix_ms=0")
     threading.Timer(0.3, lambda: status("clock_ready mode=ptp state=ready streak_ms=0 exchanges=8 ready_in_ms=0 ready_at_unix_ms=0")).start()
 
-state = {"buffered": False, "started": False, "stop": False, "flush": 0, "start_ms": 0, "join": False, "head": 0}
+state = {"buffered": False, "started": False, "stop": False, "flush": 0, "start_ms": 0, "join": False, "head": 0,
+         "tail_zero": 0, "last_rx": 0.0}
 for m in mode:
     if m.startswith("die_after="):
         threading.Timer(float(m.split("=")[1]), lambda: os._exit(0)).start()
@@ -185,6 +191,15 @@ def commands():
                     state["reanchored"] = True
                     status("REANCHOR shifted_frames=88200 total_shifted_frames=88200 sample_rate=44100")
             elif line == "ACTION=FLUSH":
+                # What was written before the FLUSH is read first (the input is a pipe).
+                waited = time.monotonic()
+                while time.monotonic() - max(state["last_rx"], waited) < 0.03 and time.monotonic() - waited < 0.3:
+                    time.sleep(0.005)
+                bed_ms = state["tail_zero"] * 1000 // (44100 * 4)
+                note("flush bed_ms=%d" % bed_ms)
+                if "starve" in mode and state["started"] and bed_ms < 250:
+                    note("starved")
+                    status("REANCHOR shifted_frames=26460 total_shifted_frames=26460 sample_rate=44100")
                 with lock:
                     state["flush"] += 1
                 state["started"] = False
@@ -209,6 +224,9 @@ while True:
     if not data:
         status("eof")
         break
+    stripped = data.rstrip(b"\0")
+    state["tail_zero"] = state["tail_zero"] + len(data) if not stripped else len(data) - len(stripped)
+    state["last_rx"] = time.monotonic()
     if not state["buffered"]:
         state["buffered"] = True
         status("audio buffered_ms=93")
