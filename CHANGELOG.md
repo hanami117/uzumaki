@@ -5,23 +5,12 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
-### Added
-- **Linux and Windows: the tray menu is now the macOS menu's.** The song on top, Play/Pause, Previous, Next, Shuffle
-  and AutoPlay with real checkmarks, Repeat as a submenu (Off, All, One) with the current one marked, a Volume
-  submenu, Show Uzumaki, Check for Updates and Quit. The Volume submenu says where the sound goes (this computer, an
-  AirPlay speaker or group, a Chromecast) and its volume ("Volume: 40%"), with Volume Up and Volume Down (5% a step)
-  and 0%, 25%, 50%, 75% and 100% with the nearest one marked; it moves what the window moves for that output, as the
-  Mac's slider does. The menu shows the current state each time it opens. On Linux, scrolling over the tray icon
-  also changes the volume (as with KDE's media players), and the menu follows changes while it is open. Linux now
-  has its own StatusNotifierItem (through the ksni library) and Windows its own notification-area icon, instead of
-  Rune's, whose menus had no checkmarks or submenus; the tray icon also follows Settings → Appearance → App icon at
-  once now, instead of at the next start.
-
 ## [0.4.5] - 2026-11-26
 
-The macOS menu bar menu gets a volume slider and Shuffle, Repeat and AutoPlay (the Linux and Windows tray shows them as
-plain items, "Shuffle: On" and so on, for now), AirPlay no longer crackles after a song change, and playing a song from
-History no longer stops playback after it. You need an Apple Music subscription to stream; local files play without one.
+The macOS menu bar menu gets a volume slider and Shuffle, Repeat and AutoPlay, and the Linux and Windows tray menus now
+match the Mac's (checkmarks, Repeat and Volume submenus; scrolling over the icon changes the volume on Linux). AirPlay
+no longer crackles after a song change, and playing a song from History no longer stops playback after it. You need an Apple Music subscription to stream; local
+files play without one.
 
 ### Added
 - **macOS: a volume slider in the menu bar icon's menu**, like the Sound menu's, so the volume can change without
@@ -35,9 +24,17 @@ History no longer stops playback after it. You need an Apple Music subscription 
   Controls menu. They do what the window's buttons and `uzu shuffle`, `uzu repeat` and `uzu autoplay` do, show the
   current state each time the menu opens, and follow changes while it is open. They are greyed while no song is loaded
   (the window's buttons aren't there either), and AutoPlay where the window has no ∞ button (local files only,
-  stations). The Linux and Windows tray menus get the same three as plain items that say their state ("Shuffle: On",
-  "Repeat: All", "AutoPlay: Off") and toggle it; Repeat steps Off, All, One, like the player bar's button, because
-  those trays have no checkmarks or submenus.
+  stations).
+- **Linux and Windows: the tray menu is now the macOS menu's.** The song on top, Play/Pause, Previous, Next, Shuffle
+  and AutoPlay with real checkmarks, Repeat as a submenu (Off, All, One) with the current one marked, a Volume
+  submenu, Show Uzumaki, Check for Updates and Quit. The Volume submenu says where the sound goes (this computer, an
+  AirPlay speaker or group, a Chromecast) and its volume ("Volume: 40%"), with Volume Up and Volume Down (5% a step)
+  and 0%, 25%, 50%, 75% and 100% with the nearest one marked; it moves what the window moves for that output, as the
+  Mac's slider does. The menu shows the current state each time it opens. On Linux, scrolling over the tray icon
+  also changes the volume (as with KDE's media players), and the menu follows changes while it is open. Linux now
+  has its own StatusNotifierItem (through the ksni library) and Windows its own notification-area icon, instead of
+  Rune's, whose menus had no checkmarks or submenus; the tray icon also follows Settings → Appearance → App icon at
+  once now, instead of at the next start.
 
 ### Fixed
 - **Playing a song from History no longer stops playback after it.** A History song from an earlier queue (in uzu,
