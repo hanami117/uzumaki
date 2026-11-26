@@ -56,7 +56,7 @@ windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "Media",
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSString", "NSDictionary", "NSValue", "NSArray", "NSData", "NSProcessInfo", "NSGeometry", "NSObject", "NSURL", "NSEnumerator", "NSError", "NSUserDefaults", "NSTimer", "NSRunLoop", "NSObjCRuntime", "NSDate"] }
 objc2-media-player = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSImage", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSMenu", "NSMenuItem", "NSSharingService", "NSBitmapImageRep", "NSImageRep", "NSGraphicsContext", "NSGraphics", "NSWindow", "NSAppearance", "NSSlider", "NSTextField", "NSImageView", "NSEvent", "NSFont", "NSColor", "NSAccessibilityProtocols", "NSParagraphStyle"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSImage", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSCell", "NSView", "NSResponder", "NSMenu", "NSMenuItem", "NSSharingService", "NSBitmapImageRep", "NSImageRep", "NSGraphicsContext", "NSGraphics", "NSWindow", "NSAppearance", "NSSlider", "NSTextField", "NSImageView", "NSEvent", "NSFont", "NSColor", "NSAccessibilityProtocols", "NSParagraphStyle"] }
 block2 = "0.6"
 dispatch2 = "0.3"
 

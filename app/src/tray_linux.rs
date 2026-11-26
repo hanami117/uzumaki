@@ -1,5 +1,6 @@
-//! The system tray icon (StatusNotifierItem through Rune; on Windows, Rune's notification-area icon): Play/Pause, Previous, Next, Show and
-//! Quit, plus the current song as the tooltip. A left click shows the window.
+//! The system tray icon (StatusNotifierItem through Rune; on Windows, Rune's notification-area icon): Play/Pause, Previous, Next,
+//! Shuffle, Repeat and AutoPlay, Show and Quit, plus the current song as the tooltip. Rune's menu items have no checkmarks or
+//! submenus, so the three modes are plain items that say their state ("Shuffle: On") and toggle it (Repeat cycles Off, All, One). A left click shows the window.
 //!
 //! The tray runs on its own thread; its events go to the UI thread with `handle.update`, so
 //! they work while the window is closed to the tray (`App::keep_running`). It shows only where
@@ -10,7 +11,8 @@ use rune::Tray;
 
 use crate::models::Song;
 use crate::settings::IconVariant;
-use crate::state::{Handle, State};
+use crate::state::tray_modes::Modes;
+use crate::state::{Handle, Repeat, State};
 
 /// Tray icon side in pixels; hosts scale it.
 #[cfg_attr(windows, allow(dead_code))]
@@ -30,6 +32,9 @@ pub struct TrayCtl {
     tray: Tray,
     playing: bool,
     tooltip: String,
+    /// A song is shown (the window's player bar, and so its Shuffle and Repeat, exist).
+    loaded: bool,
+    modes: Option<Modes>,
 }
 
 impl TrayCtl {
@@ -37,7 +42,7 @@ impl TrayCtl {
     /// The icon is the chosen app icon's; Rune's tray can't swap its image once shown, so a
     /// change in Settings shows here at the next start.
     pub fn start(handle: Handle, app_icon: IconVariant) -> Option<Self> {
-        let spec = TraySpec::new("uzumaki", "Uzumaki", icon(app_icon, icon_px())).tooltip("Uzumaki").menu(menu(false));
+        let spec = TraySpec::new("uzumaki", "Uzumaki", icon(app_icon, icon_px())).tooltip("Uzumaki").menu(menu(false, None));
         let on_event = move |ev: TrayEvent| match ev {
             TrayEvent::Activate { token } => match token {
                 Some(t) => handle.activate(t),
@@ -47,6 +52,9 @@ impl TrayCtl {
                 "play-pause" => handle.update(|s: &mut State, _| s.toggle_play()),
                 "next" => handle.update(|s: &mut State, _| s.next()),
                 "previous" => handle.update(|s: &mut State, _| s.previous()),
+                "shuffle" => handle.update(|s: &mut State, _| s.toggle_shuffle()),
+                "repeat" => handle.update(|s: &mut State, _| s.cycle_repeat()),
+                "autoplay" => handle.update(|s: &mut State, _| s.toggle_autoplay()),
                 "show" => handle.open(),
                 // The answer shows in the window (the notice, or a toast).
                 "check-updates" => {
@@ -59,7 +67,7 @@ impl TrayCtl {
             _ => {}
         };
         match Tray::new(spec, on_event) {
-            Ok(tray) => Some(Self { tray, playing: false, tooltip: String::new() }),
+            Ok(tray) => Some(Self { tray, playing: false, tooltip: String::new(), loaded: false, modes: None }),
             Err(e) => {
                 eprintln!("uzumaki: no tray icon: {e}");
                 None
@@ -74,8 +82,20 @@ impl TrayCtl {
     pub fn set_playing(&mut self, playing: bool) {
         if playing != self.playing {
             self.playing = playing;
-            self.tray.set_menu(menu(playing));
+            self.show_menu();
         }
+    }
+
+    /// Relabels Shuffle, Repeat and AutoPlay.
+    pub fn set_modes(&mut self, modes: &Modes) {
+        if self.modes.as_ref() != Some(modes) {
+            self.modes = Some(*modes);
+            self.show_menu();
+        }
+    }
+
+    fn show_menu(&mut self) {
+        self.tray.set_menu(menu(self.playing, self.modes.as_ref().map(|m| (m, self.loaded))));
     }
 
     /// The tooltip: "Title — Artist", or just "Uzumaki".
@@ -89,14 +109,25 @@ impl TrayCtl {
             self.tray.set_tooltip(tip.clone());
             self.tooltip = tip;
         }
+        // The modes are greyed while nothing is loaded.
+        if song.is_some() != self.loaded {
+            self.loaded = song.is_some();
+            self.show_menu();
+        }
     }
 }
 
-fn menu(playing: bool) -> Vec<TrayItem> {
+/// `modes`: what Shuffle, Repeat and AutoPlay show, and whether a song is loaded.
+fn menu(playing: bool, modes: Option<(&Modes, bool)>) -> Vec<TrayItem> {
+    let (m, loaded) = modes.unwrap_or((&Modes { shuffle: false, repeat: Repeat::Off, autoplay: false, autoplay_offered: false }, false));
     vec![
         TrayItem::action("play-pause", if playing { "Pause" } else { "Play" }),
         TrayItem::action("previous", "Previous"),
         TrayItem::action("next", "Next"),
+        TrayItem::Separator,
+        TrayItem::action("shuffle", m.shuffle_text()).enabled(loaded),
+        TrayItem::action("repeat", m.repeat_text()).enabled(loaded),
+        TrayItem::action("autoplay", m.autoplay_text()).enabled(m.autoplay_enabled(loaded)),
         TrayItem::Separator,
         TrayItem::action("show", "Show Uzumaki"),
         TrayItem::action("check-updates", "Check for Updates\u{2026}"),
@@ -129,6 +160,35 @@ fn icon_pixels(app_icon: IconVariant, px: u32) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use rune::tray::TrayItem;
+
+    fn labels(items: &[TrayItem]) -> Vec<(String, bool)> {
+        items.iter().filter_map(|i| match i {
+            TrayItem::Action { label, enabled, .. } => Some((label.clone(), *enabled)),
+            _ => None,
+        }).collect()
+    }
+
+    #[test]
+    fn the_menu_has_the_three_modes_after_next_and_greys_them_with_nothing_loaded() {
+        use super::{menu, Modes, Repeat};
+        let m = Modes { shuffle: true, repeat: Repeat::One, autoplay: true, autoplay_offered: true };
+        let l = labels(&menu(false, Some((&m, true))));
+        assert_eq!(&l[..6], &[
+            ("Play".to_string(), true), ("Previous".to_string(), true), ("Next".to_string(), true),
+            ("Shuffle: On".to_string(), true), ("Repeat: One".to_string(), true), ("AutoPlay: On".to_string(), true),
+        ]);
+        let idle = labels(&menu(false, Some((&m, false))));
+        assert!(idle[3..6].iter().all(|(_, on)| !on), "greyed, like the window's missing buttons: {idle:?}");
+        assert_eq!(idle[3].0, "Shuffle: On", "still says its state");
+        let local = Modes { autoplay_offered: false, ..m };
+        let l = labels(&menu(false, Some((&local, true))));
+        assert!(l[3].1 && l[4].1 && !l[5].1, "no AutoPlay where the window has no ∞ button");
+        let first = labels(&menu(true, None));
+        assert_eq!(first[0].0, "Pause");
+        assert!(first[3..6].iter().all(|(_, on)| !on), "before the first sync: greyed");
+    }
+
     #[test]
     fn the_icon_is_a_coral_swirl_on_a_dark_rounded_tile() {
         let rgba = super::icon_pixels(super::IconVariant::Dark, super::ICON_PX);
