@@ -23,7 +23,9 @@
 //!   the local player is in charge. Until then the state stays [`Cast::Connecting`]; a source
 //!   that isn't ready within `Config::capture_timeout` ends the session ([`Why::NoAudio`]).
 //! - [`Controller::flush`]: on a seek or a song the user picked, the audio still on its way is
-//!   dropped (`ACTION=FLUSH`, then a new START), so the change is heard at once.
+//!   dropped (`ACTION=FLUSH`, then a new START), so the change is heard at once. What still plays
+//!   fades out first and the first sound after it fades in, and the helper's input never runs
+//!   dry before its FLUSH (see `FLUSH_BED_EXTRA_MS`).
 //! - A speaker that ends on its own reports why ([`Event::Failed`]); the others play on. When
 //!   none is left the audio is back on this computer: the local outputs are quiet only while
 //!   [`LocalFeed::mute_local`] is true and while the bridge's socket is connected.
@@ -34,8 +36,9 @@
 //! together; every speaker gets the same bytes from the frame it was added at. Speakers that
 //! start together get one start instant (`START_UNIX_MS`); one that joins a group that plays gets
 //! the instant its first frame is due (`START_JOIN=1`; if its helper can only start later, it cuts
-//! as much audio and stays in step). A flush stops every writer before `ACTION=FLUSH` (the helper
-//! drains its input), waits for each `[STATUS] flushed` and starts them again together.
+//! as much audio and stays in step). A flush fades out what arrives (then writes it as silence),
+//! stops every writer, puts a bed of silence in each helper's input and sends `ACTION=FLUSH` (the
+//! helper drains its input), waits for each `[STATUS] flushed` and starts them again together.
 //!
 //! One session serves both players: while a local file is loaded (`LocalFeed::set_active(true)`)
 //! the bridge's bytes are dropped and the local ones go to the helper. When nobody sends audio
@@ -77,6 +80,27 @@ const BYTES_PER_SECOND: u64 = 44100 * FRAME_BYTES;
 const FLUSH_DROP: Duration = Duration::from_millis(180);
 /// The wall clock ran this far ahead of the process clock: the computer slept.
 const SLEEP_JUMP: Duration = Duration::from_secs(8);
+/// Before a flush the audio still arriving fades out over this many frames (15 ms) and is then
+/// written as silence, so what the speaker still plays ends quietly instead of mid-wave (a click).
+pub const FADE_OUT_FRAMES: u32 = 661;
+/// The first sound after a flush fades in over this many frames (10 ms): a seek lands mid-wave.
+pub const FADE_IN_FRAMES: u32 = 441;
+/// Once the fade is written, the helper plays what it still held before it for about this long;
+/// then the flush comes.
+const FADE_SETTLE: Duration = Duration::from_millis(100);
+/// No audio came in this long after the flush was asked for: nothing sounds, no fade to wait for.
+const FADE_NO_AUDIO: Duration = Duration::from_millis(120);
+/// The flush never waits longer than this for its fade.
+const FADE_MAX: Duration = Duration::from_millis(250);
+/// The silence put in a helper's input right before its FLUSH: its warm lead (the speaker's queue,
+/// `[STATUS] latency warm_lead_ms`) plus this. cliairplay takes a FLUSH only between two reads of
+/// its input, and a read waits up to 250 ms for audio while the stream plays: with an empty input
+/// it gives up, pads 0.4-0.7 s of silence while the speaker still renders ("PCM input starved"),
+/// and the speaker's queue runs low or out before the next song (crackles, a new anchor). The
+/// silence keeps every read short and refills the queue to its lead; the FLUSH drops the rest.
+const FLUSH_BED_EXTRA_MS: u64 = 200;
+/// The warm lead until the helper reports its own (cliairplay's splice depth).
+const WARM_LEAD_MS: u64 = 600;
 
 fn log(msg: impl AsRef<str>) {
     eprintln!("airplay: {}", msg.as_ref());
@@ -303,6 +327,48 @@ struct Fanout {
     hold: bool,
     frames: u64,
     outs: Vec<Out>,
+    /// A flush is coming: the frames written since it was asked for (faded out, then silence).
+    fade_out: Option<u32>,
+    /// The first sound after a flush: the frames of its fade-in done so far.
+    fade_in: Option<u32>,
+}
+
+impl Fanout {
+    /// The bytes (whole s16le stereo frames) as the speakers get them: faded out and then silent
+    /// while a flush is coming, faded in from the first sound after it. None: unchanged.
+    fn shape(&mut self, bytes: &[u8]) -> Option<Vec<u8>> {
+        if let Some(done) = self.fade_out.as_mut() {
+            let mut out = bytes.to_vec();
+            *done = fade(&mut out, *done, FADE_OUT_FRAMES, false);
+            return Some(out);
+        }
+        let done = self.fade_in?;
+        // Silence before the sound (a song loading) stays as it is: the fade starts with the sound.
+        let start = if done == 0 { bytes.as_chunks::<4>().0.iter().position(|f| *f != [0; 4])? * 4 } else { 0 };
+        let mut out = bytes.to_vec();
+        let done = fade(&mut out[start..], done, FADE_IN_FRAMES, true);
+        self.fade_in = (done < FADE_IN_FRAMES).then_some(done);
+        Some(out)
+    }
+}
+
+/// Scales the frames of `bytes` (s16le stereo) along a linear fade of `len` frames, `done` of
+/// them before these: down to silence (and silence after it), or up from silence (and unchanged
+/// after it). Returns how many frames of the fade are done after these.
+pub fn fade(bytes: &mut [u8], mut done: u32, len: u32, up: bool) -> u32 {
+    for frame in bytes.as_chunks_mut::<4>().0 {
+        if up && done >= len {
+            break;
+        }
+        let k = done.min(len) as f32 / len as f32;
+        let gain = if up { k } else { 1.0 - k };
+        for s in frame.as_chunks_mut::<2>().0 {
+            let v = (f32::from(i16::from_le_bytes([s[0], s[1]])) * gain).round() as i16;
+            s.copy_from_slice(&v.to_le_bytes());
+        }
+        done = done.saturating_add(1);
+    }
+    done
 }
 
 #[derive(Default)]
@@ -327,6 +393,9 @@ struct Shared {
     /// is dropped after a flush.
     last_write: AtomicU64,
     drop_until: AtomicU64,
+    /// A flush is coming and fades out what arrives (`Fanout::fade_out`): the audio keeps flowing
+    /// to the helpers, even while the old position's would be dropped.
+    fading: AtomicBool,
     /// Wall-clock ms of the first audio written since the group started together (0: none yet).
     first_audio: AtomicU64,
     /// Wall-clock ms at which frame 0 of `fan.frames` is heard (the group's start, as the helper
@@ -356,6 +425,11 @@ impl Shared {
         self.now_ms() < self.drop_until.load(Ordering::Relaxed)
     }
 
+    /// What arrives now goes to the helpers: no flush is dropping it, or a flush is fading it out.
+    fn takes_audio(&self) -> bool {
+        self.fading.load(Ordering::SeqCst) || !self.dropping()
+    }
+
     /// What the speaker gets is what the user hears: the local player is in charge, or the
     /// bridge is connected and its capture taps MusicKit's player.
     fn source_ready(&self) -> bool {
@@ -369,7 +443,10 @@ impl Shared {
         if fan.hold || fan.outs.is_empty() || bytes.is_empty() {
             return;
         }
-        let data: Arc<[u8]> = Arc::from(bytes);
+        let data: Arc<[u8]> = match fan.shape(bytes) {
+            Some(shaped) => Arc::from(shaped),
+            None => Arc::from(bytes),
+        };
         let len = bytes.len();
         fan.outs.retain(|o| {
             if o.queued.load(Ordering::SeqCst) + len > QUEUE_CAP {
@@ -999,6 +1076,8 @@ struct Member {
     start_tries: u32,
     flushing: bool,
     head_ms: u64,
+    /// How much audio its helper keeps queued at the speaker (`[STATUS] latency warm_lead_ms`).
+    warm_lead_ms: u64,
     error: Option<String>,
     error_http: u64,
     failed: Option<Why>,
@@ -1041,6 +1120,7 @@ impl Member {
             start_tries: 0,
             flushing: false,
             head_ms: 0,
+            warm_lead_ms: WARM_LEAD_MS,
             error: None,
             error_http: 0,
             failed: None,
@@ -1090,6 +1170,46 @@ impl Member {
         while self.busy.load(Ordering::SeqCst) && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    /// Writes the silence that goes into the helper's input right before its FLUSH (see
+    /// `FLUSH_BED_EXTRA_MS`), after `unfeed`, and waits (briefly) until the helper took it, so the
+    /// FLUSH drops all of it and nothing of it is left for after.
+    fn flush_bed(&self) {
+        let Some(tx) = &self.tx else { return };
+        let frames = 44100 * (self.warm_lead_ms + FLUSH_BED_EXTRA_MS) / 1000;
+        let data: Arc<[u8]> = vec![0u8; (frames * FRAME_BYTES) as usize].into();
+        let len = data.len();
+        self.queued.fetch_add(len, Ordering::SeqCst);
+        if tx.send((self.wgen.load(Ordering::SeqCst), data)).is_err() {
+            self.queued.fetch_sub(len, Ordering::SeqCst);
+            return;
+        }
+        let until = Instant::now() + Duration::from_millis(500);
+        while (self.queued.load(Ordering::SeqCst) > 0 || self.busy.load(Ordering::SeqCst)) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+/// Before a flush: what arrives from now on fades out and then goes on as silence, so the helpers'
+/// input keeps flowing; returns once the fade has had time to reach the speakers (`FADE_SETTLE`),
+/// at once when no audio comes (`FADE_NO_AUDIO`), and after `FADE_MAX` at most.
+fn fade_out(shared: &Shared) {
+    shared.fan.lock().unwrap().fade_out = Some(0);
+    shared.fading.store(true, Ordering::SeqCst);
+    let began = Instant::now();
+    let mut faded: Option<Instant> = None;
+    loop {
+        let done = shared.fan.lock().unwrap().fade_out.unwrap_or(0);
+        if done >= FADE_OUT_FRAMES {
+            faded.get_or_insert_with(Instant::now);
+        }
+        let waited = began.elapsed();
+        if faded.is_some_and(|t| t.elapsed() >= FADE_SETTLE) || (done == 0 && waited >= FADE_NO_AUDIO) || waited >= FADE_MAX {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -1503,7 +1623,12 @@ impl<'a> Group<'a> {
                 m.flushing = false;
                 m.head_ms = head_ms;
             }
-            Status::Latency { warm_lead_ms } => log(format!("\"{name}\" keeps {warm_lead_ms} ms of audio queued")),
+            Status::Latency { warm_lead_ms } => {
+                log(format!("\"{name}\" keeps {warm_lead_ms} ms of audio queued"));
+                if warm_lead_ms > 0 {
+                    self.members[i].warm_lead_ms = warm_lead_ms.min(5000);
+                }
+            }
             Status::Reanchor { total_frames } => {
                 log(format!("\"{name}\" padded {} ms of silence after a gap: heard that much later", total_frames * 10 / 441));
                 self.shared().shifted.fetch_max(total_frames, Ordering::SeqCst);
@@ -1597,11 +1722,22 @@ impl<'a> Group<'a> {
         let shared = self.shared().clone();
         // Audio already on its way is the old position's.
         shared.drop_until.store(shared.now_ms() + self.cfg().flush_drop.as_millis() as u64, Ordering::Relaxed);
+        let flushes = |m: &Member| !m.stopping && (m.feeding || m.start_sent.is_some());
+        if !self.members.iter().any(flushes) {
+            return;
+        }
+        // What the speakers still play ends on a fade, not mid-wave.
+        if self.members.iter().any(|m| flushes(m) && m.feeding && m.started) {
+            fade_out(&shared);
+        }
         let mut fan = shared.fan.lock().unwrap();
+        fan.fade_out = None;
+        shared.fading.store(false, Ordering::SeqCst);
         let mut any = false;
-        for m in self.members.iter_mut().filter(|m| !m.stopping && (m.feeding || m.start_sent.is_some())) {
+        for m in self.members.iter_mut().filter(|m| flushes(m)) {
             m.unfeed(&mut fan);
             m.writer_idle();
+            m.flush_bed();
             if m.command("ACTION=FLUSH\n") {
                 m.flushing = true;
                 any = true;
@@ -1616,6 +1752,7 @@ impl<'a> Group<'a> {
         log("flush (seek or new song): the speakers start again from the new audio");
         fan.hold = true;
         fan.frames = 0;
+        fan.fade_in = Some(0);
         drop(fan);
         shared.first_audio.store(0, Ordering::Relaxed);
         shared.audible_at.store(0, Ordering::SeqCst);
@@ -2274,7 +2411,7 @@ impl Pump {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
                             let whole = frames.whole(&buf[..n]);
-                            if !whole.is_empty() && !shared.local_active.load(Ordering::SeqCst) && !shared.dropping() {
+                            if !whole.is_empty() && !shared.local_active.load(Ordering::SeqCst) && shared.takes_audio() {
                                 shared.write(whole);
                                 this += whole.len() as u64;
                                 if this >= next_report {
@@ -2343,7 +2480,7 @@ fn local_pump(rx: mpsc::Receiver<Vec<i16>>, shared: Arc<Shared>, alive: Arc<Atom
         let now = Instant::now();
         let local = shared.local_active.load(Ordering::SeqCst);
         let bytes = match chunk {
-            Some(c) if c.len() >= 2 && local && !shared.dropping() => {
+            Some(c) if c.len() >= 2 && local && shared.takes_audio() => {
                 let c = &c[..c.len() - c.len() % 2]; // whole stereo frames
                 audio_until = audio_until.max(now) + Duration::from_secs_f64((c.len() / 2) as f64 / 44100.0);
                 sent += (c.len() / 2) as u64;
@@ -2388,6 +2525,50 @@ mod tests {
         assert_eq!(f.whole(&[10, 11, 12]), &[9, 10, 11, 12]);
         f.consume();
         assert_eq!(f.whole(&[]), &[] as &[u8]);
+    }
+
+    fn frames(v: &[i16]) -> Vec<u8> {
+        v.iter().flat_map(|s| [s.to_le_bytes(), s.to_le_bytes()]).flatten().collect()
+    }
+
+    fn left(bytes: &[u8]) -> Vec<i16> {
+        bytes.as_chunks::<4>().0.iter().map(|f| i16::from_le_bytes([f[0], f[1]])).collect()
+    }
+
+    #[test]
+    fn a_fade_goes_down_to_silence_or_up_from_it_across_chunks() {
+        let mut a = frames(&[1000; 3]);
+        assert_eq!(fade(&mut a, 0, 4, false), 3);
+        assert_eq!(left(&a), [1000, 750, 500]);
+        let mut b = frames(&[1000; 3]);
+        assert_eq!(fade(&mut b, 3, 4, false), 6);
+        assert_eq!(left(&b), [250, 0, 0], "silence after the fade");
+        let mut c = frames(&[-1000; 3]);
+        assert_eq!(fade(&mut c, 2, 4, true), 4);
+        assert_eq!(left(&c), [-500, -750, -1000], "unchanged after the fade");
+    }
+
+    #[test]
+    fn a_flush_fades_out_what_still_plays_and_fades_in_the_first_sound_after() {
+        let mut fan = Fanout { fade_out: Some(0), ..Fanout::default() };
+        let out = fan.shape(&frames(&[10000; FADE_OUT_FRAMES as usize + 10])).unwrap();
+        let l = left(&out);
+        assert_eq!(l[0], 10000);
+        assert!(l.windows(2).all(|w| w[1] <= w[0] && w[0] - w[1] <= 16), "a smooth fade");
+        assert!(l[FADE_OUT_FRAMES as usize..].iter().all(|&v| v == 0), "then silence");
+        // After the flush: the silence of a song loading stays, the fade starts with the sound.
+        let mut fan = Fanout { fade_in: Some(0), ..Fanout::default() };
+        assert_eq!(fan.shape(&frames(&[0; 8])), None);
+        let mut chunk = vec![0i16; 4];
+        chunk.extend([20000; FADE_IN_FRAMES as usize - 1]);
+        let l = left(&fan.shape(&frames(&chunk)).unwrap());
+        assert!(l[..5].iter().all(|&v| v == 0) && l[5] > 0 && l[5] < 100, "{:?}", &l[..6]);
+        assert!(l[4..].windows(2).all(|w| w[1] >= w[0] && w[1] - w[0] <= 50));
+        assert_eq!(fan.fade_in, Some(FADE_IN_FRAMES - 1), "one frame of the fade still to come");
+        let l = left(&fan.shape(&frames(&[20000; 4])).unwrap());
+        assert_eq!(l, [19955, 20000, 20000, 20000]);
+        assert_eq!(fan.fade_in, None);
+        assert_eq!(fan.shape(&frames(&[5; 2])), None, "nothing to change any more");
     }
 
     #[test]

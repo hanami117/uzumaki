@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use uzumaki_airplay::discover::{Device, Service};
-use uzumaki_airplay::{Cast, Config, Connect, Controller, Event, Need, Speaker, Why};
+use uzumaki_airplay::{Cast, Config, Connect, Controller, Event, Need, Speaker, Why, FADE_IN_FRAMES};
 
 struct Rig {
     ctl: Controller,
@@ -220,18 +220,75 @@ fn a_seek_flushes_and_drops_the_audio_on_its_way() {
     bridge.write_all(&pcm(0x1111, 4096)).unwrap();
     r.on();
     wait_for("the first audio", || r.samples().iter().filter(|&&s| s == 0x1111).count() == 8192);
-    // The seek: what is still on its way (0x2222) belongs to the old position.
+    // The seek: what is still on its way (-0x2222: no fade of the others makes it) belongs to
+    // the old position.
     r.ctl.flush();
     wait_for("the flush command", || r.journal().contains("cmd ACTION=FLUSH"));
-    bridge.write_all(&pcm(0x2222, 2048)).unwrap();
+    bridge.write_all(&pcm(-0x2222, 2048)).unwrap();
     std::thread::sleep(Duration::from_millis(1600));
     bridge.write_all(&pcm(0x3333, 4096)).unwrap();
-    wait_for("the audio after the seek", || r.samples().iter().filter(|&&s| s == 0x3333).count() == 8192);
+    // Its first frames fade in (a seek lands mid-wave).
+    let full = (4096 - FADE_IN_FRAMES as usize) * 2;
+    wait_for("the audio after the seek", || r.samples().iter().filter(|&&s| s == 0x3333).count() == full);
     // The speaker is started again on the new audio (and shown as playing throughout).
     wait_for("the second start", || r.journal().matches("status started").count() == 2);
     assert_eq!(r.journal().matches("cmd ACTION=START").count(), 2, "{}", r.journal());
-    assert!(!r.samples().contains(&0x2222), "the audio of the old position was dropped");
+    assert!(!r.samples().contains(&-0x2222), "the audio of the old position was dropped");
     assert_eq!(r.journal().matches("args ").count(), 1, "one helper for the whole session");
+    r.end();
+}
+
+/// The bridge as MusicKit's tap sends it: 4096-frame chunks about as fast as they play (a live
+/// source never runs ahead), of the value in `tone`, until `stop`.
+fn live(mut bridge: UnixStream, tone: std::sync::Arc<std::sync::atomic::AtomicI16>, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let began = Instant::now();
+        let mut sent = 0u64;
+        while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+            if bridge.write_all(&pcm(tone.load(std::sync::atomic::Ordering::SeqCst), 4096)).is_err() {
+                break;
+            }
+            sent += 4096;
+            let due = began + Duration::from_micros(sent * 1_000_000 / 44100);
+            std::thread::sleep(due.saturating_duration_since(Instant::now()));
+        }
+    })
+}
+
+#[test]
+fn a_flush_keeps_the_helpers_input_flowing_and_fades_out_and_in() {
+    // The stand-in starves as cliairplay does when its input is dry at the FLUSH (the live log:
+    // "PCM input starved", 0.4-0.7 s padded, then a new song with too little queued: crackles).
+    let mut r = rig("flush-bed", "starve", vec![device("Bedroom", "AudioAccessory5,1", &[])]);
+    r.ctl.set_bridge(true);
+    r.ctl.connect_named("Bedroom", opts());
+    r.wait("the capture request", |e| *e == Event::Capture(true));
+    let tone = std::sync::Arc::new(std::sync::atomic::AtomicI16::new(0x1111));
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let feeder = live(r.bridge(), tone.clone(), stop.clone());
+    r.on();
+    wait_for("half a second of the song", || r.frames_of("Bedroom").iter().filter(|f| f.0 == 0x1111).count() > 22050);
+    r.ctl.flush(); // the user picks another song
+    wait_for("the flush command", || r.journal().contains("cmd ACTION=FLUSH"));
+    // The player loads the new song (silence) for longer than the rig's (wide) drop window.
+    tone.store(0, std::sync::atomic::Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(1600));
+    tone.store(0x3333, std::sync::atomic::Ordering::SeqCst);
+    wait_for("the new song", || r.frames_of("Bedroom").iter().filter(|f| f.0 == 0x3333).count() > 8192);
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    feeder.join().unwrap();
+    let j = r.journal();
+    let bed = j.lines().find_map(|l| l.strip_prefix("flush bed_ms=")).and_then(|v| v.parse::<u64>().ok()).unwrap_or_else(|| panic!("{j}"));
+    assert!(bed >= 600, "the FLUSH comes after the speaker's lead of silence, {bed} ms: {j}");
+    assert!(!j.contains("starved") && !j.contains("REANCHOR"), "the helper never starved: {j}");
+    // No step anywhere from the song's first frame on: it fades out before the flush and the
+    // next song fades in (a constant tone only changes along the fades).
+    let left: Vec<i16> = r.frames_of("Bedroom").iter().map(|f| f.0).collect();
+    let from = left.iter().position(|&v| v == 0x1111).unwrap();
+    let worst = left[from..].windows(2).map(|w| (i32::from(w[1]) - i32::from(w[0])).abs()).max().unwrap();
+    assert!(worst <= 64, "a jump of {worst} between two frames");
+    assert!(left[from..].iter().any(|&v| v > 0 && v < 0x1111), "the old song fades out");
+    assert!(left[from..].iter().any(|&v| v > 0x1111 && v < 0x3333), "the new song fades in");
     r.end();
 }
 
