@@ -1,4 +1,5 @@
-//! The volume of wherever the sound goes, for the macOS menu bar slider (`tray_mac.rs`).
+//! The volume of wherever the sound goes, for the macOS menu bar slider (`tray_mac.rs`) and the
+//! Volume submenu and icon scrolling of the Linux and Windows tray (`tray_menu.rs`).
 //!
 //! It is the volume the window's own control sets for the output in use, through the same
 //! actions: AirPlay speakers → the picker's master volume (`airplay_master_volume`; with one
@@ -79,19 +80,46 @@ impl State {
             self.output_drag = None;
         }
     }
+
+    /// Moves the output's volume by `percent` (on the whole-percent grid, within 0..100): the
+    /// tray's Volume Up / Down (`done`) and a scroll on its icon (a drag, ended by
+    /// `end_output_drag`). Nothing while the output hasn't said its volume.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn step_output_volume(&mut self, percent: i32, done: bool) {
+        let Some(v) = self.output_volume().volume else { return };
+        let to = (((v * 100.0).round() + f64::from(percent)) / 100.0).clamp(0.0, 1.0);
+        if (to - v).abs() > f64::EPSILON || done {
+            self.set_output_volume(to, done);
+        }
+    }
+
+    /// Ends a scroll's drag: AirPlay saves the speakers' volumes, and the next one starts from them.
+    #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
+    pub fn end_output_drag(&mut self) {
+        if self.output_drag.is_none() {
+            return;
+        }
+        match self.output_volume().volume {
+            Some(v) => self.set_output_volume(v, true),
+            None => self.output_drag = None,
+        }
+    }
 }
 
 /// At most one value sent per this while the slider is dragged.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const THROTTLE: Duration = Duration::from_millis(100);
 
 /// Spaces out a slider's values: the first goes at once, later ones at most every `THROTTLE`,
 /// and the last one is never lost (`flush`, or a `done` value).
 #[derive(Debug, Default)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct Throttle {
     sent_at: Option<Instant>,
     pending: Option<f64>,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 impl Throttle {
     /// A new slider value: what to send now, if anything.
     pub fn push(&mut self, v: f64, now: Instant, done: bool) -> Option<f64> {
@@ -211,6 +239,42 @@ mod tests {
         s.airplay_pick(None); // back to this Mac
         let o = s.output_volume();
         assert_eq!((o.output, o.volume), (Output::ThisComputer, Some(0.3)));
+    }
+
+    #[test]
+    fn steps_move_the_output_in_whole_percents_and_stop_at_the_ends() {
+        let mut s = State::offline();
+        s.playback.volume = 0.42;
+        s.step_output_volume(5, true);
+        assert!((s.playback.volume - 0.47).abs() < 1e-9, "{}", s.playback.volume);
+        s.step_output_volume(-50, true);
+        assert_eq!(s.playback.volume, 0.0);
+        s.step_output_volume(-5, true);
+        assert_eq!(s.playback.volume, 0.0);
+        s.cast.state = CastState::Connecting { name: "TV".into() };
+        s.step_output_volume(5, true);
+        assert_eq!(s.cast.volume, None, "nothing before the device says its volume");
+    }
+
+    #[test]
+    fn scrolling_an_airplay_group_keeps_its_balance_until_the_scroll_ends() {
+        let mut s = State::offline();
+        group(&mut s, &[("aa", "Bedroom"), ("bb", "Living Room")]);
+        s.airplay_speaker_volume("aa", 20, true);
+        s.airplay_speaker_volume("bb", 40, true);
+        for _ in 0..8 {
+            s.step_output_volume(-5, false); // down to nothing
+        }
+        assert_eq!(s.output_volume().volume, Some(0.0));
+        for _ in 0..8 {
+            s.step_output_volume(5, false);
+        }
+        assert!(s.output_drag.is_some(), "still one drag");
+        s.end_output_drag();
+        assert!(s.output_drag.is_none());
+        assert_eq!((s.airplay.prefs.volume_of("aa"), s.airplay.prefs.volume_of("bb")), (20, 40), "each back to its share");
+        s.end_output_drag(); // nothing open: a no-op
+        assert_eq!(s.output_volume().volume, Some(0.4));
     }
 
     #[test]
