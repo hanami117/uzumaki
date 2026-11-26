@@ -46,6 +46,7 @@ pub mod restricted;
 mod resume;
 mod signin;
 mod source;
+pub mod tray_modes;
 mod update;
 
 pub use self::edits::in_library;
@@ -797,6 +798,7 @@ impl State {
         // The installed icon files (Linux) or the .app bundle's icon (macOS) follow the setting
         // at every start (a reinstall puts the dark one back).
         s.sync_app_icon();
+        s.sync_tray_modes();
         // The saved storefront, for Settings and links before the bridge is up.
         s.session.storefront = s.settings.storefront.as_ref().map(|f| f.id.clone());
         // "Show on Discord", when it was left on (no thread at all otherwise).

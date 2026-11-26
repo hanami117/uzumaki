@@ -351,6 +351,7 @@ impl State {
         self.queue.plan_lap(self.playback.repeat);
         self.autoplay_check();
         self.resume_changed(false);
+        self.sync_tray_modes();
         if self.playback.local {
             return;
         }

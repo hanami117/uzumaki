@@ -20,6 +20,12 @@
 //! While the menu is open it isn't rebuilt (a song change mid-drag would pull the slider away);
 //! a change waits for it to close.
 //!
+//! Shuffle, Repeat (a submenu: Off, All, One) and AutoPlay sit after Next, with a checkmark on what
+//! is on, as in Apple Music's Controls menu. They call what the window's buttons call
+//! (`toggle_shuffle`, `set_repeat`, `toggle_autoplay`) and show `State::tray_modes`: when the menu
+//! opens, on its sync ticks and whenever one changes. They are greyed while no song is loaded (the
+//! window's buttons aren't there then), and AutoPlay also where the window has no ∞ button.
+//!
 //! The icon is always a template image: black with alpha, derived from the app's tray swirl, so
 //! macOS tints it for light and dark menu bars. It does not follow Settings → Appearance → App
 //! icon (the menu bar keeps the plain swirl); the Dock and the bundle do.
@@ -34,11 +40,14 @@ use objc2_app_kit::{
     NSAccessibility, NSApplication, NSAutoresizingMaskOptions, NSColor, NSEventType, NSFont, NSImage, NSImageView, NSLineBreakMode, NSMenu,
     NSMenuDelegate, NSMenuItem, NSSlider, NSStatusBar, NSStatusItem, NSTextField, NSVariableStatusItemLength, NSView,
 };
+use objc2_app_kit::{NSControlStateValueOff, NSControlStateValueOn};
 use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer};
 
 use crate::models::Song;
 use crate::settings::IconVariant;
 use crate::state::output_volume::{Output, OutputVolume, Throttle};
+use crate::state::tray_modes::{repeat_word, Modes};
+use crate::state::Repeat;
 use crate::state::{Handle, State};
 
 /// Menu bar icon height in points; the image is twice that in pixels for Retina.
@@ -51,6 +60,13 @@ const NEXT: isize = 3;
 const SHOW: isize = 4;
 const QUIT: isize = 5;
 const CHECK_UPDATES: isize = 6;
+const SHUFFLE: isize = 7;
+const AUTOPLAY: isize = 8;
+/// The Repeat submenu's items (the parent has no action).
+const REPEAT_OFF: isize = 10;
+const REPEAT_ALL: isize = 11;
+const REPEAT_ONE: isize = 12;
+const REPEATS: [(isize, Repeat); 3] = [(REPEAT_OFF, Repeat::Off), (REPEAT_ALL, Repeat::All), (REPEAT_ONE, Repeat::One)];
 
 /// The volume item's view, in points (the menu stretches it to its own width).
 const VOLUME_W: f64 = 240.0;
@@ -101,6 +117,14 @@ define_class!(
                 PLAY_PAUSE => handle.update(|s: &mut State, _| s.toggle_play()),
                 PREVIOUS => handle.update(|s: &mut State, _| s.previous()),
                 NEXT => handle.update(|s: &mut State, _| s.next()),
+                SHUFFLE => handle.update(|s: &mut State, _| s.toggle_shuffle()),
+                AUTOPLAY => handle.update(|s: &mut State, _| s.toggle_autoplay()),
+                tag @ (REPEAT_OFF | REPEAT_ALL | REPEAT_ONE) => {
+                    if let Some((_, mode)) = REPEATS.iter().find(|(t, _)| *t == tag) {
+                        let mode = *mode;
+                        handle.update(move |s: &mut State, _| s.set_repeat(mode));
+                    }
+                }
                 SHOW => super::show_window(handle),
                 // The answer shows in the window (the notice, or a toast).
                 CHECK_UPDATES => {
@@ -215,8 +239,10 @@ impl Target {
 /// Shows the state's output and volume on the slider.
 fn sync(s: &mut State) {
     let o = s.output_volume();
+    let modes = s.tray_modes();
     if let Some(t) = &mut s.tray {
         t.show_output(&o);
+        t.set_modes(&modes);
     }
 }
 
@@ -228,6 +254,14 @@ struct VolumeItem {
     icon: Retained<NSImageView>,
 }
 
+/// Shuffle, Repeat and AutoPlay. Like the volume item, they move to each new menu.
+struct ModeItems {
+    shuffle: Retained<NSMenuItem>,
+    repeat: Retained<NSMenuItem>,
+    repeats: Vec<Retained<NSMenuItem>>,
+    autoplay: Retained<NSMenuItem>,
+}
+
 pub struct TrayCtl {
     item: Retained<NSStatusItem>,
     target: Retained<Target>,
@@ -237,6 +271,11 @@ pub struct TrayCtl {
     song: String,
     menu: Option<Retained<NSMenu>>,
     volume: VolumeItem,
+    modes: ModeItems,
+    /// What the three mode items show.
+    shown_modes: Option<Modes>,
+    /// A song is shown: Shuffle and Repeat (and AutoPlay) can be used.
+    loaded: bool,
     /// What the volume item shows (None: not synced yet, or the knob was held).
     shown: Option<OutputVolume>,
     /// A change came while the menu was open: rebuild once it closes.
@@ -266,7 +305,21 @@ impl TrayCtl {
             button.setToolTip(Some(&NSString::from_str("Uzumaki")));
         }
         let volume = volume_item(mtm, &target);
-        let mut ctl = Self { item, target, mtm, playing: false, song: String::new(), menu: None, volume, shown: None, stale: false };
+        let modes = mode_items(mtm, &target);
+        let mut ctl = Self {
+            item,
+            target,
+            mtm,
+            playing: false,
+            song: String::new(),
+            menu: None,
+            volume,
+            modes,
+            shown_modes: None,
+            loaded: false,
+            shown: None,
+            stale: false,
+        };
         ctl.set_app_icon(app_icon);
         ctl.rebuild();
         // The slider shows the volume before the menu first opens.
@@ -300,6 +353,10 @@ impl TrayCtl {
             Some(s) => s.title.clone(),
             None => String::new(),
         };
+        if song.is_some() != self.loaded {
+            self.loaded = song.is_some();
+            self.apply_modes();
+        }
         if text != self.song {
             if let Some(button) = self.item.button(self.mtm) {
                 let tip = if text.is_empty() { "Uzumaki" } else { &text };
@@ -336,6 +393,30 @@ impl TrayCtl {
         }
     }
 
+    /// Checkmarks and greying of Shuffle, Repeat and AutoPlay (in place, also while the menu is open).
+    pub fn set_modes(&mut self, modes: &Modes) {
+        if self.shown_modes.as_ref() != Some(modes) {
+            self.shown_modes = Some(*modes);
+            self.apply_modes();
+        }
+    }
+
+    fn apply_modes(&self) {
+        let Some(m) = &self.shown_modes else {
+            return;
+        };
+        let it = &self.modes;
+        let mark = |on: bool| if on { NSControlStateValueOn } else { NSControlStateValueOff };
+        it.shuffle.setState(mark(m.shuffle));
+        it.shuffle.setEnabled(self.loaded);
+        it.repeat.setEnabled(self.loaded);
+        for (item, (_, mode)) in it.repeats.iter().zip(REPEATS) {
+            item.setState(mark(m.repeat == mode));
+        }
+        it.autoplay.setState(mark(m.autoplay));
+        it.autoplay.setEnabled(m.autoplay_enabled(self.loaded));
+    }
+
     /// The menu closed: a change it held back applies now.
     fn menu_closed(&mut self) {
         if self.stale {
@@ -353,10 +434,12 @@ impl TrayCtl {
 
     fn rebuild(&mut self) {
         // The volume item moves to the new menu (an item can be in one menu only).
-        if let Some(old) = self.menu.take()
-            && unsafe { self.volume.item.menu() }.is_some()
-        {
-            old.removeItem(&self.volume.item);
+        if let Some(old) = self.menu.take() {
+            for item in [&self.volume.item, &self.modes.shuffle, &self.modes.repeat, &self.modes.autoplay] {
+                if unsafe { item.menu() }.is_some() {
+                    old.removeItem(item);
+                }
+            }
         }
         let menu = NSMenu::new(self.mtm);
         // Without this AppKit would grey the song line and enable the rest by itself; be explicit.
@@ -372,6 +455,10 @@ impl TrayCtl {
         self.add(&menu, "Previous", PREVIOUS);
         self.add(&menu, "Next", NEXT);
         menu.addItem(&NSMenuItem::separatorItem(self.mtm));
+        menu.addItem(&self.modes.shuffle);
+        menu.addItem(&self.modes.repeat);
+        menu.addItem(&self.modes.autoplay);
+        menu.addItem(&NSMenuItem::separatorItem(self.mtm));
         menu.addItem(&self.volume.item);
         menu.addItem(&NSMenuItem::separatorItem(self.mtm));
         self.add(&menu, "Show Uzumaki", SHOW);
@@ -382,6 +469,7 @@ impl TrayCtl {
         self.item.setMenu(Some(&menu));
         self.menu = Some(menu);
         self.stale = false;
+        self.apply_modes();
     }
 
     fn add(&self, menu: &NSMenu, title: &str, tag: isize) {
@@ -398,6 +486,36 @@ impl TrayCtl {
         unsafe { item.setTarget(Some(target)) };
         menu.addItem(&item);
     }
+}
+
+/// A menu item that calls `trayAction:` on the target.
+fn action_item(mtm: MainThreadMarker, target: &Target, title: &str, tag: isize) -> Retained<NSMenuItem> {
+    let item = unsafe {
+        NSMenuItem::initWithTitle_action_keyEquivalent(mtm.alloc::<NSMenuItem>(), &NSString::from_str(title), Some(sel!(trayAction:)), &NSString::new())
+    };
+    item.setTag(tag);
+    let target: &AnyObject = target;
+    unsafe { item.setTarget(Some(target)) };
+    item
+}
+
+/// Shuffle, Repeat with its Off / All / One submenu, and AutoPlay. Greyed until the first sync.
+fn mode_items(mtm: MainThreadMarker, target: &Target) -> ModeItems {
+    let shuffle = action_item(mtm, target, "Shuffle", SHUFFLE);
+    let autoplay = action_item(mtm, target, "AutoPlay", AUTOPLAY);
+    let repeat = NSMenuItem::new(mtm);
+    repeat.setTitle(&NSString::from_str("Repeat"));
+    let sub = NSMenu::new(mtm);
+    sub.setAutoenablesItems(false);
+    let repeats: Vec<_> = REPEATS.iter().map(|&(tag, mode)| action_item(mtm, target, repeat_word(mode), tag)).collect();
+    for r in &repeats {
+        sub.addItem(r);
+    }
+    repeat.setSubmenu(Some(&sub));
+    for i in [&shuffle, &repeat, &autoplay] {
+        i.setEnabled(false);
+    }
+    ModeItems { shuffle, repeat, repeats, autoplay }
 }
 
 /// The SF Symbol for where the sound goes.

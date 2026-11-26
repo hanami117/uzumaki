@@ -11,8 +11,15 @@ takes each release's notes from its section here.
   moves what the window moves for that output: the AirPlay picker's volume (for several speakers, their master
   volume, keeping their balance), the Chromecast's own volume, or the app's volume on this Mac. It shows the current
   volume when the menu opens and follows changes made elsewhere (the window, `uzu vol`, media keys, the speakers)
-  while it is open. A drag sends at most ten changes a second to a speaker. VoiceOver reads it as "Volume". Linux and
-  Windows tray menus are unchanged.
+  while it is open. A drag sends at most ten changes a second to a speaker. VoiceOver reads it as "Volume".
+- **Shuffle, Repeat and AutoPlay in the tray menu.** On the Mac's menu bar menu, after Next: Shuffle and AutoPlay with a
+  checkmark when on, and Repeat as a submenu (Off, All, One) with a checkmark on the current one, as in Apple Music's
+  Controls menu. They do what the window's buttons and `uzu shuffle`, `uzu repeat` and `uzu autoplay` do, show the
+  current state each time the menu opens, and follow changes while it is open. They are greyed while no song is loaded
+  (the window's buttons aren't there either), and AutoPlay where the window has no ∞ button (local files only,
+  stations). The Linux and Windows tray menus get the same three as plain items that say their state ("Shuffle: On",
+  "Repeat: All", "AutoPlay: Off") and toggle it; Repeat steps Off, All, One, like the player bar's button, because
+  those trays have no checkmarks or submenus.
 
 ### Fixed
 - **Playing a song from History no longer stops playback after it.** A History song from an earlier queue (in uzu,
