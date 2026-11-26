@@ -5,6 +5,12 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-26
+
+The macOS menu bar menu gets a volume slider and Shuffle, Repeat and AutoPlay (the Linux and Windows tray shows them as
+plain items, "Shuffle: On" and so on, for now), AirPlay no longer crackles after a song change, and playing a song from
+History no longer stops playback after it. You need an Apple Music subscription to stream; local files play without one.
+
 ### Added
 - **macOS: a volume slider in the menu bar icon's menu**, like the Sound menu's, so the volume can change without
   opening the window. Above it is where the sound goes (This Mac, an AirPlay speaker or group, a Chromecast), and it
