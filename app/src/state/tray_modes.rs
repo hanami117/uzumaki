@@ -1,4 +1,4 @@
-//! Shuffle, Repeat and AutoPlay in the tray menus (`tray_mac.rs`, `tray_linux.rs`).
+//! Shuffle, Repeat and AutoPlay in the tray menus (`tray_mac.rs`, and `tray_menu.rs` for Linux and Windows).
 //!
 //! No state of their own: the menu items call what the window's buttons call (`toggle_shuffle`,
 //! `cycle_repeat` / `set_repeat`, `toggle_autoplay`, the same as `uzu shuffle/repeat/autoplay`),
@@ -26,31 +26,9 @@ impl Modes {
     pub fn autoplay_enabled(&self, loaded: bool) -> bool {
         loaded && self.autoplay_offered
     }
-
-    // Plain-item wording, for trays without checkmarks (Linux, Windows; the Mac menu has checkmarks).
-
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub fn shuffle_text(&self) -> String {
-        format!("Shuffle: {}", on_off(self.shuffle))
-    }
-
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub fn repeat_text(&self) -> String {
-        format!("Repeat: {}", repeat_word(self.repeat))
-    }
-
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub fn autoplay_text(&self) -> String {
-        format!("AutoPlay: {}", on_off(self.autoplay))
-    }
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-fn on_off(on: bool) -> &'static str {
-    if on { "On" } else { "Off" }
-}
-
-/// The word for a repeat mode, in the macOS submenu and the plain items.
+/// The word for a repeat mode, in the Repeat submenus.
 pub fn repeat_word(r: Repeat) -> &'static str {
     match r {
         Repeat::Off => "Off",
@@ -69,11 +47,16 @@ impl State {
         }
     }
 
-    /// Tells the tray what the three show now (a no-op without a tray).
+    /// Tells the tray what the three show now (a no-op without a tray). The Linux and Windows
+    /// tray also gets the output's volume here (the Mac menu asks for it itself while open).
     pub fn sync_tray_modes(&mut self) {
         let modes = self.tray_modes();
+        #[cfg(not(target_os = "macos"))]
+        let output = self.output_volume();
         if let Some(t) = &mut self.tray {
             t.set_modes(&modes);
+            #[cfg(not(target_os = "macos"))]
+            t.set_output(&output);
         }
     }
 }
@@ -115,16 +98,6 @@ mod tests {
         let m = Modes { shuffle: false, repeat: Repeat::Off, autoplay: true, autoplay_offered: true };
         assert!(!m.autoplay_enabled(false) && m.autoplay_enabled(true));
         assert!(!Modes { autoplay_offered: false, ..m }.autoplay_enabled(true));
-    }
-
-    #[test]
-    fn plain_items_say_their_state() {
-        let m = Modes { shuffle: true, repeat: Repeat::All, autoplay: false, autoplay_offered: true };
-        assert_eq!(m.shuffle_text(), "Shuffle: On");
-        assert_eq!(m.repeat_text(), "Repeat: All");
-        assert_eq!(m.autoplay_text(), "AutoPlay: Off");
-        assert_eq!(Modes { repeat: Repeat::One, ..m }.repeat_text(), "Repeat: One");
-        assert_eq!(Modes { shuffle: false, repeat: Repeat::Off, autoplay: true, ..m }.repeat_text(), "Repeat: Off");
     }
 
     #[test]
