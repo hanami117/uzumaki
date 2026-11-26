@@ -35,6 +35,9 @@ pub mod lrclib;
 mod lyrics;
 pub mod mixed;
 pub mod motion;
+// Only the macOS menu bar uses it; its tests run everywhere.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub mod output_volume;
 mod playlist_edit;
 mod playlists;
 mod prefs;
@@ -547,6 +550,8 @@ pub struct State {
     pub creating_playlist: bool,
     /// When the user last changed the volume (see `VOLUME_ECHO`).
     pub(crate) volume_set_at: Option<Instant>,
+    /// The speakers' volumes when a drag of the menu bar volume slider began (AirPlay master).
+    pub(crate) output_drag: Option<Vec<(String, u8)>>,
     /// Browse pages.
     pub browse_new: Load<Vec<Shelf>>,
     pub made_for_you: Load<Vec<Shelf>>,
@@ -782,6 +787,7 @@ impl State {
             fine_time_panel: false,
             creating_playlist: false,
             volume_set_at: None,
+            output_drag: None,
             system_dark: None,
             applied_icon: None,
             tray_icon_guessed: tray_icon.is_none(),

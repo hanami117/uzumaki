@@ -5,6 +5,15 @@ takes each release's notes from its section here.
 
 ## [Unreleased]
 
+### Added
+- **macOS: a volume slider in the menu bar icon's menu**, like the Sound menu's, so the volume can change without
+  opening the window. Above it is where the sound goes (This Mac, an AirPlay speaker or group, a Chromecast), and it
+  moves what the window moves for that output: the AirPlay picker's volume (for several speakers, their master
+  volume, keeping their balance), the Chromecast's own volume, or the app's volume on this Mac. It shows the current
+  volume when the menu opens and follows changes made elsewhere (the window, `uzu vol`, media keys, the speakers)
+  while it is open. A drag sends at most ten changes a second to a speaker. VoiceOver reads it as "Volume". Linux and
+  Windows tray menus are unchanged.
+
 ### Fixed
 - **Playing a song from History no longer stops playback after it.** A History song from an earlier queue (in uzu,
   where every search pick is a queue of its own, that was nearly every History song) used to replace the queue with that
