@@ -35,6 +35,8 @@ pub mod lrclib;
 mod lyrics;
 pub mod mixed;
 pub mod motion;
+// Only the macOS menu bar uses it; its tests run everywhere.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod output_volume;
 mod playlist_edit;
 mod playlists;
