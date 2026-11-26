@@ -5,7 +5,7 @@ RUN apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -yq --no
       pkg-config build-essential git rsync ca-certificates curl xz-utils \
       libdbus-1-dev libasound2-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libssl-dev \
       libudev-dev libx11-dev libxcb1-dev libvulkan1 mesa-vulkan-drivers libegl1 libgl1-mesa-dri libgles2 \
-      ffmpeg fonts-dejavu-core fonts-noto-core \
+      ffmpeg fonts-dejavu-core fonts-noto-core dbus-daemon dbus-session-bus-common \
  && rm -rf /var/lib/apt/lists/*
 # Node for the bridge tests (plain node:test files, no Electron needed).
 RUN curl -fsSL https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-$(dpkg --print-architecture | sed 's/amd64/x64/;s/arm64/arm64/').tar.xz \
