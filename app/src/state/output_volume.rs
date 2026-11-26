@@ -116,11 +116,6 @@ impl Throttle {
         self.sent_at = Some(now);
         Some(v)
     }
-
-    /// A value is waiting for `flush`.
-    pub fn pending(&self) -> bool {
-        self.pending.is_some()
-    }
 }
 
 #[cfg(test)]
@@ -226,13 +221,12 @@ mod tests {
         assert_eq!(t.push(0.10, ms(0), false), Some(0.10), "the first at once");
         assert_eq!(t.push(0.12, ms(16), false), None);
         assert_eq!(t.push(0.14, ms(32), false), None);
-        assert!(t.pending());
         assert_eq!(t.flush(ms(50), false), None, "not yet");
         assert_eq!(t.flush(ms(100), false), Some(0.14), "the latest one");
         assert_eq!(t.flush(ms(300), false), None, "nothing left");
         assert_eq!(t.push(0.20, ms(150), false), None);
         assert_eq!(t.push(0.22, ms(160), true), Some(0.22), "the mouse up goes at once");
-        assert!(!t.pending(), "and replaces what waited");
+        assert_eq!(t.flush(ms(400), true), None, "and replaces what waited");
         assert_eq!(t.push(0.30, ms(170), false), None);
         assert_eq!(t.flush(ms(171), true), Some(0.30), "the menu closed");
         // 60 moves a second for a second: about ten sent.

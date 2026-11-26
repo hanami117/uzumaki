@@ -1,24 +1,44 @@
-//! The macOS menu bar icon: an `NSStatusItem` with Play/Pause, Previous, Next, Show and Quit,
-//! the current song as a disabled first item and as the tooltip. A click opens the menu, as
-//! for every menu bar item. Rune has no Mac tray, so this talks to AppKit itself.
+//! The macOS menu bar icon: an `NSStatusItem` with Play/Pause, Previous, Next, a volume slider,
+//! Show and Quit, the current song as a disabled first item and as the tooltip. A click opens the
+//! menu, as for every menu bar item. Rune has no Mac tray, so this talks to AppKit itself.
 //!
 //! AppKit objects live on the main thread. `TrayCtl` is built and used from the UI thread (the
 //! state's init and its update handlers run there, and Rune's UI thread is the main thread on
 //! macOS); `MainThreadMarker::new()` fails anywhere else and `start` then returns None. Menu
 //! actions go to the app through the handle, like the Linux tray.
 //!
+//! The volume item is a custom view, like the Sound menu's: where the sound goes ("This Mac",
+//! "Bedroom", a Chromecast) over a continuous `NSSlider` (accessibility label "Volume"). It moves
+//! what the window's control for that output moves (`State::set_output_volume`). A drag sends at
+//! most one value per `output_volume::THROTTLE` (a timer sends the last one held back); the mouse
+//! up and the menu closing end the drag. Each time the menu opens, and every `SYNC_EVERY` ticks
+//! while it is open, the state is asked for the current output and volume (`sync`), so changes
+//! made elsewhere (window, `uzu vol`, media keys, the speakers) show; the knob is left alone for
+//! `HOLD` after the user's own move. Handler updates run during the menu's tracking: winit's
+//! wake-up source is in the common run loop modes, and so is the tick timer.
+//!
+//! While the menu is open it isn't rebuilt (a song change mid-drag would pull the slider away);
+//! a change waits for it to close.
+//!
 //! The icon is always a template image: black with alpha, derived from the app's tray swirl, so
 //! macOS tints it for light and dark menu bars. It does not follow Settings → Appearance → App
 //! icon (the menu bar keeps the plain swirl); the Dock and the bundle do.
 
+use std::cell::{Cell, RefCell};
+use std::time::{Duration, Instant};
+
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength};
-use objc2_foundation::{NSData, NSObject, NSSize, NSString};
+use objc2_app_kit::{
+    NSAccessibility, NSApplication, NSAutoresizingMaskOptions, NSColor, NSEventType, NSFont, NSImage, NSImageView, NSLineBreakMode, NSMenu,
+    NSMenuDelegate, NSMenuItem, NSSlider, NSStatusBar, NSStatusItem, NSTextField, NSVariableStatusItemLength, NSView,
+};
+use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer};
 
 use crate::models::Song;
 use crate::settings::IconVariant;
+use crate::state::output_volume::{Output, OutputVolume, Throttle};
 use crate::state::{Handle, State};
 
 /// Menu bar icon height in points; the image is twice that in pixels for Retina.
@@ -32,12 +52,41 @@ const SHOW: isize = 4;
 const QUIT: isize = 5;
 const CHECK_UPDATES: isize = 6;
 
+/// The volume item's view, in points (the menu stretches it to its own width).
+const VOLUME_W: f64 = 240.0;
+const VOLUME_H: f64 = 46.0;
+/// Left and right margin, lined up with the menu's item titles.
+const INSET: f64 = 14.0;
+/// The timer while the menu is open: sends a held-back value, and syncs every `SYNC_EVERY`.
+const TICK_S: f64 = 0.1;
+const SYNC_EVERY: u32 = 4;
+/// After the user's own move, a sync doesn't move the knob for this long (late echoes).
+const HOLD: Duration = Duration::from_secs(1);
+
+/// The slider's drag, as the target sees it.
+#[derive(Default)]
+struct Slide {
+    throttle: Throttle,
+    /// The last value the slider gave.
+    last: f64,
+    /// A drag began and its end (`done`) wasn't sent yet.
+    open: bool,
+    /// When the user last moved it.
+    at: Option<Instant>,
+}
+
 struct Ivars {
     handle: Handle,
+    slide: RefCell<Slide>,
+    /// The menu is open.
+    open: Cell<bool>,
+    ticks: Cell<u32>,
+    timer: RefCell<Option<Retained<NSTimer>>>,
 }
 
 define_class!(
-    // The target of every menu item; the item's tag says which one was chosen.
+    // The target of every menu item (the item's tag says which one was chosen), of the volume
+    // slider, of its timer, and the menu's delegate.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "UzumakiTrayTarget"]
@@ -62,8 +111,122 @@ define_class!(
                 _ => {}
             }
         }
+
+        #[unsafe(method(volumeSlid:))]
+        fn volume_slid(&self, slider: &NSSlider) {
+            let v = slider.doubleValue();
+            let kind = NSApplication::sharedApplication(MainThreadMarker::from(self)).currentEvent().map(|e| e.r#type());
+            // A mouse drag goes on; the mouse up, a click on the track's end or VoiceOver's
+            // increment is a whole change.
+            let dragging = matches!(kind, Some(NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged));
+            let now = Instant::now();
+            let send = {
+                let mut sl = self.ivars().slide.borrow_mut();
+                sl.last = v;
+                sl.at = Some(now);
+                sl.open = dragging;
+                sl.throttle.push(v, now, !dragging)
+            };
+            if let Some(v) = send {
+                self.send(v, !dragging);
+            }
+        }
+
+        #[unsafe(method(volumeTick:))]
+        fn volume_tick(&self, _timer: &NSTimer) {
+            let held = self.ivars().slide.borrow_mut().throttle.flush(Instant::now(), false);
+            if let Some(v) = held {
+                self.send(v, false);
+            }
+            let n = self.ivars().ticks.get().wrapping_add(1);
+            self.ivars().ticks.set(n);
+            if n.is_multiple_of(SYNC_EVERY) {
+                self.request_sync();
+            }
+        }
+    }
+
+    unsafe impl NSObjectProtocol for Target {}
+
+    unsafe impl NSMenuDelegate for Target {
+        #[unsafe(method(menuWillOpen:))]
+        fn menu_will_open(&self, _menu: &NSMenu) {
+            self.ivars().open.set(true);
+            self.ivars().ticks.set(0);
+            self.request_sync();
+            let mut timer = self.ivars().timer.borrow_mut();
+            if timer.is_none() {
+                let target: &AnyObject = self;
+                let t = unsafe { NSTimer::timerWithTimeInterval_target_selector_userInfo_repeats(TICK_S, target, sel!(volumeTick:), None, true) };
+                // Common modes: it also fires while the menu tracks the mouse.
+                unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&t, NSRunLoopCommonModes) };
+                *timer = Some(t);
+            }
+        }
+
+        #[unsafe(method(menuDidClose:))]
+        fn menu_did_close(&self, _menu: &NSMenu) {
+            self.ivars().open.set(false);
+            self.stop_timer();
+            // The drag's last value, and its end (AirPlay saves the speakers' volumes).
+            let last = {
+                let mut sl = self.ivars().slide.borrow_mut();
+                let held = sl.throttle.flush(Instant::now(), true);
+                let open = std::mem::take(&mut sl.open);
+                if held.is_some() || open { Some(held.unwrap_or(sl.last)) } else { None }
+            };
+            if let Some(v) = last {
+                self.send(v, true);
+            }
+            self.ivars().handle.update_if(|s: &mut State, _| {
+                if let Some(t) = &mut s.tray {
+                    t.menu_closed();
+                }
+                false
+            });
+        }
     }
 );
+
+impl Target {
+    fn send(&self, v: f64, done: bool) {
+        self.ivars().handle.update(move |s: &mut State, _| s.set_output_volume(v, done));
+    }
+
+    /// Asks the state for where the sound goes and its volume (nothing to redraw in the window).
+    fn request_sync(&self) {
+        self.ivars().handle.update_if(|s: &mut State, _| {
+            sync(s);
+            false
+        });
+    }
+
+    fn stop_timer(&self) {
+        if let Some(t) = self.ivars().timer.borrow_mut().take() {
+            t.invalidate();
+        }
+    }
+
+    fn recently_slid(&self) -> bool {
+        self.ivars().slide.borrow().at.is_some_and(|t| t.elapsed() < HOLD)
+    }
+}
+
+/// Shows the state's output and volume on the slider.
+fn sync(s: &mut State) {
+    let o = s.output_volume();
+    if let Some(t) = &mut s.tray {
+        t.show_output(&o);
+    }
+}
+
+/// The volume item and the views it updates.
+struct VolumeItem {
+    item: Retained<NSMenuItem>,
+    slider: Retained<NSSlider>,
+    label: Retained<NSTextField>,
+    icon: Retained<NSImageView>,
+}
 
 pub struct TrayCtl {
     item: Retained<NSStatusItem>,
@@ -72,24 +235,42 @@ pub struct TrayCtl {
     playing: bool,
     /// "Title — Artist" or empty.
     song: String,
+    menu: Option<Retained<NSMenu>>,
+    volume: VolumeItem,
+    /// What the volume item shows (None: not synced yet, or the knob was held).
+    shown: Option<OutputVolume>,
+    /// A change came while the menu was open: rebuild once it closes.
+    stale: bool,
 }
 
 impl TrayCtl {
-    /// None when not on the main thread (AppKit would crash there).
+    /// None when not on the main thread (AppKit would crash there), and in headless runs.
     pub fn start(handle: Handle, app_icon: IconVariant) -> Option<Self> {
+        if rune::is_headless() {
+            return None;
+        }
         let Some(mtm) = MainThreadMarker::new() else {
             eprintln!("uzumaki: no menu bar icon: not on the main thread");
             return None;
         };
-        let target = mtm.alloc::<Target>().set_ivars(Ivars { handle });
+        let target = mtm.alloc::<Target>().set_ivars(Ivars {
+            handle,
+            slide: RefCell::default(),
+            open: Cell::new(false),
+            ticks: Cell::new(0),
+            timer: RefCell::new(None),
+        });
         let target: Retained<Target> = unsafe { msg_send![super(target), init] };
         let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
         if let Some(button) = item.button(mtm) {
             button.setToolTip(Some(&NSString::from_str("Uzumaki")));
         }
-        let mut ctl = Self { item, target, mtm, playing: false, song: String::new() };
+        let volume = volume_item(mtm, &target);
+        let mut ctl = Self { item, target, mtm, playing: false, song: String::new(), menu: None, volume, shown: None, stale: false };
         ctl.set_app_icon(app_icon);
         ctl.rebuild();
+        // The slider shows the volume before the menu first opens.
+        ctl.target.request_sync();
         Some(ctl)
     }
 
@@ -108,7 +289,7 @@ impl TrayCtl {
     pub fn set_playing(&mut self, playing: bool) {
         if playing != self.playing {
             self.playing = playing;
-            self.rebuild();
+            self.changed();
         }
     }
 
@@ -125,11 +306,58 @@ impl TrayCtl {
                 button.setToolTip(Some(&NSString::from_str(tip)));
             }
             self.song = text;
+            self.changed();
+        }
+    }
+
+    /// The output's name, icon and volume on the slider. The knob stays where the user just put it.
+    fn show_output(&mut self, o: &OutputVolume) {
+        if self.shown.as_ref() == Some(o) {
+            return;
+        }
+        let was = self.shown.take();
+        let v = &self.volume;
+        if was.as_ref().map(|w| &w.label) != Some(&o.label) {
+            v.label.setStringValue(&NSString::from_str(&o.label));
+        }
+        if was.as_ref().map(|w| w.output) != Some(o.output)
+            && let Some(image) = output_symbol(o.output)
+        {
+            v.icon.setImage(Some(&image));
+        }
+        v.slider.setEnabled(o.volume.is_some());
+        let held = self.target.recently_slid();
+        if let (Some(x), false) = (o.volume, held) {
+            v.slider.setDoubleValue(x);
+        }
+        // A held knob syncs again next time, even if the state stays the same.
+        if !held {
+            self.shown = Some(o.clone());
+        }
+    }
+
+    /// The menu closed: a change it held back applies now.
+    fn menu_closed(&mut self) {
+        if self.stale {
+            self.rebuild();
+        }
+    }
+
+    fn changed(&mut self) {
+        if self.target.ivars().open.get() {
+            self.stale = true;
+        } else {
             self.rebuild();
         }
     }
 
     fn rebuild(&mut self) {
+        // The volume item moves to the new menu (an item can be in one menu only).
+        if let Some(old) = self.menu.take()
+            && unsafe { self.volume.item.menu() }.is_some()
+        {
+            old.removeItem(&self.volume.item);
+        }
         let menu = NSMenu::new(self.mtm);
         // Without this AppKit would grey the song line and enable the rest by itself; be explicit.
         menu.setAutoenablesItems(false);
@@ -144,11 +372,16 @@ impl TrayCtl {
         self.add(&menu, "Previous", PREVIOUS);
         self.add(&menu, "Next", NEXT);
         menu.addItem(&NSMenuItem::separatorItem(self.mtm));
+        menu.addItem(&self.volume.item);
+        menu.addItem(&NSMenuItem::separatorItem(self.mtm));
         self.add(&menu, "Show Uzumaki", SHOW);
         self.add(&menu, "Check for Updates\u{2026}", CHECK_UPDATES);
         menu.addItem(&NSMenuItem::separatorItem(self.mtm));
         self.add(&menu, "Quit Uzumaki", QUIT);
+        menu.setDelegate(Some(ProtocolObject::from_ref(&*self.target)));
         self.item.setMenu(Some(&menu));
+        self.menu = Some(menu);
+        self.stale = false;
     }
 
     fn add(&self, menu: &NSMenu, title: &str, tag: isize) {
@@ -167,9 +400,57 @@ impl TrayCtl {
     }
 }
 
+/// The SF Symbol for where the sound goes.
+fn output_symbol(output: Output) -> Option<Retained<NSImage>> {
+    let name = symbol_name(output);
+    NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None)
+}
+
+fn symbol_name(output: Output) -> &'static str {
+    match output {
+        Output::ThisComputer => "speaker.wave.2.fill",
+        Output::AirPlay => "airplayaudio",
+        Output::Cast => "tv",
+    }
+}
+
+/// The volume item: an icon and the output's name over a full-width slider.
+fn volume_item(mtm: MainThreadMarker, target: &Target) -> VolumeItem {
+    let rect = |x: f64, y: f64, w: f64, h: f64| NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
+    let wide = NSAutoresizingMaskOptions::ViewWidthSizable;
+    let view = NSView::initWithFrame(mtm.alloc::<NSView>(), rect(0.0, 0.0, VOLUME_W, VOLUME_H));
+    view.setAutoresizingMask(wide);
+
+    let placeholder = output_symbol(Output::ThisComputer).unwrap_or_default();
+    let icon = NSImageView::imageViewWithImage(&placeholder, mtm);
+    icon.setFrame(rect(INSET, 26.0, 16.0, 16.0));
+    view.addSubview(&icon);
+
+    let label = NSTextField::labelWithString(&NSString::new(), mtm);
+    label.setFrame(rect(INSET + 22.0, 25.0, VOLUME_W - 2.0 * INSET - 22.0, 17.0));
+    label.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+    label.setTextColor(Some(&NSColor::secondaryLabelColor()));
+    label.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
+    label.setAutoresizingMask(wide);
+    view.addSubview(&label);
+
+    let target: &AnyObject = target;
+    let slider = unsafe { NSSlider::sliderWithValue_minValue_maxValue_target_action(0.0, 0.0, 1.0, Some(target), Some(sel!(volumeSlid:)), mtm) };
+    slider.setFrame(rect(INSET, 4.0, VOLUME_W - 2.0 * INSET, 20.0));
+    slider.setContinuous(true);
+    slider.setAutoresizingMask(wide);
+    slider.setAccessibilityLabel(Some(&NSString::from_str("Volume")));
+    view.addSubview(&slider);
+
+    let item = NSMenuItem::new(mtm);
+    item.setView(Some(&view));
+    VolumeItem { item, slider, label, icon }
+}
+
 impl Drop for TrayCtl {
-    /// Removes the icon from the menu bar.
+    /// Removes the icon from the menu bar (and stops the timer, which holds the target).
     fn drop(&mut self) {
+        self.target.stop_timer();
         NSStatusBar::systemStatusBar().removeStatusItem(&self.item);
     }
 }
@@ -241,6 +522,14 @@ mod tests {
         let clear = rgba.chunks(4).filter(|p| p[3] < 20).count();
         assert!(solid > 100, "a swirl, got {solid} solid pixels");
         assert!(clear > 200, "and not a filled square, got {clear} clear pixels");
+    }
+
+    #[test]
+    fn every_output_has_its_symbol() {
+        use crate::state::output_volume::Output;
+        for o in [Output::ThisComputer, Output::AirPlay, Output::Cast] {
+            assert!(super::output_symbol(o).is_some(), "SF Symbol {} on this macOS", super::symbol_name(o));
+        }
     }
 
     #[test]
