@@ -35,8 +35,7 @@ pub mod lrclib;
 mod lyrics;
 pub mod mixed;
 pub mod motion;
-// Only the macOS menu bar uses it; its tests run everywhere.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+// The menu bar slider (macOS) and the tray's Volume submenu (Linux, Windows).
 pub mod output_volume;
 mod playlist_edit;
 mod playlists;
@@ -575,8 +574,6 @@ pub struct State {
     /// The app icon last applied to the desktop (`sync_app_icon`): icon files, bundle and tray
     /// are only touched when the resolved icon differs from it.
     applied_icon: Option<IconVariant>,
-    /// Linux: the tray was started before Follow theme could be resolved (Dark was a guess).
-    tray_icon_guessed: bool,
     /// Tests: how many times `sync_app_icon` acted (a resolved icon changed).
     #[cfg(test)]
     icon_applies: u32,
@@ -791,7 +788,6 @@ impl State {
             output_drag: None,
             system_dark: None,
             applied_icon: None,
-            tray_icon_guessed: tray_icon.is_none(),
             #[cfg(test)]
             icon_applies: 0,
         };

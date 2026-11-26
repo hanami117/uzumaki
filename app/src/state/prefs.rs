@@ -631,8 +631,7 @@ impl State {
 
     /// Applies the resolved app icon, only when it differs from the one last applied (so a theme
     /// change that keeps the icon does nothing). Linux: the installed icon files on a background
-    /// thread (`app_icon::apply_async`); the tray at the next start, except a tray started on a
-    /// guess before Follow theme was known, which is started again once. macOS: the menu bar icon
+    /// thread (`app_icon::apply_async`) and the tray icon. Windows: the tray icon. macOS: the menu bar icon
     /// now, the .app bundle's icon on a background thread (`bundle_icon::apply_async`); the Dock
     /// follows from the view (`dock_icon::sync`). Offline states (tests, headless) touch no files.
     pub(super) fn sync_app_icon(&mut self) {
@@ -646,11 +645,6 @@ impl State {
         #[cfg(test)]
         {
             self.icon_applies += 1;
-        }
-        let guessed = std::mem::take(&mut self.tray_icon_guessed);
-        if cfg!(target_os = "linux") && guessed && icon != crate::settings::IconVariant::Dark && self.tray.is_some() {
-            self.tray = None; // Rune's tray can't change its icon: start it again with the right one
-            self.start_tray();
         }
         if let Some(t) = &mut self.tray {
             t.set_app_icon(icon);

@@ -38,6 +38,11 @@ libc = "0.2"
 [target.'cfg(unix)'.dependencies]
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
 
+# The tray icon (tray_linux.rs): StatusNotifierItem + dbusmenu (checkmarks, radio items, submenus,
+# scroll). ksni (Unlicense) on the same zbus 5 and async-io, no tokio.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+ksni = { version = "0.3.7", default-features = false, features = ["async-io", "blocking"] }
+
 # Windows glue, on the windows-sys and windows crates Rune already builds (new features only).
 # - `win.rs`: the console and log output, the app id, the window's icon and title bar, Explorer's
 #   "show in folder", the job that ends Electron with the app, registry calls.
